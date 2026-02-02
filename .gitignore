@@ -1,4 +1,4 @@
-assets/external/
+app/assets/external/
 *.py[cod]
 .web
 *.db
@@ -26,6 +26,9 @@ __pycache__/
 
 # Data/models folders
 data/
+
+# Local storage
+storage/
 
 # Environment
 .env
