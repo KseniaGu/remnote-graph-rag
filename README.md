@@ -1,4 +1,4 @@
-# RemNote Graph RAG - AI Practice System
+# RemNote Graph RAG | AI Practice System
 
 An AI practice and learning system that combines knowledge graph with multi-agent workflows to help you master technical concepts through interactive learning, research, and visualization.
 
