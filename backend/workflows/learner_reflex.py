@@ -1,6 +1,6 @@
 import asyncio
-from typing import AsyncGenerator, Optional
 from dataclasses import dataclass
+from typing import AsyncGenerator
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.errors import GraphRecursionError
@@ -8,10 +8,10 @@ from langgraph.errors import GraphRecursionError
 from backend.configs.enums import WorkflowEventType
 from backend.configs.models import ModelSettings
 from backend.configs.paths import PathSettings
-from backend.configs.storage import StorageSettings, LocalStorageSettings
 from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
-from backend.workflows.learner import LearnerWorkflow
+from backend.configs.storage import StorageSettings
 from backend.utils.helpers import logger
+from backend.workflows.learner import LearnerWorkflow
 
 
 @dataclass
@@ -54,18 +54,6 @@ class ReflexLearnerWorkflow:
             kg_search_settings = KnowledgeGraphSearchSettings()
 
             storage_settings = StorageSettings()
-            # storage_settings.document_storage = LocalStorageSettings(
-            #     storage_path=path_settings.local_storage_dir
-            # )
-            # storage_settings.index_storage = LocalStorageSettings(
-            #     storage_path=path_settings.local_storage_dir
-            # )
-            # storage_settings.vector_storage = LocalStorageSettings(
-            #     storage_path=path_settings.local_storage_dir
-            # )
-            # storage_settings.property_graph_storage = LocalStorageSettings(
-            #     storage_path=path_settings.local_storage_dir
-            # )
 
             self._workflow = LearnerWorkflow(
                 models_settings,

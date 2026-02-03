@@ -6,25 +6,17 @@ An AI practice and learning system that combines knowledge graph with multi-agen
 
 This project combines a backend powered by LLM with an interactive Reflex web frontend. It is built on a personal [RemNote](https://www.remnote.com) knowledge base through the creation of a knowledge graph, which is used for querying information and visualizing data. Internal personal knowledge can also be expanded through external web research.
 
-## Features
-
-- **Interactive Practice Sessions**: Engage with AI mentors to practice and reinforce technical concepts
-- **Knowledge Graph Search**: Query and explore personal knowledge base with semantic search
-- **Intelligent Research**: Automatically conduct web research to supplement your knowledge
-- **Concept Synthesis**: Get comprehensive summaries combining multiple information sources
-- **Graph Visualization**: Explore connections between concepts through interactive visualizations
-
 ## Architecture
 
 ### Backend
 The backend is built on a multi-agent workflow architecture powered by [LangGraph](https://github.com/langchain-ai/langgraph) and [LlamaIndex](https://developers.llamaindex.ai/python/framework/). The following agents are currently implemented:
 
-- **Orchestrator**: Routes the requests to other specialized agents
-- **Retriever**: Semantic search over knowledge graph with reranking
-- **Researcher**: Web search integration via [Tavily](https://www.tavily.com/) API
-- **Analyst**: Information synthesis and summarization
-- **Mentor**: Interactive Q&A and practice facilitation
-- **Visualizer**: Knowledge graph visualization generation
+- **Orchestrator**: Routes requests to other specialized agents
+- **Retriever**: Searches for relevant information in a knowledge graph and performs reranking
+- **Researcher**: Utilizes web search via [Tavily](https://www.tavily.com/) API to expand the existing knowledge base
+- **Analyst**: Synthesizes and summarizes information
+- **Mentor**: Answers questions and facilitates practice
+- **Visualizer**: Creates visual representations of knowledge graphs
 
 **Key Technologies:**
 - [LangGraph](https://github.com/langchain-ai/langgraph) for workflow orchestration
@@ -98,4 +90,5 @@ The application will be available at `http://localhost:3000`
 - Testing! The main part of the project is missing
 - Add a database to store user sessions, logs, and other data. Redis is only for the vector search
 - Check [Langsmith](https://smith.langchain.com/) – is it working?
-- **[BUG]** Jobs marked with flags after completion (e.g., retrievers, visualization) prevent users from requesting the same job on a different topic in the same chat (e.g. when asking to find the information from personal KG on different topics in one chat). Consider refreshing the state context and turning the visualization context to a list, allowing access to all previous plots while generating multiple ones 
+- **[BUG]** Jobs marked with flags after completion (e.g., retrievers, visualization) prevent users from requesting the same job on a different topic in the same chat (e.g. when asking to find the information from personal KG on different topics in one chat). Consider refreshing the state context and turning the visualization context to a list, allowing access to all previous plots while generating multiple ones
+- Try [DSPy](https://github.com/stanfordnlp/dspy)?
