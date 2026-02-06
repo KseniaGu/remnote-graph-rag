@@ -115,8 +115,8 @@ configurations are also possible.
         - Secrets (backend runtime): `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `PINECONE_API_KEY`,
           `PINECONE_ENVIRONMENT`, `PINECONE_INDEX_NAME`, `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`,
           `NEO4J_DATABASE`, `TAVILY_API_KEY`, `COHERE_API_KEY` and `OLLAMA_API_KEY`
-    - The workflow in `.github/workflows/deploy.yml` builds one image and deploys two Cloud Run services:
-      backend (port `8000`) and frontend (port `3000`). The frontend receives the backend URL automatically.
+    - The workflow in `.github/workflows/deploy.yml` builds two images and deploys two Cloud Run services:
+      backend (port `8000`) and frontend (port `8080`). The frontend is statically exported at build time and served by Caddy.
 
 4. **Deploy:**
    ```bash
