@@ -1,8 +1,6 @@
 import json
 from io import BytesIO
 
-from IPython.display import Image, display
-from PIL import Image
 from langgraph.graph import StateGraph, START, END
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.postprocessor.cohere_rerank import CohereRerank
@@ -88,6 +86,8 @@ class LearnerWorkflow:
             storage_settings,
             embedding_dim=self.models_settings.embedder.embedding_dim,
         )
+        logger.info("Knowledge graph storage initialized")
+
         self.knowledge_graph_indexer = KnowledgeGraphIndexer(
             kg_storage.storage_context,
             self.path_settings,
@@ -564,16 +564,28 @@ class LearnerWorkflow:
         graph = self.run()
         png_graph = graph.get_graph().draw_mermaid_png()
         if jupyter_notebook:
-            return display(Image(graph.get_graph().draw_mermaid_png()))
+            try:
+                from IPython.display import Image as IPyImage, display
+            except ModuleNotFoundError as e:
+                raise ModuleNotFoundError(
+                    "IPython is required for jupyter_notebook=True. Install it with 'pip install ipython'."
+                ) from e
 
-        img = Image.open(BytesIO(png_graph))
+            return display(IPyImage(png_graph))
+
+        try:
+            from PIL import Image as PILImage
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError("Pillow is required for show_graph(). Install it with 'pip install pillow'.") from e
+
+        img = PILImage.open(BytesIO(png_graph))
         img.show()
 
 
 if __name__ == '__main__':
     # ...
     """
-    from backend.configs.storage import StorageSettings, LocalStorageSettings
+    from backend.configs.storage import StorageSettings, LocalStorageSettings, RedisSettings
     from llama_index.core.schema import MetadataMode
     from langgraph.errors import GraphRecursionError
 

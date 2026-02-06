@@ -7,7 +7,8 @@ from backend.configs.storage import StorageSettings, LocalStorageSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
 
-if __name__ == '__main__':
+
+def main():
     storage_settings = StorageSettings()
     models_settings = ModelSettings()
     path_settings = PathSettings()
@@ -26,3 +27,7 @@ if __name__ == '__main__':
         kg_storage.storage_context, path_settings, storage_settings.document_storage.storage_type, kg_search_settings,
         embedder, None
     )
+
+
+if __name__ == '__main__':
+    main()

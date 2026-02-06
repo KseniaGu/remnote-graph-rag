@@ -63,6 +63,7 @@ class StorageType(StrEnum):
     local = "local"
     redis = "redis"
     neo4j = "neo4j"
+    pinecone = "pinecone"
 
 
 class ExternalSourceUrlType(StrEnum):

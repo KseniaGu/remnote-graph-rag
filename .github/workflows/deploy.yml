@@ -1,0 +1,113 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ vars.REGION }}
+  ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+  BACKEND_SERVICE_NAME: ${{ vars.BACKEND_SERVICE_NAME }}
+  FRONTEND_SERVICE_NAME: ${{ vars.FRONTEND_SERVICE_NAME }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+
+      - name: Build Docker image
+        run: |
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag:${{ github.sha }} \
+            -f deploy/Dockerfile .
+
+      - name: Push Docker image
+        run: |
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag:${{ github.sha }}
+
+      - name: Deploy backend to Cloud Run
+        run: |
+          gcloud run deploy $BACKEND_SERVICE_NAME \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag:${{ github.sha }} \
+            --platform managed \
+            --region $REGION \
+            --port 8000 \
+            --quiet \
+            --allow-unauthenticated \
+            --memory 2Gi \
+            --cpu 2 \
+            --timeout 300 \
+            --min-instances 0 \
+            --max-instances 10 \
+            --command reflex \
+            --args run,--env,prod,--backend-only,--backend-host,0.0.0.0 \
+            --set-env-vars "ENV=PROD" \
+            --set-env-vars "REDIS_HOST=${{ secrets.REDIS_HOST }}" \
+            --set-env-vars "REDIS_PORT=${{ secrets.REDIS_PORT }}" \
+            --set-env-vars "REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}" \
+            --set-env-vars "REDIS_INIT_FROM_LOCAL=false" \
+            --set-env-vars "PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}" \
+            --set-env-vars "PINECONE_ENVIRONMENT=${{ secrets.PINECONE_ENVIRONMENT }}" \
+            --set-env-vars "PINECONE_INDEX_NAME=${{ secrets.PINECONE_INDEX_NAME }}" \
+            --set-env-vars "PINECONE_INIT_FROM_LOCAL=false" \
+            --set-env-vars "NEO4J_URI=${{ secrets.NEO4J_URI }}" \
+            --set-env-vars "NEO4J_USERNAME=${{ secrets.NEO4J_USERNAME }}" \
+            --set-env-vars "NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}" \
+            --set-env-vars "NEO4J_DATABASE=${{ secrets.NEO4J_DATABASE }}" \
+            --set-env-vars "NEO4J_INIT_FROM_LOCAL=false" \
+            --set-env-vars "OLLAMA_API_KEY=${{ secrets.OLLAMA_API_KEY }}" \
+            --set-env-vars "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" \
+            --set-env-vars "COHERE_API_KEY=${{ secrets.COHERE_API_KEY }}"
+
+      - name: Get backend URL
+        run: |
+          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --region $REGION --format 'value(status.url)')
+          echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
+
+      - name: Deploy frontend to Cloud Run
+        run: |
+          gcloud run deploy $FRONTEND_SERVICE_NAME \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag:${{ github.sha }} \
+            --platform managed \
+            --region $REGION \
+            --port 3000 \
+            --quiet \
+            --allow-unauthenticated \
+            --memory 1Gi \
+            --cpu 1 \
+            --timeout 300 \
+            --min-instances 0 \
+            --max-instances 10 \
+            --command reflex \
+            --args run,--env,prod,--frontend-only \
+            --set-env-vars "API_URL=$BACKEND_URL" \
+            --set-env-vars "REFLEX_API_URL=$BACKEND_URL" \
+            --set-env-vars "ENV=PROD"
+
+      - name: Show deployment URLs
+        run: |
+          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --region $REGION --format 'value(status.url)')
+          FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE_NAME --region $REGION --format 'value(status.url)')
+          echo "Backend: $BACKEND_URL"
+          echo "Frontend: $FRONTEND_URL"
+

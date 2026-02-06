@@ -1,164 +1,28 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
+import redis
 from llama_index.core import StorageContext
 from llama_index.core.graph_stores.simple_labelled import SimplePropertyGraphStore
-from llama_index.core.graph_stores.types import LabelledNode, EntityNode, ChunkNode, Relation, Triplet
 from llama_index.core.storage.docstore import SimpleDocumentStore
+from llama_index.core.storage.docstore.keyval_docstore import KVDocumentStore
 from llama_index.core.storage.index_store import SimpleIndexStore
+from llama_index.core.storage.index_store.keyval_index_store import KVIndexStore
 from llama_index.core.vector_stores.simple import SimpleVectorStore
-from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
-from llama_index.graph_stores.neo4j.neo4j_property_graph import remove_empty_values, BASE_NODE_LABEL, BASE_ENTITY_LABEL
 from llama_index.storage.docstore.redis import RedisDocumentStore
 from llama_index.storage.index_store.redis import RedisIndexStore
+from llama_index.storage.kvstore.redis import RedisKVStore
+from llama_index.vector_stores.pinecone import PineconeVectorStore
 from llama_index.vector_stores.redis import RedisVectorStore
 from llama_index.vector_stores.redis.schema import RedisVectorStoreSchema
+from pinecone import Pinecone
 
 from backend.configs.constants import DEFAULT_EMBEDDING_DIM
 from backend.configs.enums import StorageType
 from backend.configs.paths import PathSettings
 from backend.configs.storage import StorageSettings
+from backend.knowledge_graph.custom_types import CustomNeo4jPropertyGraphStore
 from backend.utils.helpers import make_json_serializable
-
-
-class CustomNeo4jPropertyGraphStore(Neo4jPropertyGraphStore):
-    """Custom Neo4j Property Graph Store with support for ChunkNode relationships."""
-
-    def get_rel_map(
-            self,
-            graph_nodes: list[LabelledNode],
-            depth: int = 2,
-            limit: int = 30,
-            ignore_rels: Optional[list[str]] = None,
-    ) -> list[Triplet]:
-        """Gets depth-aware relationship map for all node types including ChunkNodes.
-        
-        Args:
-            graph_nodes: List of graph nodes to get relationships for.
-            depth: Maximum depth for relationship traversal.
-            limit: Maximum number of relationships to return.
-            ignore_rels: List of relationship types to ignore.
-            
-        Returns:
-            List of triplets (source, relation, target).
-        """
-        triples = []
-
-        ids = [node.id for node in graph_nodes]
-        # Modified query: use __Node__ instead of __Entity__ to include ChunkNodes
-        response = self.structured_query(
-            f"""
-            WITH $ids AS id_list
-            UNWIND range(0, size(id_list) - 1) AS idx
-            MATCH (e:`{BASE_NODE_LABEL}`)
-            WHERE e.id = id_list[idx]
-            MATCH p=(e)-[r*1..{depth}]-(other)
-            WHERE ALL(rel in relationships(p) WHERE type(rel) <> 'MENTIONS')
-            UNWIND relationships(p) AS rel
-            WITH distinct rel, idx
-            WITH startNode(rel) AS source,
-                type(rel) AS type,
-                rel{{.*}} AS rel_properties,
-                endNode(rel) AS endNode,
-                idx
-            LIMIT toInteger($limit)
-            RETURN source.id AS source_id, [l in labels(source)
-                   WHERE NOT l IN ['{BASE_ENTITY_LABEL}', '{BASE_NODE_LABEL}'] | l][0] AS source_type,
-                source{{.* , embedding: Null, id: Null}} AS source_properties,
-                type,
-                rel_properties,
-                endNode.id AS target_id, [l in labels(endNode)
-                   WHERE NOT l IN ['{BASE_ENTITY_LABEL}', '{BASE_NODE_LABEL}'] | l][0] AS target_type,
-                endNode{{.* , embedding: Null, id: Null}} AS target_properties,
-                idx
-            ORDER BY idx
-            LIMIT toInteger($limit)
-            """,
-            param_map={"ids": ids, "limit": limit},
-        )
-        response = response if response else []
-
-        ignore_rels = ignore_rels or []
-        for record in response:
-            if record["type"] in ignore_rels:
-                continue
-
-            source = EntityNode(
-                name=record["source_id"],
-                label=record["source_type"],
-                properties=remove_empty_values(record["source_properties"]),
-            )
-            target = EntityNode(
-                name=record["target_id"],
-                label=record["target_type"],
-                properties=remove_empty_values(record["target_properties"]),
-            )
-            rel = Relation(
-                source_id=record["source_id"],
-                target_id=record["target_id"],
-                label=record["type"],
-                properties=remove_empty_values(record["rel_properties"]),
-            )
-            triples.append([source, rel, target])
-
-        return triples
-
-    def get(self, properties: Optional[dict] = None, ids: Optional[list[str]] = None) -> list[LabelledNode]:
-        """Get nodes with correct label extraction.
-        
-        Adds support for returning actual entity label.
-        """
-        cypher_statement = f"MATCH (e: {BASE_NODE_LABEL}) "
-
-        params = {}
-        cypher_statement += "WHERE e.id IS NOT NULL "
-
-        if ids:
-            cypher_statement += "AND e.id in $ids "
-            params["ids"] = ids
-
-        if properties:
-            prop_list = []
-            for i, prop in enumerate(properties):
-                prop_list.append(f"e.`{prop}` = $property_{i}")
-                params[f"property_{i}"] = properties[prop]
-            cypher_statement += " AND " + " AND ".join(prop_list)
-
-        # Filter out both __Entity__ and __Node__ to get the actual label
-        return_statement = f"""
-        WITH e
-        RETURN e.id AS name,
-               [l in labels(e) WHERE NOT l IN ['{BASE_ENTITY_LABEL}', '{BASE_NODE_LABEL}'] | l][0] AS type,
-               e{{.* , embedding: Null, id: Null}} AS properties
-        """
-        cypher_statement += return_statement
-
-        response = self.structured_query(cypher_statement, param_map=params)
-        response = response if response else []
-
-        nodes = []
-        for record in response:
-            # text indicates a chunk node
-            # none on the type indicates an implicit node, likely a chunk node
-            if "text" in record["properties"] or record["type"] is None:
-                text = record["properties"].pop("text", "")
-                nodes.append(
-                    ChunkNode(
-                        id_=record["name"],
-                        text=text,
-                        properties=remove_empty_values(record["properties"]),
-                    )
-                )
-            else:
-                nodes.append(
-                    EntityNode(
-                        name=record["name"],
-                        label=record["type"],
-                        properties=remove_empty_values(record["properties"]),
-                    )
-                )
-
-        return nodes
 
 
 class KnowledgeGraphStorage:
@@ -210,12 +74,21 @@ class KnowledgeGraphStorage:
             else:
                 document_storage = SimpleDocumentStore()
         elif self.storage_settings.document_storage.storage_type == StorageType.redis:
-            document_storage = RedisDocumentStore.from_host_and_port(
-                host=self.storage_settings.document_storage.host,
-                port=self.storage_settings.document_storage.port,
-                namespace="llama_index",
-            )
-            if self.storage_settings.document_storage.init_from_local and not document_storage.docs:
+            if self.storage_settings.document_storage.password:
+                redis_url = self.storage_settings.document_storage.get_connection_url(driver="rediss")
+                redis_client = redis.from_url(redis_url)
+                kv_store = RedisKVStore(redis_client=redis_client, namespace="llama_index")
+                document_storage = KVDocumentStore(kv_store)
+            else:
+                document_storage = RedisDocumentStore.from_host_and_port(
+                    host=self.storage_settings.document_storage.host,
+                    port=self.storage_settings.document_storage.port,
+                    namespace="llama_index",
+                )
+            # The least resource demanding way to check whether Redis cloud storage is empty
+            storage_is_empty = document_storage._kvstore._redis_client.dbsize() == 0
+
+            if self.storage_settings.document_storage.init_from_local and storage_is_empty:
                 local_path_to_check = kwargs.get("local_storage", self.path_settings.local_storage_dir)
                 if self.not_empty(local_path_to_check):
                     local_document_storage = SimpleDocumentStore.from_persist_dir(
@@ -245,12 +118,24 @@ class KnowledgeGraphStorage:
             else:
                 index_storage = SimpleIndexStore()
         elif self.storage_settings.index_storage.storage_type == StorageType.redis:
-            index_storage = RedisIndexStore.from_host_and_port(
-                host=self.storage_settings.index_storage.host,
-                port=self.storage_settings.index_storage.port,
-                namespace="llama_index",
-            )
-            if self.storage_settings.index_storage.init_from_local and not index_storage.index_structs():
+            if self.storage_settings.index_storage.password:
+                redis_url = self.storage_settings.index_storage.get_connection_url(driver="rediss")
+                redis_client = redis.from_url(redis_url)
+                kv_store = RedisKVStore(redis_client=redis_client, namespace="llama_index")
+                index_storage = KVIndexStore(kv_store)
+            else:
+                index_storage = RedisIndexStore.from_host_and_port(
+                    host=self.storage_settings.index_storage.host,
+                    port=self.storage_settings.index_storage.port,
+                    namespace="llama_index",
+                )
+            try:
+                index_storage.get_index_struct()
+                storage_is_empty = False
+            except AssertionError:
+                storage_is_empty = True
+
+            if self.storage_settings.index_storage.init_from_local and storage_is_empty:
                 local_path_to_check = kwargs.get("local_storage", self.path_settings.local_storage_dir)
                 local_index_storage = SimpleIndexStore.from_persist_dir(persist_dir=str(local_path_to_check))
                 index_storage.add_index_struct(local_index_storage.get_index_struct())
@@ -262,13 +147,13 @@ class KnowledgeGraphStorage:
     def get_vector_storage(self, **kwargs) -> Any:
         """Gets vector storage backend.
         
-        Supports local and Redis storage. Configures embedding dimensions for Redis.
+        Supports local, Redis, and Pinecone storage. Configures embedding dimensions.
         
         Args:
             **kwargs: Additional arguments including optional embedding_dim.
             
         Returns:
-            Vector storage instance (SimpleVectorStore or RedisVectorStore).
+            Vector storage instance (SimpleVectorStore, RedisVectorStore, or PineconeVectorStore).
         """
         if self.storage_settings.vector_storage.storage_type == StorageType.local:
             storage_path = self.storage_settings.vector_storage.storage_path
@@ -280,11 +165,20 @@ class KnowledgeGraphStorage:
             embedding_dim = kwargs.get("embedding_dim", DEFAULT_EMBEDDING_DIM)
             schema = RedisVectorStoreSchema()
             schema.fields["vector"].attrs.dims = embedding_dim
-
-            redis_connection = self.storage_settings.vector_storage.get_connection_url()
-            vector_storage = RedisVectorStore(redis_url=redis_connection, overwrite=False, schema=schema)
+            if self.storage_settings.index_storage.password:
+                redis_connection = self.storage_settings.vector_storage.get_connection_url(driver="rediss")
+            else:
+                redis_connection = self.storage_settings.vector_storage.get_connection_url()
+            vector_storage = RedisVectorStore(
+                redis_url=redis_connection, overwrite=self.storage_settings.vector_storage.overwrite_index,
+                schema=schema
+            )
+        elif self.storage_settings.vector_storage.storage_type == StorageType.pinecone:
+            pc = Pinecone(api_key=self.storage_settings.vector_storage.api_key.get_secret_value())
+            pinecone_index = pc.Index(self.storage_settings.vector_storage.index_name)
+            vector_storage = PineconeVectorStore(pinecone_index=pinecone_index)
         else:
-            raise ValueError("Only Local and Redis storage types are supported for Index Storage")
+            raise ValueError("Only Local, Redis, and Pinecone storage types are supported for Vector Storage")
 
         return vector_storage
 
@@ -315,7 +209,10 @@ class KnowledgeGraphStorage:
                 url=self.storage_settings.property_graph_storage.get_connection_url(),
                 database=self.storage_settings.property_graph_storage.database,
             )
-            if self.storage_settings.property_graph_storage.init_from_local:
+            not_empty = property_graph_storage.structured_query("MATCH (n) RETURN count(n) > 0 AS not_empty LIMIT 1")[0]
+            not_empty = not_empty.get("not_empty", False)
+
+            if self.storage_settings.property_graph_storage.init_from_local and not not_empty:
                 local_path_to_check = kwargs.get("local_storage", self.path_settings.local_storage_dir)
                 if self.not_empty(local_path_to_check):
                     local_property_graph_storage = SimplePropertyGraphStore.from_persist_dir(

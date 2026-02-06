@@ -4,7 +4,6 @@ import reflex as rx
 from pydantic import BaseModel
 import plotly.graph_objects as go
 
-from backend.workflows.learner_reflex import get_workflow
 from backend.configs.enums import WorkflowEventType
 
 
@@ -133,6 +132,8 @@ class AppState(rx.State):
 
         try:
             # Get workflow instance
+            from backend.workflows.learner_reflex import get_workflow
+
             workflow = get_workflow()
             
             # Prepare message history

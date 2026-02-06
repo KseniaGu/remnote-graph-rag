@@ -2,7 +2,8 @@ from backend.configs.paths import PathSettings
 from backend.configs.storage import LocalStorageSettings, StorageSettings
 from backend.data_processing.parser import RemNoteParser
 
-if __name__ == '__main__':
+
+def main():
     path_settings = PathSettings()
     storage_settings = StorageSettings()
 
@@ -14,3 +15,7 @@ if __name__ == '__main__':
 
     parser = RemNoteParser(path_settings, storage_settings)
     parser.run()
+
+
+if __name__ == '__main__':
+    main()

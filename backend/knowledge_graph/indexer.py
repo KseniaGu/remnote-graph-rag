@@ -15,7 +15,9 @@ from llama_index.core.indices import PropertyGraphIndex
 from llama_index.core.indices.property_graph import ImplicitPathExtractor
 from llama_index.core.indices.property_graph.sub_retrievers.vector import VectorContextRetriever
 from llama_index.core.schema import MetadataMode, RelatedNodeInfo, TextNode, NodeRelationship
+from llama_index.core.vector_stores.simple import SimpleVectorStore
 from llama_index.llms.ollama import Ollama
+from llama_index.vector_stores.pinecone import PineconeVectorStore
 from llama_index.vector_stores.redis import RedisVectorStore
 from tqdm import tqdm
 
@@ -24,6 +26,7 @@ from backend.configs.constants import MAX_TOKEN_COUNTS_PER_CALL, TEST_SOURCES, M
 from backend.configs.enums import KnowledgeGraphEntity, KnowledgeGraphRelation, StorageType
 from backend.configs.paths import PathSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
+from backend.knowledge_graph.custom_types import CustomEntityNode
 from backend.utils.helpers import clean_json_markdown, logger, make_json_serializable
 
 load_dotenv(find_dotenv())
@@ -68,15 +71,15 @@ class KnowledgeGraphIndexer:
         self.reranker = reranker
         self.tokenizer = tokenizer
 
-        self.node_id_to_text = {k: v.text for k, v in self.storage_context.docstore.docs.items()}
-        # 'path' parameter contains the hierarchical path to the RemNote text block (page name, headers, sub-headers, etc.)
-        self.node_id_to_path = {k: v.metadata['path'] for k, v in self.storage_context.docstore.docs.items()}
-        self.node_id_to_line_number = {
-            k: v.metadata['line_number'] for k, v in self.storage_context.docstore.docs.items()
-        }
-
         self.index = None
         self.test_setup = test_setup
+
+    def _init_node_id_to_attr_mappings(self):
+        documents = self.storage_context.docstore.docs.items()
+        self.node_id_to_text = {k: v.text for k, v in documents}
+        # 'path' parameter contains the hierarchical path to the RemNote text block (page name, headers, sub-headers, etc.)
+        self.node_id_to_path = {k: v.metadata['path'] for k, v in documents}
+        self.node_id_to_line_number = {k: v.metadata['line_number'] for k, v in documents}
 
     def get_document_nodes(self, node_ids: list[str] | str) -> list[TextNode] | TextNode | None:
         """Retrieves document nodes by their IDs.
@@ -375,9 +378,9 @@ class KnowledgeGraphIndexer:
             object_key = (triplet["object"], triplet["object_type"])
 
             if subject_key not in entity_map:
-                entity_map[subject_key] = EntityNode(name=triplet["subject"], label=triplet["subject_type"])
+                entity_map[subject_key] = CustomEntityNode(name=triplet["subject"], label=triplet["subject_type"])
             if object_key not in entity_map:
-                entity_map[object_key] = EntityNode(name=triplet["object"], label=triplet["object_type"])
+                entity_map[object_key] = CustomEntityNode(name=triplet["object"], label=triplet["object_type"])
 
             relation = Relation(
                 label=triplet["predicate"],
@@ -526,7 +529,7 @@ class KnowledgeGraphIndexer:
         node_id_to_text = {}
         for node in all_unique_nodes:
             if isinstance(node, EntityNode):
-                node_id_to_text[node.id] = f"{node.name} (Label: {node.label})"
+                node_id_to_text[node.id] = f"{node.properties.get('entity_name', node.name)} (Label: {node.label})"
             elif isinstance(node, ChunkNode):
                 node_id_to_text[node.id] = node.text
 
@@ -540,6 +543,13 @@ class KnowledgeGraphIndexer:
         graph.add_edges_from(edges_to_add)
         return graph
 
+    @staticmethod
+    def _truncate_graph_label(text: str, max_len: int = 60) -> str:
+        text = " ".join(str(text).split())
+        if len(text) <= max_len:
+            return text
+        return text[: max_len - 1] + "…"
+
     def get_graph_visualization(self, nodes: list[str], relation_triplets: list[tuple[str, str, str]]) -> go.Figure:
         """Generates interactive Plotly visualization of the knowledge graph.
         
@@ -552,6 +562,11 @@ class KnowledgeGraphIndexer:
         """
         graph = self.generate_nx_graph_from(nodes, relation_triplets)
         pos = nx.spring_layout(graph, k=SPRING_LAYOUT_K, iterations=SPRING_LAYOUT_ITERATIONS)
+
+        node_id_to_full_text = {node_id: text for node_id, text in graph.nodes(data="text")}
+        node_id_to_short_text = {
+            node_id: self._truncate_graph_label(text) for node_id, text in node_id_to_full_text.items()
+        }
 
         edge_x, edge_y = [], []
         edge_label_x, edge_label_y, edge_label_text = [], [], []
@@ -568,11 +583,21 @@ class KnowledgeGraphIndexer:
             relation = data.get("relation", "RELATES_TO")
             # Hover text for edges
             if relation == "CHILD":
-                edge_label_text.append(u + " → " + "HAS CHILD" + " → " + v)
+                edge_label_text.append(
+                    node_id_to_short_text.get(u, u) + " → " + "HAS CHILD" + " → " + node_id_to_short_text.get(v, v)
+                )
             elif relation == "PARENT":
-                edge_label_text.append("")
+                edge_label_text.append(
+                    node_id_to_short_text.get(u, u) + " → " + "HAS PARENT" + " → " + node_id_to_short_text.get(v, v)
+                )
             else:
-                edge_label_text.append(u + " → " + data.get("relation", "RELATES_TO") + " → " + v)
+                edge_label_text.append(
+                    node_id_to_short_text.get(u, u)
+                    + " → "
+                    + data.get("relation", "RELATES_TO")
+                    + " → "
+                    + node_id_to_short_text.get(v, v)
+                )
 
         edge_trace = go.Scatter(
             x=edge_x,
@@ -602,7 +627,7 @@ class KnowledgeGraphIndexer:
             x=node_x, y=node_y,
             mode='markers+text',
             textposition="top center",
-            text=[str(n) for n in graph.nodes()],
+            text=[node_id_to_short_text.get(n, str(n)) for n in graph.nodes()],
             hovertext=node_text,
             marker=dict(
                 showscale=True,
@@ -681,37 +706,42 @@ class KnowledgeGraphIndexer:
         if self.index.vector_store is None:
             raise ValueError("index.vector_store is None. Ensure Vector Store is properly attached to the index.")
 
-        if self.document_storage_type == StorageType.local:
+        # Check if vector store already has embeddings
+        if isinstance(self.index.vector_store, SimpleVectorStore):
             if self.index.vector_store.data.embedding_dict:
                 return
+        elif isinstance(self.index.vector_store, RedisVectorStore):
+            # Handle both sync and async contexts (e.g., when running inside Reflex)
+            async def _check_redis_docs():
+                return await self.index.vector_store.client.ft("llama_index").info()
+
+            try:
+                loop = asyncio.get_running_loop()
+                # Already in an async context - create a task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, _check_redis_docs())
+                    info = future.result()
+            except RuntimeError:
+                # No running loop - safe to use asyncio.run()
+                info = asyncio.run(_check_redis_docs())
+
+            if info.get("num_docs", 0) > 0:
+                return
+        elif isinstance(self.index.vector_store, PineconeVectorStore):
+            # Check Pinecone index stats
+            stats = self.index.vector_store.client.describe_index_stats()
+            if stats.get("total_vector_count", 0) > 0:
+                return
         else:
-            if isinstance(self.index.vector_store, RedisVectorStore):
-                # Handle both sync and async contexts (e.g., when running inside Reflex)
-                async def _check_redis_docs():
-                    return await self.index.vector_store.client.ft("llama_index").info()
-
-                try:
-                    loop = asyncio.get_running_loop()
-                    # Already in an async context - create a task
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, _check_redis_docs())
-                        info = future.result()
-                except RuntimeError:
-                    # No running loop - safe to use asyncio.run()
-                    info = asyncio.run(_check_redis_docs())
-
-                if info.get("num_docs", 0) > 0:
-                    return
-            else:
-                raise ValueError(f"Unexpected Vector Store type: {type(self.index.vector_store)}")
+            raise ValueError(f"Unexpected Vector Store type: {type(self.index.vector_store)}")
         self.index.vector_store.stores_text = True
         document_ids = list(self.index.storage_context.docstore.docs.keys())
         documents = self.get_document_nodes(document_ids)
         documents = [document for document in documents if document.embedding is None]
         graph_entities = [x for x in self.index.property_graph_store.get() if isinstance(x, EntityNode)]
         document_texts = [node.get_content(metadata_mode=MetadataMode.EMBED) for node in documents]
-        graph_entity_texts = list(map(str, graph_entities))
+        graph_entity_texts = [x.properties.get("entity_name", str(x)) for x in graph_entities]
         nodes_to_update = []
 
         embeddings = self.embedder.get_text_embedding_batch(document_texts, show_progress=True)
@@ -724,9 +754,10 @@ class KnowledgeGraphIndexer:
 
         for node, embedding in tqdm(zip(graph_entities, embeddings), desc="Getting embeddings for graph entities"):
             node = make_json_serializable(node, "properties")
+            entity_text = node.properties.get("entity_name", str(node))
             nodes_to_update.append(
                 TextNode(
-                    text=str(node),
+                    text=entity_text,
                     metadata={VECTOR_SOURCE_KEY: node.id, **node.properties},
                     embedding=[*embedding],
                 )
@@ -751,6 +782,8 @@ class KnowledgeGraphIndexer:
             llm: LLM configuration parameters.
             graph_index_prompt: Prompt for graph processing.
         """
+        self._init_node_id_to_attr_mappings()
+
         if documents is None:
             documents = list(self.storage_context.docstore.docs.values())
             assert documents, "The documents are not provided and not found in Storage Context's docstore."
@@ -783,10 +816,12 @@ class KnowledgeGraphIndexer:
     def load_index(self):
         """Loads the PropertyGraphIndex from the provided storage_context."""
         implicit_extractor = ImplicitPathExtractor()
+        logger.info("Start loading Property Graph Index...")
         self.index = load_index_from_storage(
             self.storage_context, kg_extractors=[implicit_extractor], embed_model=self.embedder, use_async=False,
             vector_store=self.storage_context.vector_store
         )
+        logger.info("Property Graph Index loaded")
         self.get_embeddings()
 
     def get_retriever(self, retriever_params: dict = None) -> BaseRetriever:
