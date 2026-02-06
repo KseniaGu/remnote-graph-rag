@@ -49,19 +49,19 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
 
-      - name: Build Docker image
+      - name: Build backend Docker image
         run: |
-          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag:${{ github.sha }} \
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }} \
             -f deploy/Dockerfile .
 
-      - name: Push Docker image
+      - name: Push backend Docker image
         run: |
-          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag:${{ github.sha }}
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }}
 
       - name: Deploy backend to Cloud Run
         run: |
           gcloud run deploy $BACKEND_SERVICE_NAME \
-            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag:${{ github.sha }} \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }} \
             --platform managed \
             --region $REGION \
             --port 8000 \
@@ -97,24 +97,31 @@ jobs:
           BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --region $REGION --format 'value(status.url)')
           echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
 
+      - name: Build frontend Docker image (static export)
+        run: |
+          docker build \
+            --build-arg API_URL=$BACKEND_URL \
+            -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-frontend:${{ github.sha }} \
+            -f deploy/Dockerfile.frontend .
+
+      - name: Push frontend Docker image
+        run: |
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-frontend:${{ github.sha }}
+
       - name: Deploy frontend to Cloud Run
         run: |
           gcloud run deploy $FRONTEND_SERVICE_NAME \
-            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag:${{ github.sha }} \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-frontend:${{ github.sha }} \
             --platform managed \
             --region $REGION \
-            --port 3000 \
+            --port 8080 \
             --quiet \
             --allow-unauthenticated \
-            --memory 4Gi \
+            --memory 512Mi \
             --cpu 1 \
             --timeout 300 \
             --min-instances 0 \
             --max-instances 10 \
-            --command reflex \
-            --args run,--env,prod,--backend-host,0.0.0.0,--frontend-port,3000 \
-            --set-env-vars "API_URL=$BACKEND_URL" \
-            --set-env-vars "REFLEX_API_URL=$BACKEND_URL" \
             --set-env-vars "ENV=PROD"
 
       - name: Show deployment URLs

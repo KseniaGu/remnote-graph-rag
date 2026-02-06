@@ -1,0 +1,31 @@
+FROM python:3.11-slim as builder
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    unzip \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN pip install poetry==1.8.0
+
+COPY pyproject.toml poetry.lock* ./
+RUN poetry config virtualenvs.create false \
+    && poetry install --only main --no-root --no-interaction --no-ansi
+
+COPY . .
+
+RUN reflex init
+
+ARG API_URL
+ENV API_URL=${API_URL} REFLEX_API_URL=${API_URL}
+
+RUN reflex export --frontend-only --no-zip
+
+FROM caddy:2-alpine
+
+COPY deploy/Caddyfile.frontend /etc/caddy/Caddyfile
+COPY --from=builder /app/.web/build/client/ /srv/
+
+EXPOSE 8080
