@@ -28,6 +28,6 @@ COPY --from=builder /root/.local/share/reflex /root/.local/share/reflex
 
 COPY --from=builder /app /app
 
-EXPOSE 3000 8000
+EXPOSE 8000
 
 CMD ["reflex", "run", "--env", "prod", "--backend-only", "--backend-host", "0.0.0.0"]

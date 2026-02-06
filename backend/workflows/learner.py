@@ -567,16 +567,14 @@ class LearnerWorkflow:
             try:
                 from IPython.display import Image as IPyImage, display
             except ModuleNotFoundError as e:
-                raise ModuleNotFoundError(
-                    "IPython is required for jupyter_notebook=True. Install it with 'pip install ipython'."
-                ) from e
+                raise ModuleNotFoundError("IPython is required for jupyter_notebook=True.") from e
 
             return display(IPyImage(png_graph))
 
         try:
             from PIL import Image as PILImage
         except ModuleNotFoundError as e:
-            raise ModuleNotFoundError("Pillow is required for show_graph(). Install it with 'pip install pillow'.") from e
+            raise ModuleNotFoundError("Pillow is required for show_graph().") from e
 
         img = PILImage.open(BytesIO(png_graph))
         img.show()
