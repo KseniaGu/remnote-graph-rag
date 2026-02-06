@@ -93,13 +93,13 @@ jobs:
             --port 3000 \
             --quiet \
             --allow-unauthenticated \
-            --memory 1Gi \
+            --memory 2Gi \
             --cpu 1 \
             --timeout 300 \
             --min-instances 0 \
             --max-instances 10 \
             --command reflex \
-            --args run,--env,prod,--frontend-only \
+            --args run,--env,prod,--frontend-only,--frontend-host,0.0.0.0,--frontend-port,3000 \
             --set-env-vars "API_URL=$BACKEND_URL" \
             --set-env-vars "REFLEX_API_URL=$BACKEND_URL" \
             --set-env-vars "ENV=PROD"
