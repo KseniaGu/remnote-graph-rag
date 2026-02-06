@@ -140,6 +140,8 @@ jobs:
             --timeout 300 \
             --min-instances 0 \
             --max-instances 10 \
+            --command caddy \
+            --args run,--config,/etc/caddy/Caddyfile,--adapter,caddyfile \
             --set-env-vars "ENV=PROD"
 
       - name: Show deployment URLs
