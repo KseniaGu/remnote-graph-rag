@@ -25,6 +25,8 @@ RUN reflex export --frontend-only --no-zip
 
 FROM caddy:2-alpine
 
+ENV PORT=8080
+
 COPY deploy/Caddyfile.frontend /etc/caddy/Caddyfile
 COPY --from=builder /app/.web/build/client/ /srv/
 
