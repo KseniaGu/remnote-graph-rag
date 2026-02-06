@@ -24,6 +24,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Validate required configuration
+        run: |
+          set -euo pipefail
+          REQUIRED_VARS=(PROJECT_ID REGION ARTIFACT_REGISTRY_REPOSITORY BACKEND_SERVICE_NAME FRONTEND_SERVICE_NAME)
+          for var in "${REQUIRED_VARS[@]}"; do
+            if [ -z "${!var:-}" ]; then
+              echo "Missing required env var: $var"
+              exit 1
+            fi
+          done
+          echo "Configuration OK"
+
       - name: Free disk space on runner
         run: |
           echo "Disk usage before cleanup:"
@@ -46,8 +58,12 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Set active GCP project
+        run: |
+          gcloud config set project "$PROJECT_ID"
+
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet --project "$PROJECT_ID"
 
       - name: Build backend Docker image
         run: |
@@ -63,6 +79,7 @@ jobs:
           gcloud run deploy $BACKEND_SERVICE_NAME \
             --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }} \
             --platform managed \
+            --project $PROJECT_ID \
             --region $REGION \
             --port 8000 \
             --quiet \
@@ -94,7 +111,7 @@ jobs:
 
       - name: Get backend URL
         run: |
-          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --region $REGION --format 'value(status.url)')
+          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --project $PROJECT_ID --region $REGION --format 'value(status.url)')
           echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
 
       - name: Build frontend Docker image (static export)
@@ -113,6 +130,7 @@ jobs:
           gcloud run deploy $FRONTEND_SERVICE_NAME \
             --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-frontend:${{ github.sha }} \
             --platform managed \
+            --project $PROJECT_ID \
             --region $REGION \
             --port 8080 \
             --quiet \
@@ -126,8 +144,8 @@ jobs:
 
       - name: Show deployment URLs
         run: |
-          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --region $REGION --format 'value(status.url)')
-          FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE_NAME --region $REGION --format 'value(status.url)')
+          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --project $PROJECT_ID --region $REGION --format 'value(status.url)')
+          FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE_NAME --project $PROJECT_ID --region $REGION --format 'value(status.url)')
           echo "Backend: $BACKEND_URL"
           echo "Frontend: $FRONTEND_URL"
 
