@@ -99,7 +99,7 @@ jobs:
             --min-instances 0 \
             --max-instances 10 \
             --command reflex \
-            --args run,--env,prod,--frontend-only,--frontend-host,0.0.0.0,--frontend-port,3000 \
+            --args run,--env,prod,--frontend-only,--frontend-port,3000 \
             --set-env-vars "API_URL=$BACKEND_URL" \
             --set-env-vars "REFLEX_API_URL=$BACKEND_URL" \
             --set-env-vars "ENV=PROD"
