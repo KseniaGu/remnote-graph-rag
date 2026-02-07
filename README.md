@@ -82,8 +82,7 @@ configurations are also possible.
 
 ### Prerequisites
 
-- [**Google Cloud Project
-  **](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://developers.google.com/workspace/guides/create-project&ved=2ahUKEwjprMeO476SAxXAhP0HHSpjHyEQFnoECBsQAQ&usg=AOvVaw2ZhCyP-ADTJAk5HpKkZd0W)
+- [**Google Cloud Project**](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://developers.google.com/workspace/guides/create-project&ved=2ahUKEwjprMeO476SAxXAhP0HHSpjHyEQFnoECBsQAQ&usg=AOvVaw2ZhCyP-ADTJAk5HpKkZd0W)
   with billing enabled
 - [**Upstash Redis**](https://upstash.com/) for document/index storage
 - [**Pinecone**](https://www.pinecone.io/) for vector storage
@@ -116,7 +115,8 @@ configurations are also possible.
           `PINECONE_ENVIRONMENT`, `PINECONE_INDEX_NAME`, `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`,
           `NEO4J_DATABASE`, `TAVILY_API_KEY`, `COHERE_API_KEY` and `OLLAMA_API_KEY`
     - The workflow in `.github/workflows/deploy.yml` builds two images and deploys two Cloud Run services:
-      backend (port `8000`) and frontend (port `8080`). The frontend is statically exported at build time and served by Caddy.
+      backend (port `8000`) and frontend (port `8080`). The frontend is statically exported at build time and served by
+      Caddy.
 
 4. **Deploy:**
    ```bash
