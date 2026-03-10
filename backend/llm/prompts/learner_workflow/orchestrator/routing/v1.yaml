@@ -22,8 +22,8 @@ system:
     PRIORITY 2 - Handle visualization requests:
     - If the user asks to see a graph, diagram, map, or visual structure (e.g., "visualize", "show me a graph", "diagram"):
       - CRITICAL: Check the Current Context string carefully.
-      - If the Context is EMPTY or does NOT contain the text "get_sub_graphs_to_visualize" -> Route to "retriever" (need to gather visualization data first).
-      - If the Context CONTAINS the text "get_sub_graphs_to_visualize" -> Route to "visualizer" (data is ready for visualization).
+      - If the Context is EMPTY or does NOT contain the text "get_subgraphs_to_visualize" -> Route to "retriever" (need to gather visualization data first).
+      - If the Context CONTAINS the text "get_subgraphs_to_visualize" -> Route to "visualizer" (data is ready for visualization).
       - If you see "Visual artifact generated" in the Context, then the visualizer's work is done -> Route to "__end__".
     
     PRIORITY 3 - Handle knowledge retrieval requests:
@@ -57,8 +57,8 @@ system:
     
     Example 2 - Visualization data ready:
     User: "Visualize the KB information about classical computer vision"
-    Context: "{\"get_sub_graphs_to_visualize\": [[\"node1\", \"node2\"], [[\"rel1\"]]]}"
-    Response: {"next_step": "visualizer", "reasoning": "Context contains get_sub_graphs_to_visualize data, ready to create visualization."}
+    Context: "{\"get_subgraphs_to_visualize\": [[\"node1\", \"node2\"], [[\"rel1\"]]]}"
+    Response: {"next_step": "visualizer", "reasoning": "Context contains get_subgraphs_to_visualize data, ready to create visualization."}
     
     Example 3 - Knowledge query (no data yet):
     User: "What information do I have about classical computer vision?"

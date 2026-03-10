@@ -135,7 +135,7 @@ class LearnerWorkflow:
         )
         web_search_tool = deep_web_research(self.search_engine)
         visualizer_retriever_params = self.knowledge_graph_indexer.kg_search_settings.visualizer_retriever_params
-        visualizer_kb_search_tool = get_sub_graphs_to_visualize(
+        visualizer_kb_search_tool = get_subgraphs_to_visualize(
             self.knowledge_graph_indexer.get_retriever(visualizer_retriever_params)
         )
         self.tools = {tool.name: tool for tool in (base_kb_search_tool, web_search_tool, visualizer_kb_search_tool)}
@@ -359,7 +359,7 @@ class LearnerWorkflow:
         if response:
             next_step = response.next_step
             if next_step == "visualizer":
-                if not state.context or "get_sub_graphs_to_visualize" not in state.context:
+                if not state.context or "get_subgraphs_to_visualize" not in state.context:
                     logger.warning(
                         "[ORCHESTRATOR] Cannot route to visualizer without graph data. "
                         "Routing to retriever first."
@@ -376,7 +376,7 @@ class LearnerWorkflow:
         
         Analyzes user request to determine intent:
         - Information search: calls search_knowledge_base tool to retrieve relevant facts
-        - Visualization: calls get_sub_graphs_to_visualize to gather graph structure data
+        - Visualization: calls get_subgraphs_to_visualize to gather graph structure data
         
         The retrieved data is stored in context for downstream agents (Analyst, Visualizer).
         
@@ -521,7 +521,7 @@ class LearnerWorkflow:
     def visualizer_node(self, state: State) -> dict[str, Optional[dict]]:
         """Visualizer agent: creates interactive graph visualizations from retrieved data.
         
-        Processes graph structure data from get_sub_graphs_to_visualize tool and generates an interactive
+        Processes graph structure data from get_subgraphs_to_visualize tool and generates an interactive
         Plotly visualization.
         
         Args:
@@ -533,7 +533,7 @@ class LearnerWorkflow:
         try:
             tool_results = state.context
             if tool_results:
-                visualizer_tool_results = json.loads(tool_results).get("get_sub_graphs_to_visualize")
+                visualizer_tool_results = json.loads(tool_results).get("get_subgraphs_to_visualize")
                 if visualizer_tool_results:
                     plotly_figure = self.knowledge_graph_indexer.get_graph_visualization(*visualizer_tool_results)
                     return {"visual_artifact": plotly_figure.to_dict()}

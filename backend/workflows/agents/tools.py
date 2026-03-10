@@ -145,9 +145,9 @@ def deep_web_research(search_engine: Any):
     return _deep_web_research
 
 
-def get_sub_graphs_to_visualize(retriever: Any):
-    @tool("get_sub_graphs_to_visualize")
-    def _get_sub_graphs_to_visualize(queries: list[str]):
+def get_subgraphs_to_visualize(retriever: Any):
+    @tool("get_subgraphs_to_visualize")
+    def _get_subgraphs_to_visualize(queries: list[str]):
         """Retrieves subgraphs for visualization based on multiple search queries.
         
         This tool extracts graph structures and nodes from the knowledge base to support visualization workflows. It processes multiple queries simultaneously to gather comprehensive subgraph data.
@@ -186,4 +186,4 @@ def get_sub_graphs_to_visualize(retriever: Any):
 
         return list(set(all_nodes)), list(set(all_triplets))
 
-    return _get_sub_graphs_to_visualize
+    return _get_subgraphs_to_visualize

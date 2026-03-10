@@ -448,18 +448,18 @@ class KnowledgeGraphIndexer:
 
         return prompt_input, node_label_to_node_id
 
-    def process_sub_graph(self, sub_graph: nx.DiGraph, model: Ollama, prompt: str) -> int:
+    def process_subgraph(self, subgraph: nx.DiGraph, model: Ollama, prompt: str) -> int:
         """Processes a single subgraph to extract entities and relations.
         
         Args:
-            sub_graph: NetworkX directed graph representing document structure.
+            subgraph: NetworkX directed graph representing document structure.
             model: LLM for processing.
             prompt: Template prompt for the LLM.
             
         Returns:
             Total tokens used in processing.
         """
-        leaves = [node for node, degree in sub_graph.out_degree() if degree == 0]
+        leaves = [node for node, degree in subgraph.out_degree() if degree == 0]
         subgraph_tailing_subtrees = []
         checked_leaves = set()
 
@@ -467,11 +467,11 @@ class KnowledgeGraphIndexer:
             if leaf in checked_leaves:
                 continue
 
-            parents = list(sub_graph.predecessors(leaf))
+            parents = list(subgraph.predecessors(leaf))
             assert len(parents) == 1, f"Unexpected relation: one node has multiple parents (node {leaf})"
 
             # Find subtree that contains current leaf parent and its other leaves
-            subtree = sub_graph.successors(parents[0])
+            subtree = subgraph.successors(parents[0])
             subtree = [x for x in sorted(subtree, key=lambda y: self.node_id_to_line_number[y]) if x in leaves]
             checked_leaves.update(subtree)
             subgraph_tailing_subtrees.append(subtree)
@@ -656,7 +656,7 @@ class KnowledgeGraphIndexer:
     def process_implicit_graph(self, model: Ollama, processing_prompt: str):
         """Processes graph built by ImplicitPathExtractor.
 
-        Processing process consists of the following steps:
+        The processing involves the following steps:
             1. Get all connected subgraphs.
             2. For each connected subgraph:
                 - Get all its leaves and find "tailing" subtrees that contain only these leaves and their parents.
@@ -686,13 +686,13 @@ class KnowledgeGraphIndexer:
         graph.remove_nodes_from(list(nx.isolates(graph)))
 
         # Get all connected subgraphs
-        sub_graphs = [graph.subgraph(c).copy() for c in nx.weakly_connected_components(graph)]
+        subgraphs = [graph.subgraph(c).copy() for c in nx.weakly_connected_components(graph)]
 
         total_tokens = 0
-        pbar = tqdm(sub_graphs, desc="Subgraphs processing")
-        for sub_graph in pbar:
+        pbar = tqdm(subgraphs, desc="Subgraphs processing")
+        for subgraph in pbar:
             try:
-                tokens_used = self.process_sub_graph(sub_graph, model, processing_prompt)
+                tokens_used = self.process_subgraph(subgraph, model, processing_prompt)
                 total_tokens += tokens_used
                 pbar.set_postfix({"total_tokens": total_tokens})
             except (json.JSONDecodeError, KeyError, ValueError) as e:
