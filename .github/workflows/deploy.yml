@@ -104,9 +104,10 @@ jobs:
             --set-secrets "OLLAMA_API_KEY=ollama-api-key:latest" \
             --set-secrets "TAVILY_API_KEY=tavily-api-key:latest" \
             --set-secrets "COHERE_API_KEY=cohere-api-key:latest" \
-            --set-secrets "LANGCHAIN_API_KEY=langchain-api-key:latest" \
-            --set-env-vars "LANGCHAIN_TRACING_V2=true" \
-            --set-env-vars "LANGCHAIN_PROJECT=remnote-graph-rag"
+            --set-secrets "LANGSMITH_API_KEY=langchain-api-key:latest" \
+            --set-env-vars "LANGSMITH_TRACING=true" \
+            --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \ 
+            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com" 
 
       - name: Get backend URL
         run: |
