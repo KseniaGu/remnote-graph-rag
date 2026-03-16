@@ -659,7 +659,7 @@ class KnowledgeGraphIndexer:
                 xref="x", yref="y",
                 text=f"<i>{rel_display}</i>",
                 showarrow=False,
-                font=dict(size=9, color="#aaa"),
+                font=dict(size=11, color="#aaa"),
                 bgcolor="rgba(20,30,40,0.7)",
                 borderpad=2,
             ))
@@ -725,7 +725,7 @@ class KnowledgeGraphIndexer:
             mode='markers+text',
             text=node_labels,
             textposition=textpositions,
-            textfont=dict(size=10, color="#e9edef", family="Inter, sans-serif"),
+            textfont=dict(size=12, color="#e9edef", family="Inter, sans-serif"),
             hovertext=node_hovertext,
             hoverinfo='text',
             hoverlabel=dict(
@@ -753,12 +753,12 @@ class KnowledgeGraphIndexer:
             layout=go.Layout(
                 title=dict(
                     text=title,
-                    font=dict(size=12, color="#8696a0", family="Inter, sans-serif"),
-                    x=0.04,
+                    font=dict(size=14, color="#8696a0", family="Inter, sans-serif"),
+                    x=0,
                     xanchor="left",
-                    y=0.98,
+                    y=1,
                     yanchor="top",
-                    pad=dict(t=8, l=4),
+                    pad=dict(t=10, l=26),
                 ) if title else None,
                 showlegend=False,
                 hovermode='closest',
