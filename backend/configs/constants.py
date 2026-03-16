@@ -11,6 +11,7 @@ WORKFLOW_LOGGING = "Graph RAG workflow"
 DOCUMENT_PARSER_LOGGING = "Documents parsing"
 MAX_RETRIES = 3
 DEFAULT_EMBEDDING_DIM = 384
+LOGO_URL = "https://storage.googleapis.com/remnote-graph-rag-assets/book_2.png"
 
 # KNOWLEDGE BASE
 REMNOTE_IMAGE_HOST_MARKER = "remnote-user-data.s3.amazonaws.com"
@@ -45,7 +46,9 @@ TEST_SOURCES = [
     'Линейную алгебру ещё раз прогнать всю и законспектировать (обратные матрицы, svd etc  со сложностями)',
     'Backpropagation', 'Super study guide transformers and llm ADD NOTES', 'почитать про DPO, PPO, GRPO',
 ]
+MIN_RELEVANCE_SCORE = 0.1  # Retriever's threshold that is applied on the scores generated with Reranker
 
 # VISUALIZATION
 SPRING_LAYOUT_K = 0.5
 SPRING_LAYOUT_ITERATIONS = 50
+TITLE_MAX_LENGTH = 45

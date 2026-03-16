@@ -285,4 +285,24 @@ body {
 .js-plotly-plot .plotly .main-svg {
     width: 100% !important;
 }
+
+.mermaid-wrapper {
+    background: #0b141a;
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin: 0.5rem 0;
+    overflow-x: auto;
+}
+
+.mermaid-wrapper svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
+.mermaid-wrapper .label,
+.mermaid-wrapper text {
+    font-family: 'Inter', sans-serif !important;
+}
 """

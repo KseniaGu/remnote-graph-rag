@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pythonjsonlogger import jsonlogger
 
 
 def write_file(file: Any, path: Path):
@@ -61,13 +62,21 @@ def read_file(path: Path) -> Any:
 
 
 def get_logger(name: str = __name__) -> logging.Logger:
-    """Gets a configured logger instance with a memory handler.
+    """Gets a configured logger instance that emits structured JSON log lines.
 
     Args:
         name: The name of the logger. Defaults to the module name.
     """
     logger = logging.getLogger(name)
-    base_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    logging.basicConfig(level=logging.INFO, format=base_format, handlers=[logging.StreamHandler()])
+
+    if not logger.handlers and not logging.root.handlers:
+        handler = logging.StreamHandler()
+        formatter = jsonlogger.JsonFormatter(
+            fmt="%(asctime)s %(name)s %(levelname)s %(message)s",
+            rename_fields={"asctime": "timestamp", "levelname": "level", "name": "logger"},
+        )
+        handler.setFormatter(formatter)
+        logging.root.setLevel(logging.INFO)
+        logging.root.addHandler(handler)
 
     return logger

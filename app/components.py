@@ -1,18 +1,19 @@
 import reflex as rx
 
 from app.state import AppState, Message
-from app.styles import (
-    COLORS, MESSAGE_BUBBLE_USER, MESSAGE_BUBBLE_AGENT,
-    BUTTON_PRIMARY_STYLE, BUTTON_SECONDARY_STYLE, INPUT_STYLE,
-    BADGE_STYLE, STATUS_INDICATOR_STYLE, CARD_STYLE
-)
+from app.strings import APP_NAME, APP_TAGLINE, SIDEBAR_PIPELINE_HEADER, SIDEBAR_BTN_CLEAR_CHAT, \
+    SIDEBAR_BTN_TOGGLE_GRAPH, CHAT_EMPTY_HEADING, CHAT_EMPTY_SUBTEXT, CHAT_INPUT_PLACEHOLDER, CHAT_PROCESSING_LABEL, \
+    QUICK_ACTIONS, VIZ_PANEL_TITLE, CONTEXT_PANEL_TITLE
+from app.styles import COLORS, MESSAGE_BUBBLE_USER, MESSAGE_BUBBLE_AGENT, BUTTON_PRIMARY_STYLE, BUTTON_SECONDARY_STYLE, \
+    INPUT_STYLE, BADGE_STYLE, STATUS_INDICATOR_STYLE, CARD_STYLE
+from backend.configs.constants import LOGO_URL
 
 
 def logo() -> rx.Component:
     """Application logo."""
     return rx.hstack(
         rx.image(
-            src="/book_2.png",
+            src=LOGO_URL,
             width="28px",
             height="28px",
             style={
@@ -20,7 +21,7 @@ def logo() -> rx.Component:
             },
         ),
         rx.text(
-            "AI Practice",
+            APP_NAME,
             font_size="1.25rem",
             font_weight="700",
             background=f"linear-gradient(135deg, {COLORS['accent_green']}, {COLORS['accent_blue']})",
@@ -34,64 +35,69 @@ def logo() -> rx.Component:
 
 def agent_badge_item(status: dict) -> rx.Component:
     """Badge showing agent status - designed for use with rx.foreach."""
-    return rx.hstack(
-        rx.cond(
-            status["is_active"],
-            rx.box(
-                class_name="animate-pulse",
-                style={
-                    **STATUS_INDICATOR_STYLE,
-                    "background": COLORS["accent_blue"],
-                },
+    return rx.tooltip(
+        rx.hstack(
+            rx.cond(
+                status["is_active"],
+                rx.box(
+                    class_name="animate-pulse",
+                    style={
+                        **STATUS_INDICATOR_STYLE,
+                        "background": COLORS["accent_blue"],
+                    },
+                ),
+                rx.box(
+                    style={
+                        **STATUS_INDICATOR_STYLE,
+                        "background": rx.cond(
+                            status["was_used"],
+                            COLORS["accent_green"],
+                            COLORS["text_muted"],
+                        ),
+                    },
+                ),
             ),
-            rx.box(
-                style={
-                    **STATUS_INDICATOR_STYLE,
-                    "background": rx.cond(
+            rx.text(
+                status["name"],
+                font_size="0.75rem",
+                font_weight="500",
+                text_transform="capitalize",
+            ),
+            style={
+                **BADGE_STYLE,
+                "background": rx.cond(
+                    status["is_active"],
+                    f"{COLORS['accent_blue']}33",
+                    rx.cond(
+                        status["was_used"],
+                        f"{COLORS['accent_green']}15",
+                        "transparent",
+                    ),
+                ),
+                "border": rx.cond(
+                    status["is_active"],
+                    f"1px solid {COLORS['accent_blue']}",
+                    rx.cond(
+                        status["was_used"],
+                        f"1px solid {COLORS['accent_green']}50",
+                        f"1px solid {COLORS['border']}",
+                    ),
+                ),
+                "color": rx.cond(
+                    status["is_active"],
+                    COLORS["accent_blue"],
+                    rx.cond(
                         status["was_used"],
                         COLORS["accent_green"],
                         COLORS["text_muted"],
                     ),
-                },
-            ),
+                ),
+            },
+            spacing="1",
         ),
-        rx.text(
-            status["name"],
-            font_size="0.75rem",
-            font_weight="500",
-            text_transform="capitalize",
-        ),
-        style={
-            **BADGE_STYLE,
-            "background": rx.cond(
-                status["is_active"],
-                f"{COLORS['accent_blue']}33",
-                rx.cond(
-                    status["was_used"],
-                    f"{COLORS['accent_green']}15",
-                    "transparent",
-                ),
-            ),
-            "border": rx.cond(
-                status["is_active"],
-                f"1px solid {COLORS['accent_blue']}",
-                rx.cond(
-                    status["was_used"],
-                    f"1px solid {COLORS['accent_green']}50",
-                    f"1px solid {COLORS['border']}",
-                ),
-            ),
-            "color": rx.cond(
-                status["is_active"],
-                COLORS["accent_blue"],
-                rx.cond(
-                    status["was_used"],
-                    COLORS["accent_green"],
-                    COLORS["text_muted"],
-                ),
-            ),
-        },
-        spacing="1",
+        content=status["description"],
+        delay_duration=300,
+        side="right",
     )
 
 
@@ -99,7 +105,7 @@ def agent_status_panel() -> rx.Component:
     """Panel showing all agent statuses."""
     return rx.vstack(
         rx.text(
-            "Agent Pipeline",
+            SIDEBAR_PIPELINE_HEADER,
             font_size="0.75rem",
             font_weight="600",
             color=COLORS["text_secondary"],
@@ -220,12 +226,12 @@ def chat_messages() -> rx.Component:
             rx.vstack(
                 rx.icon("message-square-text", size=48, color=COLORS["text_muted"]),
                 rx.text(
-                    "Start your study session",
+                    CHAT_EMPTY_HEADING,
                     font_size="1rem",
                     color=COLORS["text_secondary"],
                 ),
                 rx.text(
-                    "Ask questions, practice concepts, or explore your knowledge graph",
+                    CHAT_EMPTY_SUBTEXT,
                     font_size="0.875rem",
                     color=COLORS["text_muted"],
                     text_align="center",
@@ -253,7 +259,7 @@ def processing_indicator() -> rx.Component:
                     rx.cond(
                         AppState.active_agent != "",
                         rx.text.span(AppState.active_agent, text_transform="capitalize"),
-                        "Processing",
+                        CHAT_PROCESSING_LABEL,
                     ),
                     font_size="0.875rem",
                     color=COLORS["text_secondary"],
@@ -275,16 +281,52 @@ def processing_indicator() -> rx.Component:
 def chat_input() -> rx.Component:
     """Chat input area."""
     return rx.vstack(
+        rx.script("""
+(function() {
+    function initChatInput() {
+        var ta = document.getElementById('chat-input');
+        var btn = document.getElementById('chat-send-btn');
+        if (!ta || ta._chatInited) return;
+        ta._chatInited = true;
+
+        ta.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        ta.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                    return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                if (btn && !btn.disabled) btn.click();
+            }
+        }, true);
+    }
+
+    // Run now and watch for DOM changes (Reflex hydration)
+    initChatInput();
+    new MutationObserver(function() { initChatInput(); })
+        .observe(document.body, { childList: true, subtree: true });
+})();
+"""),
         processing_indicator(),
         rx.hstack(
-            rx.input(
-                placeholder="Ask a question or request practice...",
+            rx.text_area(
+                id="chat-input",
+                placeholder=CHAT_INPUT_PLACEHOLDER,
                 value=AppState.current_input,
                 on_change=AppState.set_input,
                 disabled=AppState.is_processing,
+                rows="1",
                 style={
                     **INPUT_STYLE,
                     "flex": "1",
+                    "resize": "none",
+                    "max_height": "120px",
+                    "overflow_y": "auto",
                 },
             ),
             rx.button(
@@ -293,21 +335,19 @@ def chat_input() -> rx.Component:
                     rx.icon("loader-2", size=20, class_name="animate-spin"),
                     rx.icon("send", size=20),
                 ),
+                id="chat-send-btn",
                 on_click=AppState.send_message,
                 disabled=AppState.is_processing | (AppState.current_input == ""),
                 style=BUTTON_PRIMARY_STYLE,
             ),
             spacing="3",
             width="100%",
+            align="end",
         ),
         rx.cond(
             ~AppState.has_messages,
             rx.hstack(
-                quick_action_button("graduation-cap", "Quiz me on Transformers", "Quiz me on Transformer architecture"),
-                quick_action_button("search", "Search my notes",
-                                    "What information do I have about attention mechanisms?"),
-                quick_action_button("globe", "Research a topic", "Research the latest developments in LLM fine-tuning"),
-                quick_action_button("network", "Visualize concepts", "Visualize my knowledge about neural networks"),
+                *[quick_action_button(icon, label, action) for icon, label, action in QUICK_ACTIONS],
                 spacing="2",
                 wrap="wrap",
                 justify="center",
@@ -369,7 +409,7 @@ def visualization_panel() -> rx.Component:
                     rx.hstack(
                         rx.icon("network", size=18, color=COLORS["accent_blue"]),
                         rx.text(
-                            "Knowledge Graph",
+                            VIZ_PANEL_TITLE,
                             font_size="0.875rem",
                             font_weight="600",
                         ),
@@ -377,17 +417,32 @@ def visualization_panel() -> rx.Component:
                         align="center",
                     ),
                     rx.hstack(
-                        rx.icon_button(
-                            rx.icon("minus", size=14),
-                            size="1",
-                            variant="ghost",
-                            color_scheme="gray",
-                        ),
-                        rx.icon_button(
-                            rx.icon("plus", size=14),
-                            size="1",
-                            variant="ghost",
-                            color_scheme="gray",
+                        rx.cond(
+                            AppState.plot_count > 1,
+                            rx.hstack(
+                                rx.icon_button(
+                                    rx.icon("chevron-left", size=14),
+                                    on_click=AppState.prev_plot,
+                                    size="1",
+                                    variant="ghost",
+                                    color_scheme="gray",
+                                ),
+                                rx.text(
+                                    AppState.current_plot_label,
+                                    font_size="0.75rem",
+                                    color=COLORS["text_secondary"],
+                                ),
+                                rx.icon_button(
+                                    rx.icon("chevron-right", size=14),
+                                    on_click=AppState.next_plot,
+                                    size="1",
+                                    variant="ghost",
+                                    color_scheme="gray",
+                                ),
+                                spacing="1",
+                                align="center",
+                            ),
+                            rx.fragment(),
                         ),
                         rx.icon_button(
                             rx.icon("x", size=14),
@@ -397,6 +452,7 @@ def visualization_panel() -> rx.Component:
                             color_scheme="gray",
                         ),
                         spacing="1",
+                        align="center",
                     ),
                     justify="between",
                     width="100%",
@@ -404,8 +460,7 @@ def visualization_panel() -> rx.Component:
                 rx.box(
                     rx.plotly(
                         data=AppState.plotly_figure,
-                        use_resize_handler=True,
-                        config={"responsive": True},
+                        config={"displayModeBar": "hover", "scrollZoom": True},
                     ),
                     width="100%",
                     height="450px",
@@ -434,7 +489,7 @@ def context_panel() -> rx.Component:
             rx.vstack(
                 rx.hstack(
                     rx.text(
-                        "Context",
+                        CONTEXT_PANEL_TITLE,
                         font_size="0.75rem",
                         font_weight="600",
                         color=COLORS["text_secondary"],
@@ -483,7 +538,7 @@ def sidebar() -> rx.Component:
                 rx.button(
                     rx.hstack(
                         rx.icon("trash-2", size=16),
-                        rx.text("Clear Chat", font_size="0.875rem"),
+                        rx.text(SIDEBAR_BTN_CLEAR_CHAT, font_size="0.875rem"),
                         spacing="2",
                     ),
                     on_click=AppState.clear_chat,
@@ -495,11 +550,11 @@ def sidebar() -> rx.Component:
                 ),
                 rx.button(
                     rx.hstack(
-                        rx.icon("code", size=16),
-                        rx.text("Show Context", font_size="0.875rem"),
+                        rx.icon("network", size=16),
+                        rx.text(SIDEBAR_BTN_TOGGLE_GRAPH, font_size="0.875rem"),
                         spacing="2",
                     ),
-                    on_click=AppState.toggle_context_panel,
+                    on_click=AppState.toggle_visualization,
                     style={
                         **BUTTON_SECONDARY_STYLE,
                         "width": "100%",
@@ -534,25 +589,12 @@ def main_content() -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.text(
-                    "Study AI using your personal knowledge base",
+                    APP_TAGLINE,
                     font_size="1.125rem",
                     font_weight="600",
                     color=COLORS["text_primary"],
                 ),
                 rx.spacer(),
-                rx.cond(
-                    AppState.has_visualization,
-                    rx.button(
-                        rx.hstack(
-                            rx.icon("network", size=16),
-                            rx.text("Toggle Graph", font_size="0.875rem"),
-                            spacing="2",
-                        ),
-                        on_click=AppState.toggle_visualization,
-                        style=BUTTON_SECONDARY_STYLE,
-                    ),
-                    rx.fragment(),
-                ),
                 padding="1rem 1.5rem",
                 width="100%",
                 border_bottom=f"1px solid {COLORS['border']}",

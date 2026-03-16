@@ -1,10 +1,21 @@
+import re
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
+
+import plotly.graph_objects as go
 import reflex as rx
 from pydantic import BaseModel
-import plotly.graph_objects as go
 
+from app.strings import AGENT_DESCRIPTIONS
 from backend.configs.enums import WorkflowEventType
+
+
+def _normalize_math_delimiters(text: str) -> str:
+    """Converts LaTeX \\[...\\] and \\(...\\) delimiters to $$...$$ and $...$
+    so remark-math can render them."""
+    text = re.sub(r'\\\[(.+?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r'\\\((.+?)\\\)', r'$\1$', text, flags=re.DOTALL)
+    return text
 
 
 class Message(BaseModel):
@@ -35,7 +46,8 @@ class AppState(rx.State):
     agent_history: list[str] = []
 
     # Visualization state
-    visual_artifact: Optional[dict[str, Any]] = None
+    visual_artifacts: list[dict[str, Any]] = []
+    selected_plot_index: int = 0
     show_visualization: bool = False
 
     # Context state (for debugging/display)
@@ -48,24 +60,36 @@ class AppState(rx.State):
 
     @rx.var
     def has_messages(self) -> bool:
-        """Check if there are any messages."""
+        """Checks if there are any messages."""
         return len(self.messages) > 0
 
     @rx.var
     def has_visualization(self) -> bool:
-        """Check if there's a visualization to display."""
-        return self.visual_artifact is not None
+        """Checks if there are any visualizations to display."""
+        return len(self.visual_artifacts) > 0
 
     @rx.var
+    def plot_count(self) -> int:
+        """Total number of plots generated in this session."""
+        return len(self.visual_artifacts)
+
+    @rx.var
+    def current_plot_label(self) -> str:
+        """Human-readable label for the current plot position."""
+        if not self.visual_artifacts:
+            return ""
+        return f"{self.selected_plot_index + 1} / {len(self.visual_artifacts)}"
+
+    @rx.var(cache=True)
     def plotly_figure(self) -> go.Figure:
-        """Convert visual_artifact dict to a Plotly Figure for rendering."""
-        if self.visual_artifact is not None:
-            fig = go.Figure(self.visual_artifact)
-            fig.update_layout(
-                autosize=True,
-                width=None,
-                height=None,
-            )
+        """Convert the currently selected visual artifact to a Plotly Figure.
+
+        Cached so it only recalculates when visual_artifacts or selected_plot_index
+        changes, preventing Plotly re-renders on unrelated state updates.
+        """
+        if self.visual_artifacts and 0 <= self.selected_plot_index < len(self.visual_artifacts):
+            fig = go.Figure(self.visual_artifacts[self.selected_plot_index])
+            fig.update_layout(height=410)
             return fig
         return go.Figure()
 
@@ -78,38 +102,50 @@ class AppState(rx.State):
                 "name": agent,
                 "is_active": agent == self.active_agent,
                 "was_used": agent in self.agent_history,
+                "description": AGENT_DESCRIPTIONS.get(agent, ""),
             }
             for agent in agents
         ]
 
     def set_input(self, value: str):
-        """Update the current input value."""
+        """Updates the current input value."""
         self.current_input = value
 
     def toggle_context_panel(self):
-        """Toggle the context panel visibility."""
+        """Toggles the context panel visibility."""
         self.show_context_panel = not self.show_context_panel
 
     def toggle_visualization(self):
-        """Toggle visualization panel."""
+        """Toggles visualization panel."""
         self.show_visualization = not self.show_visualization
 
+    def next_plot(self):
+        """Navigates to the next plot in the history."""
+        if self.selected_plot_index < len(self.visual_artifacts) - 1:
+            self.selected_plot_index += 1
+
+    def prev_plot(self):
+        """Navigates to the previous plot in the history."""
+        if self.selected_plot_index > 0:
+            self.selected_plot_index -= 1
+
     def clear_chat(self):
-        """Clear the chat history."""
+        """Clears the chat history."""
         self.messages = []
         self.agent_history = []
         self.current_context = ""
-        self.visual_artifact = None
+        self.visual_artifacts = []
+        self.selected_plot_index = 0
         self.show_visualization = False
         self.error_message = ""
 
     def clear_error(self):
-        """Clear the error message."""
+        """Clears the error message."""
         self.error_message = ""
 
     @rx.event(background=True)
     async def send_message(self):
-        """Send a message and process the response."""
+        """Sends a message and process the response."""
         if not self.current_input.strip() or self.is_processing:
             return
 
@@ -158,17 +194,28 @@ class AppState(rx.State):
                         self.active_agent = ""
 
                     elif event.type == WorkflowEventType.CONTEXT_UPDATE:
-                        self.current_context = event.data["context"]
+                        raw = (event.data["context"]
+                               .replace("[RESEARCH_COMPLETE]", "")
+                               .replace("Visual artifact generated", "")
+                               .replace("Visualization failed", "")
+                               .strip())
+                        try:
+                            import json as _json
+                            parsed = _json.loads(raw)
+                            self.current_context = _json.dumps(parsed, ensure_ascii=False, indent=2)
+                        except Exception:
+                            self.current_context = raw
 
                     elif event.type == WorkflowEventType.VISUALIZATION:
-                        self.visual_artifact = event.data["artifact"]
+                        self.visual_artifacts = self.visual_artifacts + event.data["artifacts"]
+                        self.selected_plot_index = len(self.visual_artifacts) - 1
                         self.show_visualization = True
 
                     elif event.type == WorkflowEventType.RESPONSE:
                         agent_name = event.data.get("agent", "")
                         self.messages = self.messages + [
                             Message(
-                                content=event.data["content"],
+                                content=_normalize_math_delimiters(event.data["content"]),
                                 role="assistant",
                                 agent=agent_name,
                                 timestamp=datetime.now().strftime("%H:%M")

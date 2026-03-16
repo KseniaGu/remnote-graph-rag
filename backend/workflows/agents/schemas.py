@@ -41,9 +41,9 @@ class State(BaseModel):
         default_factory=list, description="The full history of the conversation between user and agents."
     )
     context: str = Field(default="", description="The grounding context retrieved from the knowledge base.")
-    visual_artifact: Optional[dict[str, Any]] = Field(
-        default=None,
-        description="The Plotly figure serialized as a dictionary"
+    visual_artifacts: Annotated[list[dict[str, Any]], lambda _old, new: new] = Field(
+        default_factory=list,
+        description="List of Plotly figures serialized as dictionaries, one per visualization request"
     )
     next_step: Literal["retriever", "researcher", "analyst", "mentor", "visualizer", "__end__"] = Field(
         default="retriever", description="The next node the Orchestrator has decided to activate"

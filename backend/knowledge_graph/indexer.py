@@ -1,5 +1,6 @@
-import asyncio
 import json
+import math
+import re
 from itertools import chain
 from typing import Any, Optional
 
@@ -526,15 +527,38 @@ class KnowledgeGraphIndexer:
         all_unique_node_ids = set((nodes + list(chain(*[(node_1, node_2) for node_1, _, node_2 in relation_triplets]))))
         all_unique_nodes = self.index.property_graph_store.get(ids=list(all_unique_node_ids))
 
+        def _chunk_label(text: str) -> str:
+            """Extracts a readable label from a ChunkNode's raw text."""
+            for line in text.splitlines():
+                clean = line.lstrip("#").strip()
+                if clean:
+                    return clean
+            return text.strip()
+
         node_id_to_text = {}
+        node_id_to_hover = {}  # full hover text (name + [TYPE] if available)
+
         for node in all_unique_nodes:
             if isinstance(node, EntityNode):
-                node_id_to_text[node.id] = f"{node.properties.get('entity_name', node.name)} (Label: {node.label})"
+                name = node.properties.get('entity_name', node.name)
+                label = node.label
+                node_id_to_text[node.id] = name
+                node_id_to_hover[node.id] = f"{name} [{label}]" if label and label.lower() != "entity" else name
             elif isinstance(node, ChunkNode):
-                node_id_to_text[node.id] = node.text
+                text = _chunk_label(node.text)
+                node_id_to_text[node.id] = text
+                node_id_to_hover[node.id] = text
+
+        _label_suffix_re = re.compile(r'\s*\(Label:[^)]*\)\s*$')
 
         for node_id in all_unique_node_ids:
-            nodes_to_add.append((node_id, dict(text=node_id_to_text[node_id])))
+            if node_id in node_id_to_text:
+                text = node_id_to_text[node_id]
+                hover = node_id_to_hover[node_id]
+            else:
+                text = _label_suffix_re.sub('', str(node_id)).strip()
+                hover = text
+            nodes_to_add.append((node_id, dict(text=text, hover=hover)))
 
         for relation in relation_triplets:
             edges_to_add.append((relation[0], relation[2], dict(relation=relation[1])))
@@ -550,7 +574,7 @@ class KnowledgeGraphIndexer:
             return text
         return text[: max_len - 1] + "…"
 
-    def get_graph_visualization(self, nodes: list[str], relation_triplets: list[tuple[str, str, str]]) -> go.Figure:
+    def get_graph_visualization(self, nodes: list[str], relation_triplets: list[tuple[str, str, str]], title: str | None = None) -> go.Figure:
         """Generates interactive Plotly visualization of the knowledge graph.
         
         Args:
@@ -561,93 +585,197 @@ class KnowledgeGraphIndexer:
             Plotly Figure object for visualization.
         """
         graph = self.generate_nx_graph_from(nodes, relation_triplets)
-        pos = nx.spring_layout(graph, k=SPRING_LAYOUT_K, iterations=SPRING_LAYOUT_ITERATIONS)
+
+        # kamada_kawai produces a much more evenly-spaced layout than spring for dense graphs;
+        # fall back to spring if the graph is disconnected (kamada_kawai requires connectivity)
+        try:
+            pos = nx.kamada_kawai_layout(graph)
+        except Exception:
+            pos = nx.spring_layout(graph, k=SPRING_LAYOUT_K, seed=42, iterations=SPRING_LAYOUT_ITERATIONS)
+
+        # Convert numpy.float64 -> plain float so msgpack (used by Reflex) can serialize the figure
+        pos = {n: (float(x), float(y)) for n, (x, y) in pos.items()}
+
+        # Scale positions outward to reduce label crowding in dense graphs
+        n_nodes = len(pos)
+        if n_nodes > 8:
+            scale = max(1.0, (n_nodes / 8) ** 0.55)
+            pos = {n: (x * scale, y * scale) for n, (x, y) in pos.items()}
+
+        # Truncate labels more aggressively for large graphs
+        label_max_len = max(12, 30 - max(0, n_nodes - 10) // 3)
 
         node_id_to_full_text = {node_id: text for node_id, text in graph.nodes(data="text")}
+        node_id_to_hover_text = {node_id: hover for node_id, hover in graph.nodes(data="hover")}
         node_id_to_short_text = {
-            node_id: self._truncate_graph_label(text) for node_id, text in node_id_to_full_text.items()
+            node_id: self._truncate_graph_label(text, max_len=label_max_len)
+            for node_id, text in node_id_to_full_text.items()
         }
+
+        # Degree-based node sizing and coloring
+        degrees = dict(graph.degree())
+        node_list = list(graph.nodes())
+        node_degrees = [degrees.get(n, 1) for n in node_list]
+        node_sizes = [max(12, min(30, 10 + d * 3)) for d in node_degrees]
 
         edge_x, edge_y = [], []
         edge_label_x, edge_label_y, edge_label_text = [], [], []
-        for edge in graph.edges(data=True):
-            u, v, data = edge
+        annotations = []
+
+        for u, v, data in graph.edges(data=True):
             x0, y0 = pos[u]
             x1, y1 = pos[v]
             edge_x.extend([x0, x1, None])
             edge_y.extend([y0, y1, None])
 
-            edge_label_x.append((x0 + x1) / 2)
-            edge_label_y.append((y0 + y1) / 2)
+            mid_x = (x0 + x1) / 2
+            mid_y = (y0 + y1) / 2
+            edge_label_x.append(mid_x)
+            edge_label_y.append(mid_y)
 
             relation = data.get("relation", "RELATES_TO")
-            # Hover text for edges
-            if relation == "CHILD":
-                edge_label_text.append(
-                    node_id_to_short_text.get(u, u) + " → " + "HAS CHILD" + " → " + node_id_to_short_text.get(v, v)
-                )
-            elif relation == "PARENT":
-                edge_label_text.append(
-                    node_id_to_short_text.get(u, u) + " → " + "HAS PARENT" + " → " + node_id_to_short_text.get(v, v)
-                )
-            else:
-                edge_label_text.append(
-                    node_id_to_short_text.get(u, u)
-                    + " → "
-                    + data.get("relation", "RELATES_TO")
-                    + " → "
-                    + node_id_to_short_text.get(v, v)
-                )
+            rel_display = {"CHILD": "HAS CHILD", "PARENT": "HAS PARENT"}.get(relation, relation)
+            edge_label_text.append(
+                f"{node_id_to_short_text.get(u, u)} → {rel_display} → {node_id_to_short_text.get(v, v)}"
+            )
+
+            # Arrow annotation pointing toward target node
+            annotations.append(dict(
+                x=x1, y=y1,
+                ax=x0, ay=y0,
+                xref="x", yref="y",
+                axref="x", ayref="y",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1.2,
+                arrowwidth=1,
+                arrowcolor="#555",
+                opacity=0.6,
+            ))
+
+            # Relation label at midpoint
+            annotations.append(dict(
+                x=mid_x, y=mid_y,
+                xref="x", yref="y",
+                text=f"<i>{rel_display}</i>",
+                showarrow=False,
+                font=dict(size=9, color="#aaa"),
+                bgcolor="rgba(20,30,40,0.7)",
+                borderpad=2,
+            ))
 
         edge_trace = go.Scatter(
-            x=edge_x,
-            y=edge_y,
-            line=dict(width=0.5, color='#888'),
+            x=edge_x, y=edge_y,
+            line=dict(width=0.8, color='#444'),
             hoverinfo='none',
             mode='lines',
         )
-        edge_text_trace = go.Scatter(
-            x=edge_label_x,
-            y=edge_label_y,
+        edge_hover_trace = go.Scatter(
+            x=edge_label_x, y=edge_label_y,
             mode="markers",
-            marker=dict(size=5, opacity=0),
+            marker=dict(size=8, opacity=0),
             hoverinfo='text',
             hovertext=edge_label_text,
         )
 
-        node_x, node_y, node_text = [], [], []
-        for node, data in graph.nodes(data="text"):
-            x, y = pos[node]
-            node_x.append(x)
-            node_y.append(y)
-            # Hover text for nodes
-            node_text.append(data)
+        node_x = [pos[n][0] for n in node_list]
+        node_y = [pos[n][1] for n in node_list]
+        node_labels = [node_id_to_short_text.get(n, str(n)) for n in node_list]
+        node_hovertext = [node_id_to_hover_text.get(n, node_labels[i]) for i, n in enumerate(node_list)]
+
+        # Neighbor-repulsion textposition: push each label away from nearby nodes
+        # to minimize overlap in clusters
+        textpositions = []
+        for i in range(len(node_x)):
+            dx, dy = 0.0, 0.0
+            for j in range(len(node_x)):
+                if i == j:
+                    continue
+                rx_ = node_x[i] - node_x[j]
+                ry_ = node_y[i] - node_y[j]
+                dist = math.hypot(rx_, ry_)
+                if dist < 0.6:
+                    w = 1.0 / max(dist, 0.01)
+                    dx += rx_ * w
+                    dy += ry_ * w
+
+            if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+                textpositions.append("top center")
+            else:
+                angle = math.degrees(math.atan2(dy, dx))
+                if -22.5 < angle <= 22.5:
+                    textpositions.append("middle right")
+                elif 22.5 < angle <= 67.5:
+                    textpositions.append("top right")
+                elif 67.5 < angle <= 112.5:
+                    textpositions.append("top center")
+                elif 112.5 < angle <= 157.5:
+                    textpositions.append("top left")
+                elif angle > 157.5 or angle <= -157.5:
+                    textpositions.append("middle left")
+                elif -157.5 < angle <= -112.5:
+                    textpositions.append("bottom left")
+                elif -112.5 < angle <= -67.5:
+                    textpositions.append("bottom center")
+                else:
+                    textpositions.append("bottom right")
 
         node_trace = go.Scatter(
             x=node_x, y=node_y,
             mode='markers+text',
-            textposition="top center",
-            text=[node_id_to_short_text.get(n, str(n)) for n in graph.nodes()],
-            hovertext=node_text,
+            text=node_labels,
+            textposition=textpositions,
+            textfont=dict(size=10, color="#e9edef", family="Inter, sans-serif"),
+            hovertext=node_hovertext,
+            hoverinfo='text',
+            hoverlabel=dict(
+                bgcolor="#1f2c34",
+                bordercolor="#00a884",
+                font=dict(size=12, color="#e9edef"),
+            ),
             marker=dict(
                 showscale=True,
-                colorscale='YlGnBu',
-                size=15,
-                colorbar=dict(thickness=15, title='Degree', xanchor='left'),
-                color=[10] * len(graph.nodes()),
-            )
+                colorscale=[[0, "#1f2c34"], [0.25, "#0ea5e9"], [0.6, "#00a884"], [1.0, "#a855f7"]],
+                size=node_sizes,
+                color=node_degrees,
+                colorbar=dict(
+                    thickness=12,
+                    title=dict(text='Degree', side='right', font=dict(color='#8696a0')),
+                    tickfont=dict(color='#8696a0'),
+                    xanchor='left',
+                ),
+                line=dict(width=1.5, color='#0b141a'),
+            ),
         )
 
         fig = go.Figure(
-            data=[edge_trace, edge_text_trace, node_trace],
+            data=[edge_trace, edge_hover_trace, node_trace],
             layout=go.Layout(
-                title="Knowledge subgraph visualization",
+                title=dict(
+                    text=title,
+                    font=dict(size=12, color="#8696a0", family="Inter, sans-serif"),
+                    x=0.04,
+                    xanchor="left",
+                    y=0.98,
+                    yanchor="top",
+                    pad=dict(t=8, l=4),
+                ) if title else None,
                 showlegend=False,
                 hovermode='closest',
-                margin=dict(b=20, l=5, r=5, t=40),
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                margin=dict(b=20, l=60, r=60, t=52 if title else 40),
+                paper_bgcolor="#0b141a",
+                plot_bgcolor="#0b141a",
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                           range=[min(node_x) - 0.35, max(node_x) + 0.35]),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                           range=[min(node_y) - 0.25, max(node_y) + 0.25]),
+                annotations=annotations,
                 autosize=True,
+                hoverlabel=dict(
+                    bgcolor="#1f2c34",
+                    bordercolor="#2a3942",
+                    font=dict(size=12, color="#e9edef"),
+                ),
             )
         )
 
@@ -711,23 +839,14 @@ class KnowledgeGraphIndexer:
             if self.index.vector_store.data.embedding_dict:
                 return
         elif isinstance(self.index.vector_store, RedisVectorStore):
-            # Handle both sync and async contexts (e.g., when running inside Reflex)
-            async def _check_redis_docs():
-                return await self.index.vector_store.client.ft("llama_index").info()
-
+            # Use the sync Redis client directly to avoid asyncio.run() / ThreadPoolExecutor hacks
             try:
-                loop = asyncio.get_running_loop()
-                # Already in an async context - create a task
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, _check_redis_docs())
-                    info = future.result()
-            except RuntimeError:
-                # No running loop - safe to use asyncio.run()
-                info = asyncio.run(_check_redis_docs())
-
-            if info.get("num_docs", 0) > 0:
-                return
+                sync_client = self.index.vector_store._redis_client
+                info = sync_client.ft("llama_index").info()
+                if info.get("num_docs", 0) > 0:
+                    return
+            except Exception:
+                pass
         elif isinstance(self.index.vector_store, PineconeVectorStore):
             # Check Pinecone index stats
             stats = self.index.vector_store.client.describe_index_stats()
@@ -888,7 +1007,6 @@ if __name__ == '__main__':
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from backend.configs.enums import ModelRoleType, PromptType
     from backend.knowledge_graph.storage import KnowledgeGraphStorage
-    from backend.configs.storage import LocalStorageSettings
 
     storage_settings = StorageSettings()
     models_settings = ModelSettings()
@@ -926,13 +1044,14 @@ if __name__ == '__main__':
 
     retriever_params = {
         "VectorContextRetriever": {
-            "include_text": False, "similarity_top_k": 5, "similarity_score": None, "depth": 4,
-            "include_properties": False
+            "include_text": True, "similarity_top_k": 5, "similarity_score": None, "depth": 2,
+            "include_properties": True
         },
         # "VectorIndexRetriever": {"similarity_top_k": 3, }
     }
     retriever = knowledge_graph_indexer.get_retriever(retriever_params)
-    results = retriever.retrieve("AI Agent Frameworks")
+    # results = retriever.retrieve("Attention Mechanism")
+    results = retriever.retrieve("EAGLE")
     # results = retriever.retrieve('GAN discriminator real fake images')
     print(results)
     """
