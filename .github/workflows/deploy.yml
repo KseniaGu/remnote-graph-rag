@@ -86,6 +86,7 @@ jobs:
             --min-instances 1 \
             --max-instances 10 \
             --cpu-boost \
+            --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
             --command reflex \
             --args run,--env,prod,--backend-only,--backend-host,0.0.0.0 \
             --set-secrets "REDIS_HOST=redis-host:latest" \
