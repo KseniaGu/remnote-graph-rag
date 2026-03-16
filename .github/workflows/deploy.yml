@@ -83,26 +83,30 @@ jobs:
             --memory 2Gi \
             --cpu 2 \
             --timeout 300 \
-            --min-instances 0 \
+            --min-instances 1 \
             --max-instances 10 \
+            --startup-cpu-boost \
             --command reflex \
             --args run,--env,prod,--backend-only,--backend-host,0.0.0.0 \
-            --set-env-vars "REDIS_HOST=${{ secrets.REDIS_HOST }}" \
-            --set-env-vars "REDIS_PORT=${{ secrets.REDIS_PORT }}" \
-            --set-env-vars "REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}" \
+            --set-secrets "REDIS_HOST=redis-host:latest" \
+            --set-secrets "REDIS_PORT=redis-port:latest" \
+            --set-secrets "REDIS_PASSWORD=redis-password:latest" \
             --set-env-vars "REDIS_INIT_FROM_LOCAL=false" \
-            --set-env-vars "PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}" \
-            --set-env-vars "PINECONE_ENVIRONMENT=${{ secrets.PINECONE_ENVIRONMENT }}" \
-            --set-env-vars "PINECONE_INDEX_NAME=${{ secrets.PINECONE_INDEX_NAME }}" \
+            --set-secrets "PINECONE_API_KEY=pinecone-api-key:latest" \
+            --set-secrets "PINECONE_ENVIRONMENT=pinecone-environment:latest" \
+            --set-secrets "PINECONE_INDEX_NAME=pinecone-index-name:latest" \
             --set-env-vars "PINECONE_INIT_FROM_LOCAL=false" \
-            --set-env-vars "NEO4J_URI=${{ secrets.NEO4J_URI }}" \
-            --set-env-vars "NEO4J_USERNAME=${{ secrets.NEO4J_USERNAME }}" \
-            --set-env-vars "NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}" \
-            --set-env-vars "NEO4J_DATABASE=${{ secrets.NEO4J_DATABASE }}" \
+            --set-secrets "NEO4J_URI=neo4j-uri:latest" \
+            --set-secrets "NEO4J_USERNAME=neo4j-username:latest" \
+            --set-secrets "NEO4J_PASSWORD=neo4j-password:latest" \
+            --set-secrets "NEO4J_DATABASE=neo4j-database:latest" \
             --set-env-vars "NEO4J_INIT_FROM_LOCAL=false" \
-            --set-env-vars "OLLAMA_API_KEY=${{ secrets.OLLAMA_API_KEY }}" \
-            --set-env-vars "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" \
-            --set-env-vars "COHERE_API_KEY=${{ secrets.COHERE_API_KEY }}"
+            --set-secrets "OLLAMA_API_KEY=ollama-api-key:latest" \
+            --set-secrets "TAVILY_API_KEY=tavily-api-key:latest" \
+            --set-secrets "COHERE_API_KEY=cohere-api-key:latest" \
+            --set-secrets "LANGCHAIN_API_KEY=langchain-api-key:latest" \
+            --set-env-vars "LANGCHAIN_TRACING_V2=true" \
+            --set-env-vars "LANGCHAIN_PROJECT=remnote-graph-rag"
 
       - name: Get backend URL
         run: |

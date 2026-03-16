@@ -16,6 +16,7 @@ from backend.configs.enums import WorkflowEventType
 from backend.configs.messages import FALLBACK_ALL_SOURCES_EXHAUSTED, FALLBACK_VISUALIZATION_FAILED, \
     FALLBACK_NO_RESULTS, FALLBACK_DEFAULT, ERROR_RECURSION_LIMIT
 from backend.configs.models import ModelSettings
+from backend.configs.observability import LangSmithSettings
 from backend.configs.paths import PathSettings
 from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
 from backend.configs.storage import StorageSettings, RedisSettings
@@ -61,6 +62,7 @@ class ReflexLearnerWorkflow:
             if self._graph is not None:
                 return
             try:
+                LangSmithSettings().configure()
                 tavily_settings = TavilySettings()
                 models_settings = ModelSettings()
                 path_settings = PathSettings()

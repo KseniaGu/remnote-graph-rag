@@ -18,15 +18,26 @@ COPY . .
 
 RUN reflex init
 
+RUN python -c "\
+from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+
 FROM python:3.11-slim
+
+RUN adduser --disabled-password --no-create-home appuser
 
 WORKDIR /app
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-COPY --from=builder /root/.local/share/reflex /root/.local/share/reflex
+COPY --from=builder /root/.local/share/reflex /home/appuser/.local/share/reflex
+COPY --from=builder /root/.cache/huggingface /home/appuser/.cache/huggingface
 
 COPY --from=builder /app /app
+
+RUN chown -R appuser:appuser /app /home/appuser
+
+USER appuser
 
 EXPOSE 8000
 

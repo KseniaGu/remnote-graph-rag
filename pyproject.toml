@@ -21,17 +21,25 @@ llama-index-postprocessor-cohere-rerank = "^0.5.1"
 llama-index-vector-stores-pinecone = "^0.7.1"
 langchain = "^1.2.0"
 langchain-ollama = "^1.0.1"
+langchain-openai = "^1.1.0"
+langchain-google-genai = "^4.2.0"
+langsmith = "^0.7.0"
+tenacity = "^9.1.0"
+python-json-logger = "^4.0.0"
 tavily-python = "^0.7.17"
 reflex = "^0.8.26"
 plotly = "^6.5.2"
 pymupdf = "^1.26.7"
-paddleocr = { extras = ["all"], version = "^3.3.2" }
-paddlepaddle = "^3.2.2" # To use GPU paddlepaddle-gpu need to be installed
 neo4j = "5.28.2"
 
 
 [tool.poetry.group.test.dependencies]
 pyvis = "^0.3.2"
+
+
+[tool.poetry.group.scripts.dependencies]
+paddleocr = { extras = ["all"], version = "^3.3.2" }
+paddlepaddle = "^3.2.2" # To use GPU: install paddlepaddle-gpu instead
 
 [build-system]
 requires = ["poetry-core"]

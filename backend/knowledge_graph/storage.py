@@ -3,6 +3,7 @@ from typing import Any
 
 import redis
 from llama_index.core import StorageContext
+from tenacity import retry, stop_after_attempt, wait_exponential
 from llama_index.core.graph_stores.simple_labelled import SimplePropertyGraphStore
 from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.core.storage.docstore.keyval_docstore import KVDocumentStore
@@ -56,6 +57,7 @@ class KnowledgeGraphStorage:
         """
         return any(storage_path.iterdir())
 
+    @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3), reraise=True)
     def get_document_storage(self, **kwargs) -> Any:
         """Gets document storage backend.
         
@@ -100,6 +102,7 @@ class KnowledgeGraphStorage:
 
         return document_storage
 
+    @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3), reraise=True)
     def get_index_storage(self, **kwargs) -> Any:
         """Gets index storage backend.
         
@@ -144,6 +147,7 @@ class KnowledgeGraphStorage:
 
         return index_storage
 
+    @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3), reraise=True)
     def get_vector_storage(self, **kwargs) -> Any:
         """Gets vector storage backend.
         
@@ -182,6 +186,7 @@ class KnowledgeGraphStorage:
 
         return vector_storage
 
+    @retry(wait=wait_exponential(min=1, max=10), stop=stop_after_attempt(3), reraise=True)
     def get_property_graph_storage(self, **kwargs) -> Any:
         """Gets property graph storage backend.
         

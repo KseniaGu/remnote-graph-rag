@@ -1,12 +1,15 @@
+import asyncio
 import json
 from io import BytesIO
 
 from langgraph.graph import StateGraph, START, END
+from langsmith import traceable
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.postprocessor.cohere_rerank import CohereRerank
 from ollama._types import ResponseError
 from tavily import TavilyClient
 
+from backend.configs.constants import TITLE_MAX_LENGTH
 from backend.configs.enums import ModelRoleType, PromptType
 from backend.configs.models import ModelSettings
 from backend.configs.paths import PathSettings
@@ -148,11 +151,7 @@ class LearnerWorkflow:
             role_type = getattr(ModelRoleType, next_step_type)
             model_settings = getattr(self.models_settings, role_type.name)
 
-            # Handle different prompt version formats
-            if role_type == ModelRoleType.researcher:
-                prompt_version = model_settings["prompt_version"]
-            else:
-                prompt_version = model_settings.prompt_version
+            prompt_version = model_settings.prompt_version
             model_function = ""
             if role_type == ModelRoleType.orchestrator:
                 prompt_version, model_function = prompt_version["routing"], "routing"
@@ -165,13 +164,15 @@ class LearnerWorkflow:
 
             # Initialize model agents with role-specific configurations
             if role_type == ModelRoleType.researcher:
-                self.researcher_with_tools = AgentsFactory.get_llm_by_role(model_settings["_with_tools"])
-                self.researcher_structured = AgentsFactory.get_llm_by_role(model_settings["_structured"])
+                self.researcher_with_tools = AgentsFactory.get_llm_by_role(model_settings.with_tools)
+                self.researcher_structured = AgentsFactory.get_llm_by_role(model_settings.structured)
                 self.researcher_with_tools = AgentsFactory.add_retry(
-                    self.researcher_with_tools.bind_tools([web_search_tool])
+                    self.researcher_with_tools.bind_tools([web_search_tool]),
+                    provider=model_settings.with_tools.provider,
                 )
                 self.researcher_structured = AgentsFactory.add_retry(
-                    self.researcher_structured.with_structured_output(ResearchResult)
+                    self.researcher_structured.with_structured_output(ResearchResult),
+                    provider=model_settings.structured.provider,
                 )
             else:
                 model = AgentsFactory.get_llm_by_role(model_settings)
@@ -182,7 +183,7 @@ class LearnerWorkflow:
                 elif role_type == ModelRoleType.retriever:
                     model = model.bind_tools([base_kb_search_tool, visualizer_kb_search_tool])
 
-                setattr(self, role_type.name, AgentsFactory.add_retry(model))
+                setattr(self, role_type.name, AgentsFactory.add_retry(model, provider=model_settings.provider))
 
     def _init_nodes(self):
         """Initializes workflow graph nodes and edges.
@@ -234,6 +235,7 @@ class LearnerWorkflow:
         return state.next_step
 
     @staticmethod
+    @traceable(run_type="chain", name="format_conversation_history")
     def format_conversation_history(messages: list) -> str:
         """Formats conversation messages into a readable history string.
         
@@ -243,14 +245,23 @@ class LearnerWorkflow:
         Returns:
             Formatted conversation history with agent labels and content.
         """
-        return "\n".join(f"{message.additional_kwargs.get('agent', message.type)}: "
-                         f"{message.content}" for message in messages)
+        text = ""
+        for message in messages:
+            text += f"<message role={message.additional_kwargs.get('agent', message.type)}>\n"
+            text += "<content>\n"
+            text += f"{message.content}\n"
+            text += "</content>\n"
+            text += "</message>"
 
+        return text
+
+    @traceable(run_type="chain", name="create_messages_to_pass")
     def create_messages_to_pass(
             self,
             role_type: ModelRoleType,
             state: State,
-            prompt_template_arguments: tuple
+            prompt_template_arguments: tuple,
+            conversation_history_limit: int = 4
     ) -> list[tuple[str, str]]:
         """Creates formatted message list for agent invocation.
         
@@ -263,6 +274,7 @@ class LearnerWorkflow:
             role_type: Type of agent receiving the messages.
             state: Current workflow state.
             prompt_template_arguments: Tuple of required template argument names.
+            conversation_history_limit: The maximum number of last messages passed to the agent.
             
         Returns:
             List of (role, content) tuples for model invocation.
@@ -278,18 +290,20 @@ class LearnerWorkflow:
         if "context" in prompt_template_arguments:
             prompt_kwargs["context"] = state.context
             # Notify if visualization was generated
-            if "visual_artifact" in prompt_template_arguments and state.visual_artifact:
+            if "visual_artifact" in prompt_template_arguments and state.visual_artifacts:
                 prompt_kwargs["context"] += "\nVisual artifact generated"
 
         if "conversation_history" in prompt_template_arguments:
-            prompt_kwargs["conversation_history"] = self.format_conversation_history(state.messages)
+            prompt_kwargs["conversation_history"] = self.format_conversation_history(
+                state.messages[-conversation_history_limit:]
+            )
 
         prompt, system_prompt = self.prompts[role_type]
         prompt = prompt.format(**prompt_kwargs)
 
         return [("system", system_prompt["system_instruction"]), ("human", prompt)]
 
-    def call_model(self, messages_to_pass: list, role_type: ModelRoleType, **kwargs) -> Optional[Any]:
+    async def call_model(self, messages_to_pass: list, role_type: ModelRoleType, **kwargs) -> Optional[Any]:
         """Invokes an agent model with error handling.
         
         Args:
@@ -303,18 +317,21 @@ class LearnerWorkflow:
         if role_type == ModelRoleType.researcher:
             model_type = kwargs.get("model_type")
             model = getattr(self, role_type.name + model_type)
+            run_name = f"{role_type.name}{model_type}"
         else:
             model = getattr(self, role_type.name)
+            run_name = role_type.name
         try:
-            return model.invoke(messages_to_pass)
+            return await model.ainvoke(messages_to_pass, config={"run_name": run_name})
         except ResponseError as e:
             logger.error(f"[{role_type.name.upper()}] Service error after retries exhausted: {e.status_code}")
         except Exception as e:
             logger.error(f"[{role_type.name.upper()}] Unexpected error: {str(e)}")
         return None
 
-    def call_tools(self, response: Any) -> dict[str, Any]:
-        """Executes tool calls from agent response.
+    @traceable(run_type="chain", name="call_tools")
+    async def call_tools(self, response: Any) -> dict[str, Any]:
+        """Executes tool calls from agent response in parallel.
         
         Args:
             response: Agent response containing tool_calls.
@@ -322,29 +339,24 @@ class LearnerWorkflow:
         Returns:
             Dictionary mapping tool names to their results.
         """
-        tool_results = {}
-        for tool_call in response.tool_calls:
+
+        async def _invoke_one(tool_call: dict) -> tuple[str, Any]:
             tool_name = tool_call["name"]
             try:
                 logger.info(f"Executing tool: {tool_name}")
-                result = self.tools[tool_name].invoke(tool_call["args"])
-                tool_results[tool_name] = result
+                result = await self.tools[tool_name].ainvoke(tool_call["args"])
+                return tool_name, result
             except Exception as e:
                 logger.error(f"{tool_name} failed. Error: {str(e)}")
+                return tool_name, None
 
-        return tool_results
+        results = await asyncio.gather(*[_invoke_one(tc) for tc in response.tool_calls])
+        return {name: result for name, result in results if result is not None}
 
-    def orchestrator_node(self, state: State) -> dict[str, str]:
+    async def orchestrator_node(self, state: State) -> dict[str, str]:
         """Orchestrator agent: central router that decides next workflow step.
         
         Analyzes conversation history and current context to determine which specialized agent should handle the request
-        next. Routes to:
-            - retriever: for KB searches or visualization data gathering
-            - researcher: for web research on topics not in KB
-            - analyst: to synthesize retrieved data into professional responses
-            - mentor: for interactive interview practice and Socratic questioning
-            - visualizer: to create graph visualizations from retrieved data
-            - __end__: when agent has responded and awaiting user input
         
         Args:
             state: Current workflow state.
@@ -352,26 +364,39 @@ class LearnerWorkflow:
         Returns:
             Dictionary with next_step routing decision.
         """
+        ctx = state.context or ""
+
+        # All sources exhausted (both retriever and researcher failed) → end
+        if '"all_sources_exhausted": true' in ctx:
+            logger.info("[ORCHESTRATOR] Routing to: __end__")
+            logger.info("[ORCHESTRATOR] Reasoning: Both retriever and researcher found nothing (deterministic).")
+            return {"next_step": "__end__"}
+
         messages_to_pass = self.create_messages_to_pass(
             ModelRoleType.orchestrator, state, ("conversation_history", "context", "visual_artifact")
         )
-        response = self.call_model(messages_to_pass, ModelRoleType.orchestrator)
+        response = await self.call_model(messages_to_pass, ModelRoleType.orchestrator)
+
         if response:
             next_step = response.next_step
-            if next_step == "visualizer":
-                if not state.context or "get_subgraphs_to_visualize" not in state.context:
-                    logger.warning(
-                        "[ORCHESTRATOR] Cannot route to visualizer without graph data. "
-                        "Routing to retriever first."
-                    )
-                    next_step = "retriever"
+
+            # Hard loop-breaking: if retriever already failed, never send back
+            if '"no_results": true' in ctx and next_step in ("retriever", "visualizer"):
+                logger.warning("[ORCHESTRATOR] Retriever returned no results. Routing to researcher as fallback.")
+                next_step = "researcher"
+
+            # Safety: don't route to visualizer without graph data (first attempt only)
+            elif next_step == "visualizer" and "get_subgraphs_to_visualize" not in ctx:
+                logger.warning("[ORCHESTRATOR] No graph data for visualizer. Routing to retriever.")
+                next_step = "retriever"
 
             logger.info(f"[ORCHESTRATOR] Routing to: {next_step}")
             logger.info(f"[ORCHESTRATOR] Reasoning: {response.reasoning}")
             return {"next_step": next_step}
+
         return {"next_step": ModelRoleType.retriever.name}
 
-    def retriever_node(self, state: State) -> dict[str, str]:
+    async def retriever_node(self, state: State) -> dict[str, str]:
         """Retriever agent: fetches information from knowledge base or prepares visualization data.
         
         Analyzes user request to determine intent:
@@ -391,15 +416,23 @@ class LearnerWorkflow:
             ModelRoleType.retriever, state, ("input_text", "conversation_history")
         )
 
-        response = self.call_model(messages_to_pass, ModelRoleType.retriever)
+        response = await self.call_model(messages_to_pass, ModelRoleType.retriever)
         if response and response.tool_calls:
-            tool_results = self.call_tools(response)
-            return {"context": json.dumps(tool_results)}
+            tool_results = await self.call_tools(response)
+            # If every tool result signals no relevant data, escalate to researcher
+            all_empty = all(
+                isinstance(v, str) and v.strip() == "No relevant information found."
+                for v in tool_results.values()
+            ) if tool_results else True
+            if all_empty:
+                logger.warning(f"[{model_name}] All KB results below relevance threshold, setting no_results sentinel")
+                return {"context": '{"no_results": true}'}
+            return {"context": json.dumps(tool_results, ensure_ascii=False)}
 
-        logger.warning(f"[{model_name}] Nothing retrieved, returning original context")
-        return {"context": state.context}
+        logger.warning(f"[{model_name}] Nothing retrieved, setting no_results sentinel")
+        return {"context": '{"no_results": true}'}
 
-    def researcher_node(self, state: State) -> dict[str, str]:
+    async def researcher_node(self, state: State) -> dict[str, str]:
         """Researcher agent: conducts web research for information not in knowledge base.
         
         Two-phase process:
@@ -423,12 +456,12 @@ class LearnerWorkflow:
             ModelRoleType.researcher, state, ("input_text", "context")
         )
 
-        response = self.call_model(messages_to_pass, ModelRoleType.researcher, model_type="_with_tools")
+        response = await self.call_model(messages_to_pass, ModelRoleType.researcher, model_type="_with_tools")
         logger.debug(f"[{model_name}] Initial response received")
 
         # Execute tools and synthesize results
         if response and response.tool_calls:
-            tool_call_results = self.call_tools(response)
+            tool_call_results = await self.call_tools(response)
 
             if tool_call_results:
                 # Format tool results for structured output model
@@ -445,7 +478,9 @@ class LearnerWorkflow:
                 ]
 
                 # Get structured research output
-                research_result = self.call_model(clean_messages, ModelRoleType.researcher, model_type="_structured")
+                research_result = await self.call_model(
+                    clean_messages, ModelRoleType.researcher, model_type="_structured"
+                )
 
                 if research_result:
                     logger.info(
@@ -461,12 +496,16 @@ class LearnerWorkflow:
                             formatted_context += f"- [{source.get('title', 'Unknown')}]({source.get('url', '')}) " \
                                                  f"({source.get('type', 'web')})\n"
 
-                    return {"context": formatted_context}
+                    return {"context": formatted_context + "\n[RESEARCH_COMPLETE]"}
 
+        if '"no_results": true' in (state.context or ''):
+            logger.warning(
+                f"[{model_name}] No search result generated and retriever also had no results. All sources exhausted.")
+            return {"context": '{"all_sources_exhausted": true}'}
         logger.warning(f"[{model_name}] No search result generated, returning original context")
         return {"context": state.context}
 
-    def analyst_node(self, state: State) -> dict[str, list]:
+    async def analyst_node(self, state: State) -> dict[str, list]:
         """Analyst agent: synthesizes retrieved data into professional technical responses.
         
         Acts as the "Internal Scribe" that combines:
@@ -486,15 +525,27 @@ class LearnerWorkflow:
         """
         model_name = ModelRoleType.analyst.name.upper()
         messages_to_pass = self.create_messages_to_pass(ModelRoleType.analyst, state, ("input_text", "context"))
-        response = self.call_model(messages_to_pass, ModelRoleType.analyst)
-        if response:
-            response.additional_kwargs["agent"] = f"[{model_name}]"
-            return {"messages": [response]}
+        response = await self.call_model(messages_to_pass, ModelRoleType.analyst)
 
-        logger.warning(f"[{model_name}] No response generated, returning empty list")
+        if response:
+            content, stripped = response.content, ""
+            if isinstance(content, str):
+                stripped = content.strip()
+                if stripped.startswith("```"):
+                    stripped = stripped[stripped.index("\n") + 1:] if "\n" in stripped else stripped[3:]
+                if stripped.endswith("```"):
+                    stripped = stripped[: stripped.rfind("```")]
+                stripped = stripped.strip()
+                if stripped:
+                    response.content = stripped
+                    response.additional_kwargs["agent"] = f"[{model_name}]"
+                    return {"messages": [response]}
+
+        logger.warning(
+            f"[{model_name}] No meaningful response generated, returning empty messages for fallback handling")
         return {"messages": []}
 
-    def mentor_node(self, state: State) -> dict[str, list]:
+    async def mentor_node(self, state: State) -> dict[str, list]:
         """Mentor agent: conducts Socratic interview practice and technical questioning.
         
         Acts as a Senior Technical Interviewer that:
@@ -509,47 +560,60 @@ class LearnerWorkflow:
             Dictionary with mentor's response message.
         """
         model_name = ModelRoleType.mentor.name.upper()
-        messages_to_pass = self.create_messages_to_pass(ModelRoleType.mentor, state, ("input_text", "context"))
-        response = self.call_model(messages_to_pass, ModelRoleType.mentor)
+        messages_to_pass = self.create_messages_to_pass(
+            ModelRoleType.mentor, state, ("conversation_history", "context")
+        )
+        response = await self.call_model(messages_to_pass, ModelRoleType.mentor)
         if response:
             response.additional_kwargs["agent"] = f"[{model_name}]"
             return {"messages": [response]}
 
-        logger.warning(f"[{model_name}] No response generated, returning empty list")
+        logger.warning(f"[{model_name}] No response generated, returning empty messages for fallback handling")
         return {"messages": []}
 
-    def visualizer_node(self, state: State) -> dict[str, Optional[dict]]:
+    async def visualizer_node(self, state: State) -> dict[str, list]:
         """Visualizer agent: creates interactive graph visualizations from retrieved data.
         
         Processes graph structure data from get_subgraphs_to_visualize tool and generates an interactive
-        Plotly visualization.
+        Plotly visualization. Appends the new plot to the existing visual_artifacts list.
         
         Args:
             state: Current workflow state containing graph data in context.
             
         Returns:
-            Dictionary with visual_artifact (Plotly figure dict) or None if failed.
+            Dictionary with updated visual_artifacts list.
         """
         try:
             tool_results = state.context
             if tool_results:
                 visualizer_tool_results = json.loads(tool_results).get("get_subgraphs_to_visualize")
                 if visualizer_tool_results:
-                    plotly_figure = self.knowledge_graph_indexer.get_graph_visualization(*visualizer_tool_results)
-                    return {"visual_artifact": plotly_figure.to_dict()}
+                    nodes, relation_triplets, queries = visualizer_tool_results
+                    title = " & ".join(queries)
+                    title = (title[:TITLE_MAX_LENGTH] + "…") if len(title) > TITLE_MAX_LENGTH else title
+                    plotly_figure = self.knowledge_graph_indexer.get_graph_visualization(
+                        nodes, relation_triplets, title=title.title()
+                    )
+                    return {
+                        "visual_artifacts": [plotly_figure.to_dict()],
+                        "context": "Visual artifact generated",
+                    }
             logger.error("[VISUALIZER] No graph data found in context")
         except Exception as e:
             logger.error(f"[VISUALIZER] Failed to create visualization: {str(e)}")
 
-        return {"visual_artifact": None}
+        return {"visual_artifacts": state.visual_artifacts, "context": "Visualization failed"}
 
-    def run(self) -> Any:
+    def run(self, checkpointer=None) -> Any:
         """Compiles and returns the executable workflow graph.
         
+        Args:
+            checkpointer: Optional LangGraph checkpointer for state persistence (e.g. RedisSaver).
+            
         Returns:
             Compiled LangGraph workflow ready for invocation.
         """
-        return self.workflow.compile()
+        return self.workflow.compile(checkpointer=checkpointer)
 
     def show_graph(self, jupyter_notebook: bool = False) -> Optional[Any]:
         """Visualizes the workflow graph structure.
@@ -583,8 +647,7 @@ class LearnerWorkflow:
 if __name__ == '__main__':
     # ...
     """
-    from backend.configs.storage import StorageSettings, LocalStorageSettings, RedisSettings
-    from llama_index.core.schema import MetadataMode
+    from backend.configs.storage import StorageSettings
     from langgraph.errors import GraphRecursionError
 
     tavily_settings = TavilySettings()
@@ -602,19 +665,21 @@ if __name__ == '__main__':
     workflow = LearnerWorkflow(models_settings, path_settings, storage_settings, tavily_settings, kg_search_settings)
     graph = workflow.run()
     # workflow.show_graph()
+    messages = ('Visualize my knowledge about neural networks',)
+    # "What information do I have about EAGLE?",
+    # "What information do I have about attention mechanism?",
+    # "Tell me please more about VAE",
+    # "Can you please visualize this information?")
 
     try:
-        state = graph.invoke({"messages": [
-            # 'Research the latest developments in LLM fine-tuning'
-            'Please visualize my knowledge about attention mechanism'
-        ]},
-            config={"recursion_limit": 25}
-        )
+        for message in messages:
+            state = asyncio.run(graph.ainvoke({"messages": [message]}, config={"recursion_limit": 25}))
     except GraphRecursionError as e:
         logger.error(f"Workflow exceeded recursion limit: {e}")
 
     import plotly.graph_objects as go
-    fig = go.Figure(state["visual_artifact"])
+
+    fig = go.Figure(state["visual_artifacts"][-1])
     fig.update_layout(
         autosize=True,
         width=None,

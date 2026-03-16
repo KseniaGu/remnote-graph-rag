@@ -96,6 +96,14 @@ class KnowledgeGraphRelation(StrEnum):
     related_to = "RELATED_TO"  # General relation
 
 
+class LLMProviderType(StrEnum):
+    """Supported LLM inference providers."""
+    ollama = "ollama"
+    vllm = "vllm"
+    openai = "openai"
+    gemini = "gemini"
+
+
 class WorkflowEventType(str, Enum):
     """Types of events emitted by the workflow."""
     AGENT_START = "agent_start"

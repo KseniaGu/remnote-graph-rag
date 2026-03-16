@@ -4,7 +4,7 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from backend.configs.constants import WORKFLOW_LOGGING
+from backend.configs.constants import WORKFLOW_LOGGING, MIN_RELEVANCE_SCORE
 from backend.utils.helpers import get_logger
 
 logger = get_logger(WORKFLOW_LOGGING)
@@ -40,6 +40,7 @@ def search_knowledge_base(retriever: Any, reranker: Any):
             [SOURCE PATH] CV History > Classical Era > Feature Extraction
         """
         evidence_lines = []
+        found_any = False
         for query in queries:
             evidence_lines.append(f"QUERY: {query}")
             nodes = retriever.retrieve(query)
@@ -49,7 +50,13 @@ def search_knowledge_base(retriever: Any, reranker: Any):
                 logger.error(f"Rerank failed, using top 10 raw results.", exc_info=True)
                 nodes = nodes[:10]
 
+            nodes = [
+                n for n in nodes
+                if n.score is None or n.score >= MIN_RELEVANCE_SCORE
+            ]
+
             for node_with_score in nodes:
+                found_any = True
                 node = node_with_score.node
                 score = node_with_score.score
                 text_to_add = ""
@@ -61,9 +68,19 @@ def search_knowledge_base(retriever: Any, reranker: Any):
                         relations = set(relations.split("\n"))
                         for relation in relations:
                             properties = re.findall(r'\(\{.*?\}\)', relation, re.DOTALL)
+                            id_to_name = {}
                             if properties:
                                 for property_ in set(properties):
                                     relation = relation.replace(property_, '')
+                                    try:
+                                        property_ = ast.literal_eval(property_)
+                                        if "name" in property_ and "entity_name" in property_:
+                                            id_to_name[property_["name"]] = property_["entity_name"]
+                                    except Exception:
+                                        logger.error(f"Failed to parse node properties.", exc_info=True)
+                                        pass
+                                for k, v in id_to_name.items():
+                                    relation = relation.replace(k, v)
                             text_to_add += f"[RELATION] {relation.replace('  ', ' ').strip()} (Score: {score:.2f})\n"
                         text_to_add += f"[SOURCE] {source_node_text}\n"
                         if path:
@@ -73,20 +90,43 @@ def search_knowledge_base(retriever: Any, reranker: Any):
                         if "PARENT" in node.text:
                             continue
 
-                        text, path = node.text, []
+                        node_pair, paths = [], []
                         properties = re.findall(r'\(\{.*?\}\)', node.text, re.DOTALL)
+                        text = None
+
                         if properties:
-                            text = text.replace(properties[0], '').replace('  ', ' ')
-                            path = ast.literal_eval(properties[0]).get("path", [])
+                            for property_ in properties[::2]:
+                                try:
+                                    property_ = ast.literal_eval(property_)
+                                except Exception:
+                                    logger.error(f"Failed to parse node property.", exc_info=True)
+                                    continue
+
+                                if "text" in property_:
+                                    node_pair.append(property_["text"])
+
+                                if "path" in property_:
+                                    try:
+                                        paths.append(ast.literal_eval(property_["path"]))
+                                    except Exception:
+                                        logger.error(f"Failed to parse node property's path.", exc_info=True)
+                                        pass
+                            if len(node_pair) == 2:
+                                text = node_pair[0] + " -> CHILD -> " + node_pair[1]
+
+                        if not text:
+                            continue
+
                         text_to_add += f"[RELATION] {text} (Score: {score:.2f})\n"
-                        if path:
-                            text_to_add += f"[SOURCE PATH] {' > '.join(path)}\n"
+                        if len(paths) == 2:
+                            text_to_add += f"[SOURCE 1 PATH] {' > '.join(paths[0])}\n"
+                            text_to_add += f"[SOURCE 2 PATH] {' > '.join(paths[1])}\n"
                 else:
                     text_to_add += f"[SOURCE] {node.text} (Score: {score:.2f})\n"
 
                 evidence_lines.append(text_to_add)
 
-        if not evidence_lines:
+        if not found_any:
             return "No relevant information found."
 
         return "RETRIEVER RESULTS:\n\n" + "\n\n".join(evidence_lines)
@@ -184,6 +224,6 @@ def get_subgraphs_to_visualize(retriever: Any):
                 else:
                     all_nodes.append(node.node_id)
 
-        return list(set(all_nodes)), list(set(all_triplets))
+        return list(set(all_nodes)), list(set(all_triplets)), queries
 
     return _get_subgraphs_to_visualize
