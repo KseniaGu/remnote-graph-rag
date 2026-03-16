@@ -106,8 +106,8 @@ jobs:
             --set-secrets "COHERE_API_KEY=cohere-api-key:latest" \
             --set-secrets "LANGSMITH_API_KEY=langchain-api-key:latest" \
             --set-env-vars "LANGSMITH_TRACING=true" \
-            --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \ 
-            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com" 
+            --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \
+            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com"
 
       - name: Get backend URL
         run: |
