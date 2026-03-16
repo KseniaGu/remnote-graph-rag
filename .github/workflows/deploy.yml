@@ -85,7 +85,7 @@ jobs:
             --timeout 300 \
             --min-instances 1 \
             --max-instances 10 \
-            --startup-cpu-boost \
+            --cpu-boost \
             --command reflex \
             --args run,--env,prod,--backend-only,--backend-host,0.0.0.0 \
             --set-secrets "REDIS_HOST=redis-host:latest" \
