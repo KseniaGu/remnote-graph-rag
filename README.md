@@ -149,9 +149,6 @@ See `deploy/` directory for Dockerfile and deployment configurations.
 - Consider adding more flexible graph traversal options, perhaps a dynamic one?
 - Testing! The main part of the project is missing
 - Add a database to store user sessions, logs, and other data. Redis is only for the vector search
-- Check [Langsmith](https://smith.langchain.com/) – is it working?
-- **[BUG]** Jobs marked with flags after completion (e.g., retrievers, visualization) prevent users from requesting the
-  same job on a different topic in the same chat (e.g. when asking to find the information from personal KG on different
-  topics in one chat). Consider refreshing the state context and turning the visualization context to a list, allowing
-  access to all previous plots while generating multiple ones
+- Fix bugs (?)
+- Improve interface
 - Try [DSPy](https://github.com/stanfordnlp/dspy)?

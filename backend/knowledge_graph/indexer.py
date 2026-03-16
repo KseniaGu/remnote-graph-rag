@@ -574,55 +574,38 @@ class KnowledgeGraphIndexer:
             return text
         return text[: max_len - 1] + "…"
 
-    def get_graph_visualization(self, nodes: list[str], relation_triplets: list[tuple[str, str, str]], title: str | None = None) -> go.Figure:
+    def get_graph_visualization(
+            self, nodes: list[str],
+            relation_triplets: list[tuple[str, str, str]],
+            title: str | None = None
+    ) -> go.Figure:
         """Generates interactive Plotly visualization of the knowledge graph.
-        
+
         Args:
             nodes: List of node IDs to visualize.
             relation_triplets: List of (source, relation, target) tuples.
-            
+            title: The plot title.
+
         Returns:
             Plotly Figure object for visualization.
         """
         graph = self.generate_nx_graph_from(nodes, relation_triplets)
-
-        # kamada_kawai produces a much more evenly-spaced layout than spring for dense graphs;
-        # fall back to spring if the graph is disconnected (kamada_kawai requires connectivity)
-        try:
-            pos = nx.kamada_kawai_layout(graph)
-        except Exception:
-            pos = nx.spring_layout(graph, k=SPRING_LAYOUT_K, seed=42, iterations=SPRING_LAYOUT_ITERATIONS)
-
-        # Convert numpy.float64 -> plain float so msgpack (used by Reflex) can serialize the figure
+        pos = nx.spring_layout(graph, k=SPRING_LAYOUT_K, iterations=SPRING_LAYOUT_ITERATIONS)
         pos = {n: (float(x), float(y)) for n, (x, y) in pos.items()}
-
-        # Scale positions outward to reduce label crowding in dense graphs
-        n_nodes = len(pos)
-        if n_nodes > 8:
-            scale = max(1.0, (n_nodes / 8) ** 0.55)
-            pos = {n: (x * scale, y * scale) for n, (x, y) in pos.items()}
-
-        # Truncate labels more aggressively for large graphs
-        label_max_len = max(12, 30 - max(0, n_nodes - 10) // 3)
 
         node_id_to_full_text = {node_id: text for node_id, text in graph.nodes(data="text")}
         node_id_to_hover_text = {node_id: hover for node_id, hover in graph.nodes(data="hover")}
         node_id_to_short_text = {
-            node_id: self._truncate_graph_label(text, max_len=label_max_len)
-            for node_id, text in node_id_to_full_text.items()
+            node_id: self._truncate_graph_label(text) for node_id, text in node_id_to_full_text.items()
         }
 
-        # Degree-based node sizing and coloring
         degrees = dict(graph.degree())
-        node_list = list(graph.nodes())
-        node_degrees = [degrees.get(n, 1) for n in node_list]
-        node_sizes = [max(12, min(30, 10 + d * 3)) for d in node_degrees]
+        annotations = []
 
         edge_x, edge_y = [], []
         edge_label_x, edge_label_y, edge_label_text = [], [], []
-        annotations = []
-
-        for u, v, data in graph.edges(data=True):
+        for edge in graph.edges(data=True):
+            u, v, data = edge
             x0, y0 = pos[u]
             x1, y1 = pos[v]
             edge_x.extend([x0, x1, None])
@@ -635,11 +618,12 @@ class KnowledgeGraphIndexer:
 
             relation = data.get("relation", "RELATES_TO")
             rel_display = {"CHILD": "HAS CHILD", "PARENT": "HAS PARENT"}.get(relation, relation)
+            # Hover text for edges
             edge_label_text.append(
-                f"{node_id_to_short_text.get(u, u)} → {rel_display} → {node_id_to_short_text.get(v, v)}"
+                node_id_to_short_text.get(u, u) + " → " + rel_display + " → " + node_id_to_short_text.get(v, v)
             )
 
-            # Arrow annotation pointing toward target node
+            # Arrow pointing toward target node
             annotations.append(dict(
                 x=x1, y=y1,
                 ax=x0, ay=y0,
@@ -653,20 +637,11 @@ class KnowledgeGraphIndexer:
                 opacity=0.6,
             ))
 
-            # Relation label at midpoint
-            annotations.append(dict(
-                x=mid_x, y=mid_y,
-                xref="x", yref="y",
-                text=f"<i>{rel_display}</i>",
-                showarrow=False,
-                font=dict(size=11, color="#aaa"),
-                bgcolor="rgba(20,30,40,0.7)",
-                borderpad=2,
-            ))
 
         edge_trace = go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=0.8, color='#444'),
+            x=edge_x,
+            y=edge_y,
+            line=dict(width=0.5, color='#888'),
             hoverinfo='none',
             mode='lines',
         )
@@ -678,54 +653,20 @@ class KnowledgeGraphIndexer:
             hovertext=edge_label_text,
         )
 
-        node_x = [pos[n][0] for n in node_list]
-        node_y = [pos[n][1] for n in node_list]
-        node_labels = [node_id_to_short_text.get(n, str(n)) for n in node_list]
-        node_hovertext = [node_id_to_hover_text.get(n, node_labels[i]) for i, n in enumerate(node_list)]
-
-        # Neighbor-repulsion textposition: push each label away from nearby nodes
-        # to minimize overlap in clusters
-        textpositions = []
-        for i in range(len(node_x)):
-            dx, dy = 0.0, 0.0
-            for j in range(len(node_x)):
-                if i == j:
-                    continue
-                rx_ = node_x[i] - node_x[j]
-                ry_ = node_y[i] - node_y[j]
-                dist = math.hypot(rx_, ry_)
-                if dist < 0.6:
-                    w = 1.0 / max(dist, 0.01)
-                    dx += rx_ * w
-                    dy += ry_ * w
-
-            if abs(dx) < 1e-6 and abs(dy) < 1e-6:
-                textpositions.append("top center")
-            else:
-                angle = math.degrees(math.atan2(dy, dx))
-                if -22.5 < angle <= 22.5:
-                    textpositions.append("middle right")
-                elif 22.5 < angle <= 67.5:
-                    textpositions.append("top right")
-                elif 67.5 < angle <= 112.5:
-                    textpositions.append("top center")
-                elif 112.5 < angle <= 157.5:
-                    textpositions.append("top left")
-                elif angle > 157.5 or angle <= -157.5:
-                    textpositions.append("middle left")
-                elif -157.5 < angle <= -112.5:
-                    textpositions.append("bottom left")
-                elif -112.5 < angle <= -67.5:
-                    textpositions.append("bottom center")
-                else:
-                    textpositions.append("bottom right")
+        node_x, node_y, node_labels, node_hovertext, node_degrees = [], [], [], [], []
+        for node in graph.nodes():
+            x, y = pos[node]
+            node_x.append(x)
+            node_y.append(y)
+            node_labels.append(node_id_to_short_text.get(node, str(node)))
+            node_hovertext.append(node_id_to_hover_text.get(node, node_id_to_short_text.get(node, str(node))))
+            node_degrees.append(degrees.get(node, 1))
 
         node_trace = go.Scatter(
             x=node_x, y=node_y,
             mode='markers+text',
+            textposition="top center",
             text=node_labels,
-            textposition=textpositions,
-            textfont=dict(size=12, color="#e9edef", family="Inter, sans-serif"),
             hovertext=node_hovertext,
             hoverinfo='text',
             hoverlabel=dict(
@@ -736,7 +677,7 @@ class KnowledgeGraphIndexer:
             marker=dict(
                 showscale=True,
                 colorscale=[[0, "#1f2c34"], [0.25, "#0ea5e9"], [0.6, "#00a884"], [1.0, "#a855f7"]],
-                size=node_sizes,
+                size=15,
                 color=node_degrees,
                 colorbar=dict(
                     thickness=12,
@@ -763,12 +704,8 @@ class KnowledgeGraphIndexer:
                 showlegend=False,
                 hovermode='closest',
                 margin=dict(b=20, l=60, r=60, t=52 if title else 40),
-                paper_bgcolor="#0b141a",
-                plot_bgcolor="#0b141a",
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                           range=[min(node_x) - 0.35, max(node_x) + 0.35]),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
-                           range=[min(node_y) - 0.25, max(node_y) + 0.25]),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 annotations=annotations,
                 autosize=True,
                 hoverlabel=dict(

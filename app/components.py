@@ -254,7 +254,7 @@ def processing_indicator() -> rx.Component:
         AppState.is_processing,
         rx.hstack(
             rx.hstack(
-                rx.icon("loader-2", size=16, class_name="animate-spin", color=COLORS["accent_blue"]),
+                rx.icon("loader-circle", size=16, class_name="animate-spin", color=COLORS["accent_blue"]),
                 rx.text(
                     rx.cond(
                         AppState.active_agent != "",
@@ -332,7 +332,7 @@ def chat_input() -> rx.Component:
             rx.button(
                 rx.cond(
                     AppState.is_processing,
-                    rx.icon("loader-2", size=20, class_name="animate-spin"),
+                    rx.icon("loader-circle", size=20, class_name="animate-spin"),
                     rx.icon("send", size=20),
                 ),
                 id="chat-send-btn",
