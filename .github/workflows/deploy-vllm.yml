@@ -91,6 +91,7 @@ jobs:
             --max-instances 2 \
             --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
             --set-secrets "HUGGING_FACE_HUB_TOKEN=hf-token:latest" \
+            --set-secrets "HF_TOKEN=hf-token:latest" \
             --set-env-vars "MODEL_NAME=Qwen/Qwen3.5-9B" \
             --set-env-vars "MAX_MODEL_LEN=8192" \
             --set-env-vars "GPU_MEM_UTIL=0.35" \
@@ -118,6 +119,7 @@ jobs:
             --max-instances 2 \
             --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
             --set-secrets "HUGGING_FACE_HUB_TOKEN=hf-token:latest" \
+            --set-secrets "HF_TOKEN=hf-token:latest" \
             --set-env-vars "MODEL_NAME=unsloth/Qwen3.5-27B-GGUF" \
             --set-env-vars "MAX_MODEL_LEN=32768" \
             --set-env-vars "GPU_MEM_UTIL=0.90" \
