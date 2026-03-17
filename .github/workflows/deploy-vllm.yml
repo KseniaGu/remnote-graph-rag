@@ -94,47 +94,50 @@ jobs:
             --set-secrets "HF_TOKEN=hf-token:latest" \
             --set-env-vars "MODEL_NAME=Qwen/Qwen3.5-9B" \
             --set-env-vars "MAX_MODEL_LEN=8192" \
-            --set-env-vars "GPU_MEM_UTIL=0.35" \
+            --set-env-vars "GPU_MEM_UTIL=0.90" \
             --set-env-vars "EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_coder" \
             --no-gpu-zonal-redundancy \
             --startup-probe=tcpSocket.port=8080,periodSeconds=30,failureThreshold=60,timeoutSeconds=29
 
-      - name: Deploy vllm-generation service (Qwen3.5-27B)
-        run: |
-          gcloud run deploy $VLLM_GENERATION_SERVICE_NAME \
-            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/vllm:${{ github.sha }} \
-            --platform managed \
-            --project $PROJECT_ID \
-            --region $REGION \
-            --port 8080 \
-            --quiet \
-            --no-allow-unauthenticated \
-            --memory 24Gi \
-            --cpu 8 \
-            --gpu 1 \
-            --gpu-type nvidia-l4 \
-            --concurrency 4 \
-            --timeout 600 \
-            --min-instances 0 \
-            --max-instances 2 \
-            --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
-            --set-secrets "HUGGING_FACE_HUB_TOKEN=hf-token:latest" \
-            --set-secrets "HF_TOKEN=hf-token:latest" \
-            --set-env-vars "MODEL_NAME=unsloth/Qwen3.5-27B-GGUF" \
-            --set-env-vars "MAX_MODEL_LEN=32768" \
-            --set-env-vars "GPU_MEM_UTIL=0.90" \
-            --no-gpu-zonal-redundancy \
-            --startup-probe=tcpSocket.port=8080,periodSeconds=30,failureThreshold=60,timeoutSeconds=29
+      # TODO: Generation service skipped — 27B GGUF model won't fit on single L4 (24GB).
+      # Re-enable once a suitable model/GPU config is chosen.
+      # - name: Deploy vllm-generation service (Qwen3.5-27B)
+      #   run: |
+      #     gcloud run deploy $VLLM_GENERATION_SERVICE_NAME \
+      #       --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/vllm:${{ github.sha }} \
+      #       --platform managed \
+      #       --project $PROJECT_ID \
+      #       --region $REGION \
+      #       --port 8080 \
+      #       --quiet \
+      #       --no-allow-unauthenticated \
+      #       --memory 24Gi \
+      #       --cpu 8 \
+      #       --gpu 1 \
+      #       --gpu-type nvidia-l4 \
+      #       --concurrency 4 \
+      #       --timeout 600 \
+      #       --min-instances 0 \
+      #       --max-instances 2 \
+      #       --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+      #       --set-secrets "HUGGING_FACE_HUB_TOKEN=hf-token:latest" \
+      #       --set-secrets "HF_TOKEN=hf-token:latest" \
+      #       --set-env-vars "MODEL_NAME=unsloth/Qwen3.5-27B-GGUF" \
+      #       --set-env-vars "MAX_MODEL_LEN=32768" \
+      #       --set-env-vars "GPU_MEM_UTIL=0.90" \
+      #       --no-gpu-zonal-redundancy \
+      #       --startup-probe=tcpSocket.port=8080,periodSeconds=30,failureThreshold=60,timeoutSeconds=29
 
       - name: Get vLLM service URLs
         run: |
           VLLM_ROUTING_URL=$(gcloud run services describe $VLLM_ROUTING_SERVICE_NAME \
             --project $PROJECT_ID --region $REGION --format 'value(status.url)')
-          VLLM_GENERATION_URL=$(gcloud run services describe $VLLM_GENERATION_SERVICE_NAME \
-            --project $PROJECT_ID --region $REGION --format 'value(status.url)')
           echo "VLLM_ROUTING_URL=${VLLM_ROUTING_URL}/v1" >> $GITHUB_ENV
+          echo "Routing: ${VLLM_ROUTING_URL}/v1"
+          # Generation service is currently skipped; use routing URL as fallback
+          VLLM_GENERATION_URL=$(gcloud run services describe $VLLM_GENERATION_SERVICE_NAME \
+            --project $PROJECT_ID --region $REGION --format 'value(status.url)' 2>/dev/null || echo "$VLLM_ROUTING_URL")
           echo "VLLM_GENERATION_URL=${VLLM_GENERATION_URL}/v1" >> $GITHUB_ENV
-          echo "Routing:    ${VLLM_ROUTING_URL}/v1"
           echo "Generation: ${VLLM_GENERATION_URL}/v1"
 
       - name: Build backend Docker image

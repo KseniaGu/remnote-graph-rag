@@ -1,5 +1,8 @@
 FROM vllm/vllm-openai:latest
 
+# Qwen3.5 models require transformers >=5.0 for tokenizer support
+RUN pip install --no-cache-dir -U transformers tokenizers
+
 ENV MODEL_NAME="Qwen/Qwen3.5-9B"
 ENV MAX_MODEL_LEN=8192
 ENV GPU_MEM_UTIL=0.90
