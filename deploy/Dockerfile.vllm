@@ -1,4 +1,4 @@
-FROM vllm/vllm-openai:latest
+FROM vllm/vllm-openai:nightly
 
 RUN pip install --no-cache-dir -U transformers tokenizers huggingface_hub
 
