@@ -95,7 +95,9 @@ jobs:
             --set-env-vars "MAX_MODEL_LEN=8192" \
             --set-env-vars "GPU_MEM_UTIL=0.35" \
             --set-env-vars "EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_coder" \
-            --no-gpu-zonal-redundancy
+            --no-gpu-zonal-redundancy \
+            --startup-probe-failure-threshold=60 \
+            --startup-probe-period-secs=30
 
       - name: Deploy vllm-generation service (Qwen3.5-27B)
         run: |
@@ -120,7 +122,9 @@ jobs:
             --set-env-vars "MODEL_NAME=unsloth/Qwen3.5-27B-GGUF" \
             --set-env-vars "MAX_MODEL_LEN=32768" \
             --set-env-vars "GPU_MEM_UTIL=0.90" \
-            --no-gpu-zonal-redundancy
+            --no-gpu-zonal-redundancy \
+            --startup-probe-failure-threshold=60 \
+            --startup-probe-period-secs=30
 
       - name: Get vLLM service URLs
         run: |
