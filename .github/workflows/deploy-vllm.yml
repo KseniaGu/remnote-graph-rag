@@ -96,7 +96,7 @@ jobs:
             --set-env-vars "MODEL_NAME=/mnt/models/qwen-9b" \
             --set-env-vars "MAX_MODEL_LEN=4096" \
             --set-env-vars "GPU_MEM_UTIL=0.85" \
-            --set-env-vars "EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_coder --max-num-seqs 16" \
+            --set-env-vars "EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_coder --max-num-seqs 16 --language-model-only" \
             --no-gpu-zonal-redundancy \
             --startup-probe=tcpSocket.port=8080,periodSeconds=30,failureThreshold=60,timeoutSeconds=29
 
