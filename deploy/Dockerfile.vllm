@@ -3,9 +3,6 @@ FROM vllm/vllm-openai:nightly
 RUN pip install --no-cache-dir -U transformers tokenizers huggingface_hub
 
 ENV MODEL_NAME="/mnt/models/qwen-9b"
-ENV MAX_MODEL_LEN=8192
-ENV GPU_MEM_UTIL=0.90
-ENV EXTRA_ARGS=""
 
 EXPOSE 8080
 
