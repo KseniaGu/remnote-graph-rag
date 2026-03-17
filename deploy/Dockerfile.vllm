@@ -10,4 +10,4 @@ ENV EXTRA_ARGS=""
 EXPOSE 8080
 
 ENTRYPOINT []
-CMD ["sh", "-c", "if [ -n \"$HF_TOKEN\" ]; then python3 -m huggingface_hub.commands.cli login --token \"$HF_TOKEN\"; fi && python3 -m vllm.entrypoints.openai.api_server --model \"$MODEL_NAME\" --host 0.0.0.0 --port 8080 --max-model-len \"$MAX_MODEL_LEN\" --gpu-memory-utilization \"$GPU_MEM_UTIL\" --reasoning-parser qwen3 --enable-prefix-caching $EXTRA_ARGS"]
+CMD ["sh", "-c", "python3 -m vllm.entrypoints.openai.api_server --model $MODEL_NAME --host 0.0.0.0 --port 8080 --max-model-len $MAX_MODEL_LEN --gpu-memory-utilization $GPU_MEM_UTIL --reasoning-parser qwen3 --enable-prefix-caching $EXTRA_ARGS"]
