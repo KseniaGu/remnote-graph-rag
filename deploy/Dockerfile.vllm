@@ -1,7 +1,6 @@
 FROM vllm/vllm-openai:latest
 
-# Qwen3.5 models require transformers >=5.0 for tokenizer support
-RUN pip install --no-cache-dir -U transformers tokenizers
+RUN pip install --no-cache-dir -U transformers tokenizers huggingface_hub
 
 ENV MODEL_NAME="Qwen/Qwen3.5-9B"
 ENV MAX_MODEL_LEN=8192
@@ -11,4 +10,4 @@ ENV EXTRA_ARGS=""
 EXPOSE 8080
 
 ENTRYPOINT []
-CMD ["sh", "-c", "if [ -n \"$HF_TOKEN\" ]; then huggingface-cli login --token $HF_TOKEN; fi && python3 -m vllm.entrypoints.openai.api_server --model $MODEL_NAME --host 0.0.0.0 --port 8080 --max-model-len $MAX_MODEL_LEN --gpu-memory-utilization $GPU_MEM_UTIL --reasoning-parser qwen3 --enable-prefix-caching $EXTRA_ARGS"]
+CMD ["sh", "-c", "if [ -n \"$HF_TOKEN\" ]; then python3 -m huggingface_hub.commands.cli login --token \"$HF_TOKEN\"; fi && python3 -m vllm.entrypoints.openai.api_server --model \"$MODEL_NAME\" --host 0.0.0.0 --port 8080 --max-model-len \"$MAX_MODEL_LEN\" --gpu-memory-utilization \"$GPU_MEM_UTIL\" --reasoning-parser qwen3 --enable-prefix-caching $EXTRA_ARGS"]
