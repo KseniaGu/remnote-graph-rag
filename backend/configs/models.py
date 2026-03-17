@@ -1,3 +1,5 @@
+import os
+
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -165,3 +167,92 @@ class ModelSettings(BaseSettings):
         model_name="rerank-multilingual-v3.0",
         top_n=10
     )
+
+
+def _ollama_models() -> ModelSettings:
+    """Ollama Cloud pipeline (default)."""
+    return ModelSettings()
+
+
+def _vllm_models() -> ModelSettings:
+    """vLLM Cloud Run GPU pipeline."""
+    routing_url = os.environ["VLLM_ROUTING_URL"]
+    generation_url = os.environ["VLLM_GENERATION_URL"]
+    return ModelSettings(
+        orchestrator=OllamaSettings(
+            role=ModelRoleType.orchestrator,
+            provider=LLMProviderType.vllm,
+            model_name="Qwen/Qwen3.5-9B",
+            base_url=routing_url,
+            temperature=0.,
+            num_predict=2048,
+            prompt_version={"graph_index": "v2", "routing": "v2"},
+        ),
+        retriever=OllamaSettings(
+            role=ModelRoleType.retriever,
+            provider=LLMProviderType.vllm,
+            model_name="Qwen/Qwen3.5-9B",
+            base_url=routing_url,
+            temperature=0.,
+            num_ctx=8192,
+            num_predict=512,
+            prompt_version="v2",
+        ),
+        researcher=ResearcherModelSettings(
+            with_tools=OllamaSettings(
+                role=ModelRoleType.researcher,
+                provider=LLMProviderType.vllm,
+                model_name="Qwen/Qwen3.5-9B",
+                base_url=routing_url,
+                temperature=0.,
+                num_ctx=8192,
+                num_predict=1024,
+            ),
+            structured=OllamaSettings(
+                role=ModelRoleType.researcher,
+                provider=LLMProviderType.vllm,
+                model_name="Qwen/Qwen3.5-9B",
+                base_url=routing_url,
+                temperature=0.,
+                num_ctx=8192,
+                num_predict=2048,
+            ),
+        ),
+        analyst=OllamaSettings(
+            role=ModelRoleType.analyst,
+            provider=LLMProviderType.vllm,
+            model_name="Qwen/Qwen3.5-27B",
+            base_url=generation_url,
+            temperature=0.15,
+            num_ctx=32768,
+            num_predict=4096,
+            reasoning=True,
+            prompt_version="v2",
+        ),
+        mentor=OllamaSettings(
+            role=ModelRoleType.mentor,
+            provider=LLMProviderType.vllm,
+            model_name="Qwen/Qwen3.5-27B",
+            base_url=generation_url,
+            temperature=0.7,
+            num_ctx=8192,
+            num_predict=2048,
+            reasoning=True,
+            prompt_version="v2",
+        ),
+    )
+
+
+_PIPELINES = {"ollama": _ollama_models, "vllm": _vllm_models}
+
+
+def get_model_settings() -> ModelSettings:
+    """Returns ModelSettings for the active LLM pipeline.
+
+    Reads the LLM_PIPELINE environment variable (default: 'ollama').
+    Supported values: 'ollama', 'vllm'.
+    """
+    pipeline = os.environ.get("LLM_PIPELINE", "ollama")
+    if pipeline not in _PIPELINES:
+        raise ValueError(f"Unknown LLM_PIPELINE '{pipeline}'. Must be one of: {list(_PIPELINES)}")
+    return _PIPELINES[pipeline]()

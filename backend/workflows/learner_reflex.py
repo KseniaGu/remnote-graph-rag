@@ -15,7 +15,7 @@ except ImportError:
 from backend.configs.enums import WorkflowEventType
 from backend.configs.messages import FALLBACK_ALL_SOURCES_EXHAUSTED, FALLBACK_VISUALIZATION_FAILED, \
     FALLBACK_NO_RESULTS, FALLBACK_DEFAULT, ERROR_RECURSION_LIMIT
-from backend.configs.models import ModelSettings
+from backend.configs.models import get_model_settings
 from backend.configs.observability import LangSmithSettings
 from backend.configs.paths import PathSettings
 from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
@@ -64,7 +64,7 @@ class ReflexLearnerWorkflow:
             try:
                 LangSmithSettings().configure()
                 tavily_settings = TavilySettings()
-                models_settings = ModelSettings()
+                models_settings = get_model_settings()
                 path_settings = PathSettings()
                 kg_search_settings = KnowledgeGraphSearchSettings()
 

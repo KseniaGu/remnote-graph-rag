@@ -1,0 +1,230 @@
+name: Deploy vLLM Pipeline to Cloud Run
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ vars.VLLM_REGION }}
+  ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+  BACKEND_SERVICE_NAME: ${{ vars.BACKEND_SERVICE_NAME }}
+  FRONTEND_SERVICE_NAME: ${{ vars.FRONTEND_SERVICE_NAME }}
+  VLLM_ROUTING_SERVICE_NAME: vllm-routing
+  VLLM_GENERATION_SERVICE_NAME: vllm-generation
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate required configuration
+        run: |
+          set -euo pipefail
+          REQUIRED_VARS=(PROJECT_ID REGION ARTIFACT_REGISTRY_REPOSITORY BACKEND_SERVICE_NAME FRONTEND_SERVICE_NAME)
+          for var in "${REQUIRED_VARS[@]}"; do
+            if [ -z "${!var:-}" ]; then
+              echo "Missing required env var: $var"
+              exit 1
+            fi
+          done
+          echo "Configuration OK"
+
+      - name: Free disk space on runner
+        run: |
+          echo "Disk usage before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo apt-get clean || true
+          docker system prune -af || true
+          docker builder prune -af || true
+          echo "Disk usage after cleanup:"
+          df -h
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet --project "$PROJECT_ID"
+
+      - name: Build vLLM Docker image
+        run: |
+          docker build \
+            -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/vllm:${{ github.sha }} \
+            -f deploy/Dockerfile.vllm .
+
+      - name: Push vLLM Docker image
+        run: |
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/vllm:${{ github.sha }}
+
+      - name: Deploy vllm-routing service (Qwen3.5-9B)
+        run: |
+          gcloud run deploy $VLLM_ROUTING_SERVICE_NAME \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/vllm:${{ github.sha }} \
+            --platform managed \
+            --project $PROJECT_ID \
+            --region $REGION \
+            --port 8080 \
+            --quiet \
+            --no-allow-unauthenticated \
+            --memory 24Gi \
+            --cpu 8 \
+            --gpu 1 \
+            --gpu-type nvidia-l4 \
+            --concurrency 4 \
+            --timeout 600 \
+            --min-instances 0 \
+            --max-instances 2 \
+            --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+            --set-secrets "HUGGING_FACE_HUB_TOKEN=hf-token:latest" \
+            --set-env-vars "MODEL_NAME=Qwen/Qwen3.5-9B" \
+            --set-env-vars "MAX_MODEL_LEN=8192" \
+            --set-env-vars "GPU_MEM_UTIL=0.35" \
+            --set-env-vars "EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_coder"
+
+      - name: Deploy vllm-generation service (Qwen3.5-27B)
+        run: |
+          gcloud run deploy $VLLM_GENERATION_SERVICE_NAME \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/vllm:${{ github.sha }} \
+            --platform managed \
+            --project $PROJECT_ID \
+            --region $REGION \
+            --port 8080 \
+            --quiet \
+            --no-allow-unauthenticated \
+            --memory 24Gi \
+            --cpu 8 \
+            --gpu 1 \
+            --gpu-type nvidia-l4 \
+            --concurrency 4 \
+            --timeout 600 \
+            --min-instances 0 \
+            --max-instances 2 \
+            --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+            --set-secrets "HUGGING_FACE_HUB_TOKEN=hf-token:latest" \
+            --set-env-vars "MODEL_NAME=unsloth/Qwen3.5-27B-GGUF" \
+            --set-env-vars "MAX_MODEL_LEN=32768" \
+            --set-env-vars "GPU_MEM_UTIL=0.90"
+
+      - name: Get vLLM service URLs
+        run: |
+          VLLM_ROUTING_URL=$(gcloud run services describe $VLLM_ROUTING_SERVICE_NAME \
+            --project $PROJECT_ID --region $REGION --format 'value(status.url)')
+          VLLM_GENERATION_URL=$(gcloud run services describe $VLLM_GENERATION_SERVICE_NAME \
+            --project $PROJECT_ID --region $REGION --format 'value(status.url)')
+          echo "VLLM_ROUTING_URL=${VLLM_ROUTING_URL}/v1" >> $GITHUB_ENV
+          echo "VLLM_GENERATION_URL=${VLLM_GENERATION_URL}/v1" >> $GITHUB_ENV
+          echo "Routing:    ${VLLM_ROUTING_URL}/v1"
+          echo "Generation: ${VLLM_GENERATION_URL}/v1"
+
+      - name: Build backend Docker image
+        run: |
+          docker build \
+            -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }} \
+            -f deploy/Dockerfile .
+
+      - name: Push backend Docker image
+        run: |
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }}
+
+      - name: Deploy backend to Cloud Run (vLLM pipeline)
+        run: |
+          gcloud run deploy $BACKEND_SERVICE_NAME \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }} \
+            --platform managed \
+            --project $PROJECT_ID \
+            --region $REGION \
+            --port 8000 \
+            --quiet \
+            --allow-unauthenticated \
+            --memory 2Gi \
+            --cpu 2 \
+            --timeout 300 \
+            --min-instances 1 \
+            --max-instances 10 \
+            --cpu-boost \
+            --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+            --command reflex \
+            --args run,--env,prod,--backend-only,--backend-host,0.0.0.0 \
+            --set-secrets "REDIS_HOST=redis-host:latest" \
+            --set-secrets "REDIS_PORT=redis-port:latest" \
+            --set-secrets "REDIS_PASSWORD=redis-password:latest" \
+            --set-env-vars "REDIS_INIT_FROM_LOCAL=false" \
+            --set-secrets "PINECONE_API_KEY=pinecone-api-key:latest" \
+            --set-secrets "PINECONE_ENVIRONMENT=pinecone-environment:latest" \
+            --set-secrets "PINECONE_INDEX_NAME=pinecone-index-name:latest" \
+            --set-env-vars "PINECONE_INIT_FROM_LOCAL=false" \
+            --set-secrets "NEO4J_URI=neo4j-uri:latest" \
+            --set-secrets "NEO4J_USERNAME=neo4j-username:latest" \
+            --set-secrets "NEO4J_PASSWORD=neo4j-password:latest" \
+            --set-secrets "NEO4J_DATABASE=neo4j-database:latest" \
+            --set-env-vars "NEO4J_INIT_FROM_LOCAL=false" \
+            --set-secrets "TAVILY_API_KEY=tavily-api-key:latest" \
+            --set-secrets "COHERE_API_KEY=cohere-api-key:latest" \
+            --set-secrets "LANGSMITH_API_KEY=langchain-api-key:latest" \
+            --set-env-vars "LANGSMITH_TRACING=true" \
+            --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \
+            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com" \
+            --set-env-vars "LLM_PIPELINE=vllm" \
+            --set-env-vars "VLLM_ROUTING_URL=${{ env.VLLM_ROUTING_URL }}" \
+            --set-env-vars "VLLM_GENERATION_URL=${{ env.VLLM_GENERATION_URL }}"
+
+      - name: Get backend URL
+        run: |
+          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME \
+            --project $PROJECT_ID --region $REGION --format 'value(status.url)')
+          echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
+
+      - name: Build frontend Docker image (static export)
+        run: |
+          docker build \
+            --build-arg API_URL=$BACKEND_URL \
+            -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-frontend:${{ github.sha }} \
+            -f deploy/Dockerfile.frontend .
+
+      - name: Push frontend Docker image
+        run: |
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-frontend:${{ github.sha }}
+
+      - name: Deploy frontend to Cloud Run
+        run: |
+          gcloud run deploy $FRONTEND_SERVICE_NAME \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-frontend:${{ github.sha }} \
+            --platform managed \
+            --project $PROJECT_ID \
+            --region $REGION \
+            --port 8080 \
+            --quiet \
+            --allow-unauthenticated \
+            --memory 512Mi \
+            --cpu 1 \
+            --timeout 300 \
+            --min-instances 0 \
+            --max-instances 10 \
+            --command caddy \
+            --args run,--config,/etc/caddy/Caddyfile,--adapter,caddyfile
+
+      - name: Show deployment URLs
+        run: |
+          BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME \
+            --project $PROJECT_ID --region $REGION --format 'value(status.url)')
+          FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE_NAME \
+            --project $PROJECT_ID --region $REGION --format 'value(status.url)')
+          echo "Routing vLLM:    ${{ env.VLLM_ROUTING_URL }}"
+          echo "Generation vLLM: ${{ env.VLLM_GENERATION_URL }}"
+          echo "Backend:         $BACKEND_URL"
+          echo "Frontend:        $FRONTEND_URL"

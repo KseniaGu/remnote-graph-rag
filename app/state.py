@@ -153,6 +153,8 @@ class AppState(rx.State):
 
         async with self:
             self.current_input = ""
+
+        async with self:
             self.is_processing = True
             self.error_message = ""
             self.agent_history = []

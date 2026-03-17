@@ -10,6 +10,10 @@ personal [RemNote](https://www.remnote.com) knowledge base through the creation 
 querying information and visualizing data. Internal personal knowledge can also be expanded through external web
 research.
 
+## Live demo
+
+Try the application: [open reflex app](https://remnote-graph-rag-frontend-259340997119.europe-west1.run.app/)
+
 ## Architecture
 
 ### Backend
