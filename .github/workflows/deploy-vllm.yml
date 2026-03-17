@@ -81,12 +81,12 @@ jobs:
             --port 8080 \
             --quiet \
             --no-allow-unauthenticated \
-            --memory 24Gi \
+            --memory 32Gi \
             --cpu 8 \
             --gpu 1 \
             --gpu-type nvidia-l4 \
             --concurrency 4 \
-            --timeout 600 \
+            --timeout 1200 \
             --min-instances 0 \
             --max-instances 2 \
             --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
