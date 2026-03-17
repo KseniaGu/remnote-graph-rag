@@ -156,3 +156,4 @@ See `deploy/` directory for Dockerfile and deployment configurations.
 - Fix bugs (?)
 - Improve interface
 - Try [DSPy](https://github.com/stanfordnlp/dspy)?
+- Add feedback gathering to further improve the prompts (e.g. XML → Markdown?)

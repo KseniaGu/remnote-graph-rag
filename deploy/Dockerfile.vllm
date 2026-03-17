@@ -1,8 +1,8 @@
 FROM vllm/vllm-openai:latest
 
-RUN pip install --no-cache-dir -U transformers tokenizers huggingface_hub hf_transfer
+RUN pip install --no-cache-dir -U transformers tokenizers huggingface_hub
 
-ENV MODEL_NAME="Qwen/Qwen3.5-9B"
+ENV MODEL_NAME="/mnt/models/qwen-9b"
 ENV MAX_MODEL_LEN=8192
 ENV GPU_MEM_UTIL=0.90
 ENV EXTRA_ARGS=""

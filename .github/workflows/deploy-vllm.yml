@@ -90,9 +90,10 @@ jobs:
             --min-instances 0 \
             --max-instances 2 \
             --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+            --add-volume=name=models-volume,type=cloud-storage,bucket=remnote-graph-rag-models \
+            --add-volume-mount=volume=models-volume,mount-path=/mnt/models \
             --set-secrets "HF_TOKEN=hf-token:latest" \
-            --set-env-vars "HF_HUB_ENABLE_HF_TRANSFER=1" \
-            --set-env-vars "MODEL_NAME=Qwen/Qwen3.5-9B" \
+            --set-env-vars "MODEL_NAME=/mnt/models/qwen-9b" \
             --set-env-vars "MAX_MODEL_LEN=8192" \
             --set-env-vars "GPU_MEM_UTIL=0.90" \
             --set-env-vars "EXTRA_ARGS=--enable-auto-tool-choice --tool-call-parser qwen3_coder" \
