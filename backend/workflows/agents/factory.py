@@ -50,20 +50,19 @@ class AgentsFactory:
             )
 
         if provider == LLMProviderType.vllm:
+            role_params = model_settings.model_dump(include={"temperature", "top_p", "max_tokens", "base_url"})
             return ChatOpenAI(
                 model=model_settings.model_name,
-                base_url=getattr(model_settings, "base_url", None),
                 api_key=api_key or "EMPTY",
-                temperature=model_settings.temperature,
-                max_tokens=getattr(model_settings, "num_predict", None),
+                **role_params,
             )
 
         if provider == LLMProviderType.openai:
+            role_params = model_settings.model_dump(include={"temperature", "top_p", "max_tokens", "base_url"})
             return ChatOpenAI(
                 model=model_settings.model_name,
                 api_key=api_key,
-                temperature=model_settings.temperature,
-                max_tokens=getattr(model_settings, "num_predict", None),
+                **role_params,
             )
 
         if provider == LLMProviderType.gemini:

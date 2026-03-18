@@ -196,7 +196,7 @@ jobs:
             --set-env-vars "VLLM_ROUTING_URL=${{ env.VLLM_ROUTING_URL }}" \
             --set-env-vars "VLLM_GENERATION_URL=${{ env.VLLM_GENERATION_URL }}" \
             --vpc-connector=vllm-vpc-connector \
-            --vpc-egress=all
+            --vpc-egress=private-ranges-only
 
       - name: Get backend URL
         run: |

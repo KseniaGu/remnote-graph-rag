@@ -1,5 +1,7 @@
 FROM python:3.11-slim as builder
 
+ENV HF_HOME=/home/appuser/.cache/huggingface
+
 RUN apt-get update && apt-get install -y \
     curl \
     unzip \
@@ -18,16 +20,18 @@ COPY . .
 
 RUN reflex init
 
-RUN python -c "\
-from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
 
 FROM python:3.11-slim
+
+ENV HF_HOME=/home/appuser/.cache/huggingface
+ENV PYTHONUNBUFFERED=1
 
 RUN adduser --disabled-password --no-create-home appuser
 
 WORKDIR /app
 
+COPY --from=builder $HF_HOME $HF_HOME
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.local/share/reflex /home/appuser/.local/share/reflex

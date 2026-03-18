@@ -37,6 +37,9 @@ class OpenAISettings(BaseLLMSettings):
     """
     model_config = BaseLLMSettings.model_config_with_prefix("OPENAI_")
     api_key: SecretStr | None = None
+    top_p: float = 0.5
+    max_tokens: int = 128
+    base_url: str = ""
 
 
 class OllamaSettings(BaseLLMSettings):
@@ -80,7 +83,7 @@ class ResearcherModelSettings(BaseSettings):
     one for tool-calling and one for structured output synthesis.
     """
     # vLLM self-hosted alternative: Qwen3.5-9B (provider=vllm, base_url=VLLM_ROUTING_URL)
-    with_tools: OllamaSettings = OllamaSettings(
+    with_tools: BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.researcher,
         model_name="qwen3.5:cloud",
         temperature=0.0,
@@ -90,7 +93,7 @@ class ResearcherModelSettings(BaseSettings):
         num_predict=1024,
     )
     # vLLM self-hosted alternative: Qwen3.5-9B (same instance as with_tools)
-    structured: OllamaSettings = OllamaSettings(
+    structured: BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.researcher,
         model_name="qwen3.5:cloud",
         temperature=0.0,
@@ -179,65 +182,58 @@ def _vllm_models() -> ModelSettings:
     routing_url = os.environ["VLLM_ROUTING_URL"]
     generation_url = os.environ.get("VLLM_GENERATION_URL", routing_url)
     return ModelSettings(
-        orchestrator=OllamaSettings(
+        orchestrator=OpenAISettings(
             role=ModelRoleType.orchestrator,
             provider=LLMProviderType.vllm,
             model_name="Qwen/Qwen3.5-9B",
             base_url=routing_url,
             temperature=0.,
-            num_predict=2048,
+            max_tokens=2048,
             prompt_version={"graph_index": "v2", "routing": "v2"},
         ),
-        retriever=OllamaSettings(
+        retriever=OpenAISettings(
             role=ModelRoleType.retriever,
             provider=LLMProviderType.vllm,
             model_name="Qwen/Qwen3.5-9B",
             base_url=routing_url,
             temperature=0.,
-            num_ctx=8192,
-            num_predict=512,
+            max_tokens=512,
             prompt_version="v2",
         ),
         researcher=ResearcherModelSettings(
-            with_tools=OllamaSettings(
+            with_tools=OpenAISettings(
                 role=ModelRoleType.researcher,
                 provider=LLMProviderType.vllm,
                 model_name="Qwen/Qwen3.5-9B",
                 base_url=routing_url,
                 temperature=0.,
-                num_ctx=8192,
-                num_predict=1024,
+                max_tokens=1024,
             ),
-            structured=OllamaSettings(
+            structured=OpenAISettings(
                 role=ModelRoleType.researcher,
                 provider=LLMProviderType.vllm,
                 model_name="Qwen/Qwen3.5-9B",
                 base_url=routing_url,
                 temperature=0.,
-                num_ctx=8192,
-                num_predict=2048,
+                max_tokens=2048,
             ),
         ),
-        analyst=OllamaSettings(
+        analyst=OpenAISettings(
             role=ModelRoleType.analyst,
             provider=LLMProviderType.vllm,
             model_name="Qwen/Qwen3.5-9B",
             base_url=generation_url,
             temperature=0.15,
-            num_ctx=8192,
-            num_predict=4096,
-            reasoning=True,
+            max_tokens=4096,
             prompt_version="v2",
         ),
-        mentor=OllamaSettings(
+        mentor=OpenAISettings(
             role=ModelRoleType.mentor,
             provider=LLMProviderType.vllm,
             model_name="Qwen/Qwen3.5-9B",
             base_url=generation_url,
             temperature=0.7,
-            num_ctx=8192,
-            num_predict=2048,
-            reasoning=True,
+            max_tokens=2048,
             prompt_version="v2",
         ),
     )
