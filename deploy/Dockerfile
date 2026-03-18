@@ -25,6 +25,7 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 FROM python:3.11-slim
 
 ENV HF_HOME=/home/appuser/.cache/huggingface
+ENV HF_HUB_OFFLINE=1
 ENV PYTHONUNBUFFERED=1
 
 RUN adduser --disabled-password --no-create-home appuser

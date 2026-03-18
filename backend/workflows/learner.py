@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from io import BytesIO
 
 from langgraph.graph import StateGraph, START, END
@@ -75,6 +76,7 @@ class LearnerWorkflow:
         """
         embedder = HuggingFaceEmbedding(
             self.models_settings.embedder.model_path,
+            cache_folder=os.environ.get("HF_HOME"),
             trust_remote_code=True,
             device=self.models_settings.embedder.device,
             embed_batch_size=10,
