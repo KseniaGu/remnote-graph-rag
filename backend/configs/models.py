@@ -185,7 +185,7 @@ def _vllm_models() -> ModelSettings:
         orchestrator=OpenAISettings(
             role=ModelRoleType.orchestrator,
             provider=LLMProviderType.vllm,
-            model_name="Qwen/Qwen3.5-9B",
+            model_name="/mnt/models/qwen-9b",
             base_url=routing_url,
             temperature=0.,
             max_tokens=2048,
@@ -194,7 +194,7 @@ def _vllm_models() -> ModelSettings:
         retriever=OpenAISettings(
             role=ModelRoleType.retriever,
             provider=LLMProviderType.vllm,
-            model_name="Qwen/Qwen3.5-9B",
+            model_name="/mnt/models/qwen-9b",
             base_url=routing_url,
             temperature=0.,
             max_tokens=512,
@@ -204,7 +204,7 @@ def _vllm_models() -> ModelSettings:
             with_tools=OpenAISettings(
                 role=ModelRoleType.researcher,
                 provider=LLMProviderType.vllm,
-                model_name="Qwen/Qwen3.5-9B",
+                model_name="/mnt/models/qwen-9b",
                 base_url=routing_url,
                 temperature=0.,
                 max_tokens=1024,
@@ -212,7 +212,7 @@ def _vllm_models() -> ModelSettings:
             structured=OpenAISettings(
                 role=ModelRoleType.researcher,
                 provider=LLMProviderType.vllm,
-                model_name="Qwen/Qwen3.5-9B",
+                model_name="/mnt/models/qwen-9b",
                 base_url=routing_url,
                 temperature=0.,
                 max_tokens=2048,
@@ -221,7 +221,7 @@ def _vllm_models() -> ModelSettings:
         analyst=OpenAISettings(
             role=ModelRoleType.analyst,
             provider=LLMProviderType.vllm,
-            model_name="Qwen/Qwen3.5-9B",
+            model_name="/mnt/models/qwen-9b",
             base_url=generation_url,
             temperature=0.15,
             max_tokens=4096,
@@ -230,7 +230,7 @@ def _vllm_models() -> ModelSettings:
         mentor=OpenAISettings(
             role=ModelRoleType.mentor,
             provider=LLMProviderType.vllm,
-            model_name="Qwen/Qwen3.5-9B",
+            model_name="/mnt/models/qwen-9b",
             base_url=generation_url,
             temperature=0.7,
             max_tokens=2048,
