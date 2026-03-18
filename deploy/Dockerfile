@@ -35,7 +35,6 @@ COPY --from=builder $HF_HOME $HF_HOME
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.local/share/reflex /home/appuser/.local/share/reflex
-COPY --from=builder /root/.cache/huggingface /home/appuser/.cache/huggingface
 
 COPY --from=builder /app /app
 
