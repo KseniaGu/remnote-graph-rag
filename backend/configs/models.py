@@ -177,7 +177,7 @@ def _ollama_models() -> ModelSettings:
 def _vllm_models() -> ModelSettings:
     """vLLM Cloud Run GPU pipeline."""
     routing_url = os.environ["VLLM_ROUTING_URL"]
-    generation_url = os.environ["VLLM_GENERATION_URL"]
+    generation_url = os.environ.get("VLLM_GENERATION_URL", routing_url)
     return ModelSettings(
         orchestrator=OllamaSettings(
             role=ModelRoleType.orchestrator,
@@ -221,10 +221,10 @@ def _vllm_models() -> ModelSettings:
         analyst=OllamaSettings(
             role=ModelRoleType.analyst,
             provider=LLMProviderType.vllm,
-            model_name="Qwen/Qwen3.5-27B",
+            model_name="Qwen/Qwen3.5-9B",
             base_url=generation_url,
             temperature=0.15,
-            num_ctx=32768,
+            num_ctx=8192,
             num_predict=4096,
             reasoning=True,
             prompt_version="v2",
@@ -232,7 +232,7 @@ def _vllm_models() -> ModelSettings:
         mentor=OllamaSettings(
             role=ModelRoleType.mentor,
             provider=LLMProviderType.vllm,
-            model_name="Qwen/Qwen3.5-27B",
+            model_name="Qwen/Qwen3.5-9B",
             base_url=generation_url,
             temperature=0.7,
             num_ctx=8192,
