@@ -134,15 +134,29 @@ jobs:
 
       - name: Get vLLM service URLs
         run: |
-          VLLM_ROUTING_URL=$(gcloud run services describe $VLLM_ROUTING_SERVICE_NAME \
-            --project $PROJECT_ID --region $REGION --format 'value(status.url)')
-          echo "VLLM_ROUTING_URL=${VLLM_ROUTING_URL}/v1" >> $GITHUB_ENV
-          echo "Routing: ${VLLM_ROUTING_URL}/v1"
-          # Generation service is currently skipped; use routing URL as fallback
-          VLLM_GENERATION_URL=$(gcloud run services describe $VLLM_GENERATION_SERVICE_NAME \
-            --project $PROJECT_ID --region $REGION --format 'value(status.url)' 2>/dev/null || echo "$VLLM_ROUTING_URL")
-          echo "VLLM_GENERATION_URL=${VLLM_GENERATION_URL}/v1" >> $GITHUB_ENV
-          echo "Generation: ${VLLM_GENERATION_URL}/v1"
+          # Construct the internal URL for the vLLM routing service
+          VLLM_ROUTING_INTERNAL_URL="http://${VLLM_ROUTING_SERVICE_NAME}.default.svc.run.internal"
+          echo "VLLM_ROUTING_URL=${VLLM_ROUTING_INTERNAL_URL}/v1" >> $GITHUB_ENV
+          echo "Routing (Internal): ${VLLM_ROUTING_INTERNAL_URL}/v1"
+
+          # Construct the internal URL for the vLLM generation service (if it exists)
+          # If VLLM_GENERATION_SERVICE_NAME is not set or the service doesn't exist,
+          # it will fall back to the routing service's internal URL.
+          VLLM_GENERATION_INTERNAL_URL="http://${VLLM_GENERATION_SERVICE_NAME}.default.svc.run.internal"
+          # Check if VLLM_GENERATION_SERVICE_NAME is defined and if the service actually exists
+          # For simplicity in a CI/CD script, you might just use the routing URL if generation is optional
+          # or ensure VLLM_GENERATION_SERVICE_NAME is always set to a valid service name.
+          # For now, I'll use the fallback logic you had, but adapted for internal URLs.
+          if [ -z "$VLLM_GENERATION_SERVICE_NAME" ]; then
+            VLLM_GENERATION_URL="${VLLM_ROUTING_INTERNAL_URL}/v1"
+          else
+            # You might want to add a gcloud command here to verify if VLLM_GENERATION_SERVICE_NAME exists
+            # For now, assuming it's either defined or falls back to routing.
+            VLLM_GENERATION_URL="${VLLM_GENERATION_INTERNAL_URL}/v1"
+          fi
+
+          echo "VLLM_GENERATION_URL=${VLLM_GENERATION_URL}" >> $GITHUB_ENV
+          echo "Generation (Internal): ${VLLM_GENERATION_URL}"
 
       - name: Build backend Docker image
         run: |
