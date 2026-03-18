@@ -101,7 +101,7 @@ jobs:
             --startup-probe=tcpSocket.port=8080,periodSeconds=30,failureThreshold=60,timeoutSeconds=29 \
             --ingress=internal \
             --vpc-connector=vllm-vpc-connector \
-            --egress-settings=all
+            --vpc-egress=all
 
       # TODO: Generation service skipped for now
       # Re-enable once a suitable model/GPU config is chosen.
@@ -196,7 +196,7 @@ jobs:
             --set-env-vars "VLLM_ROUTING_URL=${{ env.VLLM_ROUTING_URL }}" \
             --set-env-vars "VLLM_GENERATION_URL=${{ env.VLLM_GENERATION_URL }}" \
             --vpc-connector=vllm-vpc-connector \
-            --egress-settings=all
+            --vpc-egress=all
 
       - name: Get backend URL
         run: |
