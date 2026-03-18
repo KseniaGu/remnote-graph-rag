@@ -20,7 +20,8 @@ COPY . .
 
 RUN reflex init
 
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='sentence-transformers/all-MiniLM-L6-v2', local_files_only=False, cache_dir='/home/appuser/.cache/huggingface')"
+
 
 FROM python:3.11-slim
 
