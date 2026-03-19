@@ -1,5 +1,9 @@
+import asyncio
 from typing import Any
 
+import google.auth.transport.requests
+import google.oauth2.id_token
+import httpx
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
@@ -16,6 +20,23 @@ from backend.configs.enums import LLMProviderType
 from backend.utils.common_funcs import get_logger
 
 logger = get_logger(WORKFLOW_LOGGING)
+
+
+# Sidecar is too much, let it be simple approach for now
+class GoogleAuthAsyncClient(httpx.AsyncClient):
+    def __init__(self, target_audience: str, **kwargs):
+        super().__init__(**kwargs)
+        self.target_audience = target_audience
+        self.auth_req = google.auth.transport.requests.Request()
+
+    async def send(self, request: httpx.Request, **kwargs):
+        token = await asyncio.to_thread(
+            google.oauth2.id_token.fetch_id_token,
+            self.auth_req,
+            self.target_audience
+        )
+        request.headers["Authorization"] = f"Bearer {token}"
+        return await super().send(request, **kwargs)
 
 
 class AgentsFactory:
@@ -50,10 +71,13 @@ class AgentsFactory:
             )
 
         if provider == LLMProviderType.vllm:
-            role_params = model_settings.model_dump(include={"temperature", "top_p", "max_tokens", "base_url"})
+            async_auth_client = GoogleAuthAsyncClient(target_audience=model_settings.base_url)
+            role_params = model_settings.model_dump(include={"temperature", "top_p", "max_tokens"})
             return ChatOpenAI(
                 model=model_settings.model_name,
                 api_key=api_key or "EMPTY",
+                base_url=f"{model_settings.base_url}/v1",
+                http_async_client=async_auth_client,
                 **role_params,
             )
 
