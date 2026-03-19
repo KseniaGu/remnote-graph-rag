@@ -111,6 +111,14 @@ class AppState(rx.State):
         """Updates the current input value."""
         self.current_input = value
 
+    def handle_form_submit(self, form_data: dict):
+        """Handles chat form submission using the current DOM value to avoid WebSocket sync race conditions."""
+        value = form_data.get("message", "").strip()
+        if not value or self.is_processing:
+            return
+        self.current_input = value
+        return AppState.send_message
+
     def toggle_context_panel(self):
         """Toggles the context panel visibility."""
         self.show_context_panel = not self.show_context_panel

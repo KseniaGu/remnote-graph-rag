@@ -285,7 +285,6 @@ def chat_input() -> rx.Component:
 (function() {
     function initChatInput() {
         var ta = document.getElementById('chat-input');
-        var btn = document.getElementById('chat-send-btn');
         if (!ta || ta._chatInited) return;
         ta._chatInited = true;
 
@@ -295,13 +294,14 @@ def chat_input() -> rx.Component:
         });
 
         ta.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                if (e.ctrlKey || e.metaKey || e.shiftKey) {
-                    return;
-                }
+            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
                 e.preventDefault();
                 e.stopPropagation();
-                if (btn && !btn.disabled) btn.click();
+                var form = ta.closest('form');
+                var btn = document.getElementById('chat-send-btn');
+                if (form && btn && !btn.disabled) {
+                    form.requestSubmit();
+                }
             }
         }, true);
     }
@@ -313,36 +313,42 @@ def chat_input() -> rx.Component:
 })();
 """),
         processing_indicator(),
-        rx.hstack(
-            rx.text_area(
-                id="chat-input",
-                placeholder=CHAT_INPUT_PLACEHOLDER,
-                value=AppState.current_input,
-                on_change=AppState.set_input,
-                disabled=AppState.is_processing,
-                rows="1",
-                style={
-                    **INPUT_STYLE,
-                    "flex": "1",
-                    "resize": "none",
-                    "max_height": "120px",
-                    "overflow_y": "auto",
-                },
-            ),
-            rx.button(
-                rx.cond(
-                    AppState.is_processing,
-                    rx.icon("loader-circle", size=20, class_name="animate-spin"),
-                    rx.icon("send", size=20),
+        rx.form(
+            rx.hstack(
+                rx.text_area(
+                    id="chat-input",
+                    name="message",
+                    placeholder=CHAT_INPUT_PLACEHOLDER,
+                    value=AppState.current_input,
+                    on_change=AppState.set_input,
+                    disabled=AppState.is_processing,
+                    rows="1",
+                    style={
+                        **INPUT_STYLE,
+                        "flex": "1",
+                        "resize": "none",
+                        "max_height": "120px",
+                        "overflow_y": "auto",
+                    },
                 ),
-                id="chat-send-btn",
-                on_click=AppState.send_message,
-                disabled=AppState.is_processing | (AppState.current_input == ""),
-                style=BUTTON_PRIMARY_STYLE,
+                rx.button(
+                    rx.cond(
+                        AppState.is_processing,
+                        rx.icon("loader-circle", size=20, class_name="animate-spin"),
+                        rx.icon("send", size=20),
+                    ),
+                    id="chat-send-btn",
+                    type="submit",
+                    disabled=AppState.is_processing | (AppState.current_input == ""),
+                    style=BUTTON_PRIMARY_STYLE,
+                ),
+                spacing="3",
+                width="100%",
+                align="end",
             ),
-            spacing="3",
+            on_submit=AppState.handle_form_submit,
+            reset_on_submit=False,
             width="100%",
-            align="end",
         ),
         rx.cond(
             ~AppState.has_messages,
