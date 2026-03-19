@@ -100,7 +100,7 @@ class ResearcherModelSettings(BaseSettings):
         num_ctx=8192,
         top_k=50,
         top_p=1.,
-        num_predict=2048,
+        num_predict=4096,
     )
     prompt_version: str = "v2"
 
@@ -148,7 +148,7 @@ class ModelSettings(BaseSettings):
         num_ctx=32768,
         top_k=40,
         top_p=0.9,
-        num_predict=4096,
+        num_predict=8192,
         reasoning=True,
         prompt_version="v2"
     )
@@ -160,7 +160,7 @@ class ModelSettings(BaseSettings):
         num_ctx=8192,
         top_k=40,
         top_p=0.8,
-        num_predict=2048,
+        num_predict=8192,
         reasoning=True,
         prompt_version="v2"
     )
@@ -180,7 +180,7 @@ def _ollama_models() -> ModelSettings:
 def _vllm_models() -> ModelSettings:
     """vLLM Cloud Run GPU pipeline."""
     routing_url = os.environ["VLLM_ROUTING_URL"]
-    generation_url = os.environ.get("VLLM_GENERATION_URL", routing_url)
+    generation_url = os.environ.get("VLLM_GENERATION_URL")
     vllm_model_path = os.environ.get("VLLM_MODEL_PATH")
     return ModelSettings(
         orchestrator=OpenAISettings(
@@ -216,7 +216,7 @@ def _vllm_models() -> ModelSettings:
                 model_name=vllm_model_path,
                 base_url=routing_url,
                 temperature=0.,
-                max_tokens=2048,
+                max_tokens=4096,
             ),
         ),
         analyst=OpenAISettings(
@@ -225,7 +225,7 @@ def _vllm_models() -> ModelSettings:
             model_name=vllm_model_path,
             base_url=generation_url,
             temperature=0.15,
-            max_tokens=4096,
+            max_tokens=8192,
             prompt_version="v2",
         ),
         mentor=OpenAISettings(
@@ -234,7 +234,7 @@ def _vllm_models() -> ModelSettings:
             model_name=vllm_model_path,
             base_url=generation_url,
             temperature=0.7,
-            max_tokens=2048,
+            max_tokens=8192,
             prompt_version="v2",
         ),
     )
