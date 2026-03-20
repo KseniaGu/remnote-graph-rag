@@ -4,6 +4,7 @@ from starlette.responses import JSONResponse
 from app.components import sidebar, main_content, error_toast
 from app.strings import APP_PAGE_TITLE
 from app.styles import COLORS, GLOBAL_STYLES
+from backend.configs.constants import FAVICON_URL
 
 
 def index() -> rx.Component:
@@ -88,6 +89,7 @@ app = rx.App(
     ],
     head_components=[
         rx.el.script(src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"),
+        rx.el.link(rel="icon", href=FAVICON_URL),
     ],
 )
 

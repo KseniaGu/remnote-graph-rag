@@ -158,3 +158,4 @@ See `deploy/` directory for Dockerfile and deployment configurations.
 - Try [DSPy](https://github.com/stanfordnlp/dspy)?
 - Add feedback gathering to further improve the prompts (e.g. XML → Markdown?)
 - Add functionality to update personal knowledge graph (and RemNote?)
+- Fix huge cold start
