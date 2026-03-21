@@ -108,27 +108,28 @@ configurations are also possible.
       and the property graph to Neo4j.
 
 3. **Configure [GitHub Actions](https://github.com/features/actions):**
-    - Create a regional Artifact Registry **Docker** repository in `REGION` (e.g. `europe-west1`) and make sure its name
-      matches `ARTIFACT_REGISTRY_REPOSITORY`.
+    - Create a regional Artifact Registry Docker repository in `REGION` (e.g. `europe-west1`).
+    - Create service accounts for GitHub Actions and Runtime managing (or one SA for both).
     - Set up Workload Identity Federation (OIDC) for GitHub Actions and grant the GitHub Actions service account the
       permissions needed to deploy to Cloud Run and push images to Artifact Registry.
-    - In your GitHub repo, go to `Settings -> Secrets and variables -> Actions` and add:
-        - Variables: `REGION`, `ARTIFACT_REGISTRY_REPOSITORY`, `BACKEND_SERVICE_NAME`, `FRONTEND_SERVICE_NAME`
-        - Secrets (WIF auth): `GCP_PROJECT_ID`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`
-        - Secrets (backend runtime): `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `PINECONE_API_KEY`,
-          `PINECONE_ENVIRONMENT`, `PINECONE_INDEX_NAME`, `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`,
-          `NEO4J_DATABASE`, `TAVILY_API_KEY`, `COHERE_API_KEY` and `OLLAMA_API_KEY`
+    - Configure secrets and variables. The configuration files in the `.github.workflows` directory contain suggestions
+      for secret configuration. For example, there is advice to set up API keys and passwords using the GCP Secrets
+      Manager.
     - The workflow in `.github/workflows/deploy.yml` builds two images and deploys two Cloud Run services:
       backend (port `8000`) and frontend (port `8080`). The frontend is statically exported at build time and served by
       Caddy.
+    - The workflow in `.github/workflows/deploy-vllm.yml` creates three images and deploys three Cloud Run services. The
+      first two are the same as mentioned above, and the third is a new one for hosting LLMs using the vLLM library.
+      Before deploying, it's recommended to download the models and store them in a bucket from which they will be
+      loaded during the deployment process. You also need to add the "run.invoker" role to the backend Runtime SA in the
+      vllm service in order to allow model calls.
 
 4. **Deploy:**
    ```bash
    git push origin main
    ```
-   GitHub Actions will automatically build and deploy to Cloud Run.
-
-See `deploy/` directory for Dockerfile and deployment configurations.
+   GitHub Actions will automatically build and deploy to Cloud Run the **basic workflow**.\
+   To deploy the **vLLM workflow**, you should manually trigger it in the GitHub UI/CLI.
 
 ## Usage examples
 
