@@ -1,7 +1,16 @@
 # RemNote Graph RAG | AI Practice System
 
-An AI practice and learning system that combines knowledge graph with multi-agent workflows to help you master technical
-concepts through interactive learning, research, and visualization.
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![Reflex](https://img.shields.io/badge/Reflex-Web_Framework-6A5ACD.svg)](https://reflex.dev/)
+[![Neo4j](https://img.shields.io/badge/LlamaIndex-Knowledge_Graph-FF8DF2.svg)](https://neo4j.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Multi--Agent-7DBCFF.svg)](https://github.com/langchain-ai/langgraph)
+[![GCP Cloud Run](https://img.shields.io/badge/GCP-Cloud_Run-1A73E8.svg)](https://cloud.google.com/run)
+
+> An AI practice and learning system that combines knowledge graph with multi-agent workflows to help you master
+> technical
+> concepts through interactive learning, research, and visualization.
+
+### [**Live Demo**](https://remnote-graph-rag-frontend-259340997119.europe-west1.run.app/)
 
 ## Overview
 
@@ -10,11 +19,7 @@ personal [RemNote](https://www.remnote.com) knowledge base through the creation 
 querying information and visualizing data. Internal personal knowledge can also be expanded through external web
 research.
 
-## Live demo
-
-Try the application: [open reflex app](https://remnote-graph-rag-frontend-259340997119.europe-west1.run.app/)
-
-## Architecture
+## System architecture
 
 ### Backend
 
@@ -50,18 +55,13 @@ Web interface built with [Reflex](https://github.com/reflex-dev/reflex) framewor
 
 ## Prepare environment
 
-1. **Get data:**\
-   Download RemNote data in Markdown format and move all .md files to the `data.raw.<remnote_data_folder>` directory (
-   specify the <remnote_data_folder> in the `backend.configs.constants.REMNOTE_FOLDER_NAME` variable).
-2. **Parse data:**\
-   We need to parse the files: run the `scripts.parse_data.py` script.
-3. **Create index:**\
-   Finally, create the knowledge graph from the parsed data by running the `scripts.build_graph_index.py` script.
+1. **Ingest**: Place RemNote Markdown exports in `data.raw`.
+2. **Parse**: `python scripts/parse_data.py`
+3. **Index**: `python scripts/build_graph_index.py`
 
 Both scripts will save the data to the local storage by default (the path is specified in the
 `backend.configs.paths.PathSettings.local_storage_dir` parameter). See the comments in the scripts to use non-local
-storage (Redis and Neo4j).\
-Now we are ready to run the application.
+storage (Redis and Neo4j).
 
 ## Running the application locally
 
@@ -101,14 +101,13 @@ configurations are also possible.
     - Create Neo4j Sandbox/Aura instance and note `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `NEO4J_DATABASE`
 
 2. **Migrate local data to cloud databases:**
-    - Parse the data and create an index by following the instructions in the "Prepare environment" section.
     - Update the `.env` file with your cloud database credentials. Set `REDIS_INIT_FROM_LOCAL=true`,
       `PINECONE_INIT_FROM_LOCAL=true`, and `NEO4J_INIT_FROM_LOCAL=true`.
     - Run the `scripts.migrate_to_cloud.py` script. This will migrate documents/indexes to Redis, vectors to Pinecone,
       and the property graph to Neo4j.
 
 3. **Configure [GitHub Actions](https://github.com/features/actions):**
-    - Create a regional Artifact Registry Docker repository in `REGION` (e.g. `europe-west1`).
+    - Create an Artifact Registry Docker repository in `REGION` (e.g. `europe-west1`).
     - Create service accounts for GitHub Actions and Runtime managing (or one SA for both).
     - Set up Workload Identity Federation (OIDC) for GitHub Actions and grant the GitHub Actions service account the
       permissions needed to deploy to Cloud Run and push images to Artifact Registry.
