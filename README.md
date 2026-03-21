@@ -2,7 +2,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 [![Reflex](https://img.shields.io/badge/Reflex-Web_Framework-6A5ACD.svg)](https://reflex.dev/)
-[![Neo4j](https://img.shields.io/badge/LlamaIndex-Knowledge_Graph-FF8DF2.svg)](https://neo4j.com/)
+[![LlamaIndex](https://img.shields.io/badge/LlamaIndex-Knowledge_Graph-FF8DF2.svg)](https://developers.llamaindex.ai/python/framework/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Multi--Agent-7DBCFF.svg)](https://github.com/langchain-ai/langgraph)
 [![GCP Cloud Run](https://img.shields.io/badge/GCP-Cloud_Run-1A73E8.svg)](https://cloud.google.com/run)
 
@@ -10,7 +10,7 @@
 > technical
 > concepts through interactive learning, research, and visualization.
 
-### [**Live Demo**](https://remnote-graph-rag-frontend-259340997119.europe-west1.run.app/)
+## [**Live Demo**](https://remnote-graph-rag-frontend-259340997119.europe-west1.run.app/)
 
 ## Overview
 
