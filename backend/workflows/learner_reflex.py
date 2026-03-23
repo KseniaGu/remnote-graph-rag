@@ -12,6 +12,7 @@ try:
 except ImportError:
     _RedisSaver = None
 
+from backend.configs.constants import RECURSION_LIMIT
 from backend.configs.enums import WorkflowEventType
 from backend.configs.messages import FALLBACK_ALL_SOURCES_EXHAUSTED, FALLBACK_VISUALIZATION_FAILED, \
     FALLBACK_NO_RESULTS, FALLBACK_DEFAULT, ERROR_RECURSION_LIMIT
@@ -137,7 +138,7 @@ class ReflexLearnerWorkflow:
             self,
             user_message: str,
             message_history: list[dict],
-            recursion_limit: int = 10
+            recursion_limit: int = RECURSION_LIMIT
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """
         Processes a user message through the workflow and yield events.
@@ -230,7 +231,7 @@ class ReflexLearnerWorkflow:
             self,
             user_message: str,
             message_history: list[dict],
-            recursion_limit: int = 10
+            recursion_limit: int = RECURSION_LIMIT
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """Streams workflow execution with detailed status updates.
         

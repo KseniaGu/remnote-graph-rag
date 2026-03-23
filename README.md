@@ -152,7 +152,7 @@ configurations are also possible.
 
 - Consider adding more flexible graph traversal options, perhaps a dynamic one?
 - Testing! The main part of the project is missing
-- Add a database to store user sessions, logs, and other data. Redis is only for the vector search
+- Add a database to store user sessions, logs, and other data
 - Fix bugs
 - Improve interface
 - Try [DSPy](https://github.com/stanfordnlp/dspy)?
@@ -160,3 +160,4 @@ configurations are also possible.
 - Add functionality to update personal knowledge graph (and RemNote?)
 - Fix huge cold start
 - Health checks?? 😮
+- Optimize visualization agent

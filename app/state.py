@@ -7,6 +7,7 @@ import reflex as rx
 from pydantic import BaseModel
 
 from app.strings import AGENT_DESCRIPTIONS
+from backend.configs.constants import RECURSION_LIMIT
 from backend.configs.enums import WorkflowEventType
 
 
@@ -192,7 +193,7 @@ class AppState(rx.State):
             async for event in workflow.stream_with_status(
                     user_message=user_message,
                     message_history=message_history,
-                    recursion_limit=25
+                    recursion_limit=RECURSION_LIMIT
             ):
                 async with self:
                     if event.type == WorkflowEventType.AGENT_START:
