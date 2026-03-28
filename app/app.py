@@ -86,6 +86,7 @@ app = rx.App(
     stylesheets=[
         "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
         "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
+        "https://fonts.googleapis.com/css2?family=Hi+Melody&display=swap"
     ],
     head_components=[
         rx.el.script(src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"),

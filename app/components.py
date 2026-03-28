@@ -14,18 +14,19 @@ def logo() -> rx.Component:
     return rx.hstack(
         rx.image(
             src=LOGO_URL,
-            width="28px",
-            height="28px",
+            width="30px",
+            height="30px",
             style={
                 "filter": "brightness(0) saturate(100%) invert(52%) sepia(85%) saturate(1352%) hue-rotate(131deg) brightness(95%) contrast(101%)",
             },
         ),
         rx.text(
             APP_NAME,
-            font_size="1.25rem",
-            font_weight="700",
+            font_size="1.95rem",
+            font_weight="800",
             background=f"linear-gradient(135deg, {COLORS['accent_green']}, {COLORS['accent_blue']})",
             background_clip="text",
+            font_family="'Hi Melody', sans-serif",
             style={"-webkit-background-clip": "text", "-webkit-text-fill-color": "transparent"},
         ),
         spacing="3",
@@ -208,12 +209,60 @@ def message_bubble(message: Message) -> rx.Component:
     )
 
 
+def streaming_bubble() -> rx.Component:
+    """Live streaming bubble that shows tokens as they arrive from analyst/mentor."""
+    return rx.cond(
+        AppState.is_streaming,
+        rx.box(
+            rx.box(
+                rx.vstack(
+                    rx.hstack(
+                        rx.box(
+                            style={
+                                "width": "6px",
+                                "height": "6px",
+                                "borderRadius": "50%",
+                                "background": COLORS["accent_blue"],
+                                "animation": "pulse 1.5s ease-in-out infinite",
+                            },
+                        ),
+                        rx.text(
+                            AppState.streaming_agent,
+                            font_size="0.65rem",
+                            font_weight="600",
+                            color=COLORS["accent_blue"],
+                            letter_spacing="0.05em",
+                            text_transform="uppercase",
+                        ),
+                        spacing="2",
+                        align="center",
+                        margin_bottom="0.25rem",
+                    ),
+                    rx.markdown(
+                        AppState.streaming_content + " ▍",
+                        class_name="markdown-content",
+                    ),
+                    align="start",
+                    spacing="0",
+                ),
+                style=MESSAGE_BUBBLE_AGENT,
+            ),
+            width="100%",
+            display="flex",
+            justify_content="flex-start",
+        ),
+        rx.fragment(),
+    )
+
+
 def chat_messages() -> rx.Component:
     """Chat messages container."""
     return rx.cond(
-        AppState.has_messages,
+        AppState.has_messages | AppState.is_streaming,
         rx.box(
             rx.foreach(AppState.messages, message_bubble),
+            streaming_bubble(),
+            id="chat-messages",
             flex="1",
             overflow_y="auto",
             padding="1.5rem",
@@ -227,14 +276,18 @@ def chat_messages() -> rx.Component:
                 rx.icon("message-square-text", size=48, color=COLORS["text_muted"]),
                 rx.text(
                     CHAT_EMPTY_HEADING,
-                    font_size="1rem",
-                    color=COLORS["text_secondary"],
+                    font_size="1.75rem",
+                    font_weight="700",
+                    color=COLORS["accent_blue_light"],
+                    font_family="'Courier New', Courier, monospace",
+                    text_align="center",
                 ),
                 rx.text(
                     CHAT_EMPTY_SUBTEXT,
                     font_size="0.875rem",
                     color=COLORS["text_muted"],
                     text_align="center",
+                    font_family="'Courier New', Courier, monospace",
                 ),
                 spacing="3",
                 align="center",
@@ -304,12 +357,32 @@ def chat_input() -> rx.Component:
                 }
             }
         }, true);
+
+        // Reset textarea height whenever the form is submitted (Enter key or send button)
+        var form = ta.closest('form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                ta.style.height = '';
+            });
+        }
+    }
+
+    function initAutoScroll() {
+        var container = document.getElementById('chat-messages');
+        if (!container || container._autoScrollInited) return;
+        container._autoScrollInited = true;
+        new MutationObserver(function() {
+            container.scrollTop = container.scrollHeight;
+        }).observe(container, { childList: true, subtree: true });
     }
 
     // Run now and watch for DOM changes (Reflex hydration)
     initChatInput();
-    new MutationObserver(function() { initChatInput(); })
-        .observe(document.body, { childList: true, subtree: true });
+    initAutoScroll();
+    new MutationObserver(function() {
+        initChatInput();
+        initAutoScroll();
+    }).observe(document.body, { childList: true, subtree: true });
 })();
 """),
         processing_indicator(),
@@ -537,7 +610,7 @@ def sidebar() -> rx.Component:
     return rx.box(
         rx.vstack(
             logo(),
-            rx.divider(margin_y="1.5rem", border_color=COLORS["border"]),
+            rx.divider(margin_y="1rem", border_color=COLORS["border"]),
             agent_status_panel(),
             rx.spacer(),
             rx.vstack(
@@ -596,12 +669,13 @@ def main_content() -> rx.Component:
             rx.hstack(
                 rx.text(
                     APP_TAGLINE,
-                    font_size="1.125rem",
-                    font_weight="600",
-                    color=COLORS["text_primary"],
+                    font_size="1.375rem",
+                    font_weight="550",
+                    color=COLORS["accent_blue"],
+                    font_family="'Courier New', Courier, monospace",
                 ),
                 rx.spacer(),
-                padding="1rem 1.5rem",
+                padding="1.65rem 1.5rem",
                 width="100%",
                 border_bottom=f"1px solid {COLORS['border']}",
                 background=COLORS["bg_card"],

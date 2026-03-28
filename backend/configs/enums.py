@@ -110,6 +110,7 @@ class WorkflowEventType(str, Enum):
     AGENT_END = "agent_end"
     CONTEXT_UPDATE = "context_update"
     VISUALIZATION = "visualization"
+    TOKEN = "token"
     RESPONSE = "response"
     ERROR = "error"
     COMPLETE = "complete"

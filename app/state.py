@@ -59,6 +59,15 @@ class AppState(rx.State):
     session_started: bool = False
     error_message: str = ""
 
+    # Streaming state
+    streaming_content: str = ""
+    streaming_agent: str = ""
+
+    @rx.var
+    def is_streaming(self) -> bool:
+        """True while a token stream is in progress."""
+        return self.streaming_content != ""
+
     @rx.var
     def has_messages(self) -> bool:
         """Checks if there are any messages."""
@@ -142,7 +151,7 @@ class AppState(rx.State):
         """Clears the chat history."""
         self.messages = []
         self.agent_history = []
-        self.current_context = ""
+        # self.current_context = "" # It's hidden now
         self.visual_artifacts = []
         self.selected_plot_index = 0
         self.show_visualization = False
@@ -189,8 +198,8 @@ class AppState(rx.State):
                 for msg in self.messages[:-1]  # Exclude the message we just added
             ]
 
-            # Stream through workflow with status updates
-            async for event in workflow.stream_with_status(
+            # Stream through workflow with per-token updates
+            async for event in workflow.stream_with_tokens(
                     user_message=user_message,
                     message_history=message_history,
                     recursion_limit=RECURSION_LIMIT
@@ -204,18 +213,24 @@ class AppState(rx.State):
                     elif event.type == WorkflowEventType.AGENT_END:
                         self.active_agent = ""
 
-                    elif event.type == WorkflowEventType.CONTEXT_UPDATE:
-                        raw = (event.data["context"]
-                               .replace("[RESEARCH_COMPLETE]", "")
-                               .replace("Visual artifact generated", "")
-                               .replace("Visualization failed", "")
-                               .strip())
-                        try:
-                            import json as _json
-                            parsed = _json.loads(raw)
-                            self.current_context = _json.dumps(parsed, ensure_ascii=False, indent=2)
-                        except Exception:
-                            self.current_context = raw
+                    elif event.type == WorkflowEventType.TOKEN:
+                        agent_name = event.data.get("agent", "")
+                        self.streaming_agent = agent_name
+                        self.streaming_content = self.streaming_content + event.data["chunk"]
+
+                    # Context is hidden for now
+                    # elif event.type == WorkflowEventType.CONTEXT_UPDATE:
+                    #     raw = (event.data["context"]
+                    #            .replace("[RESEARCH_COMPLETE]", "")
+                    #            .replace("Visual artifact generated", "")
+                    #            .replace("Visualization failed", "")
+                    #            .strip())
+                    #     try:
+                    #         import json as _json
+                    #         parsed = _json.loads(raw)
+                    #         self.current_context = _json.dumps(parsed, ensure_ascii=False, indent=2)
+                    #     except Exception:
+                    #         self.current_context = raw
 
                     elif event.type == WorkflowEventType.VISUALIZATION:
                         self.visual_artifacts = self.visual_artifacts + event.data["artifacts"]
@@ -224,6 +239,8 @@ class AppState(rx.State):
 
                     elif event.type == WorkflowEventType.RESPONSE:
                         agent_name = event.data.get("agent", "")
+                        self.streaming_content = ""
+                        self.streaming_agent = ""
                         self.messages = self.messages + [
                             Message(
                                 content=_normalize_math_delimiters(event.data["content"]),
@@ -251,6 +268,8 @@ class AppState(rx.State):
             async with self:
                 self.is_processing = False
                 self.active_agent = ""
+                self.streaming_content = ""
+                self.streaming_agent = ""
 
 
 class SidebarState(rx.State):

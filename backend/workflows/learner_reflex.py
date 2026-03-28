@@ -326,6 +326,132 @@ class ReflexLearnerWorkflow:
                 data={"message": str(e)}
             )
 
+    async def stream_with_tokens(
+            self,
+            user_message: str,
+            message_history: list[dict],
+            recursion_limit: int = RECURSION_LIMIT
+    ) -> AsyncGenerator[WorkflowEvent, None]:
+        """Streams workflow execution with per-token updates for analyst/mentor responses.
+
+        Uses LangGraph's astream_events(version="v2") to intercept token chunks from
+        the LLM layer inside analyst and mentor nodes, yielding TOKEN events in real time.
+        All other event types (AGENT_START/END, CONTEXT_UPDATE, VISUALIZATION, RESPONSE)
+        are preserved with the same semantics as stream_with_status().
+        """
+        self._ensure_initialized()
+
+        messages = self._convert_messages(message_history)
+        messages.append(HumanMessage(content=user_message))
+
+        thread_id = str(uuid.uuid4())
+        config = {"recursion_limit": recursion_limit, "configurable": {"thread_id": thread_id}}
+        initial_state = {"messages": messages}
+
+        _AGENT_NODES = {"orchestrator", "retriever", "researcher", "analyst", "mentor", "visualizer"}
+        _STREAMING_NODES = {"analyst", "mentor"}
+
+        accumulated: dict[str, str] = {}
+        final_state: dict = {}
+
+        try:
+            async for event in self._graph.astream_events(initial_state, config=config, version="v2"):
+                event_type = event.get("event", "")
+                name = event.get("name", "")
+                metadata = event.get("metadata", {})
+                node = metadata.get("langgraph_node", "")
+
+                if event_type == "on_chain_start" and name in _AGENT_NODES and name == node:
+                    yield WorkflowEvent(
+                        type=WorkflowEventType.AGENT_START,
+                        data={"agent": node}
+                    )
+
+                elif event_type == "on_chain_end" and name in _AGENT_NODES and name == node:
+                    yield WorkflowEvent(
+                        type=WorkflowEventType.AGENT_END,
+                        data={"agent": node}
+                    )
+
+                elif event_type == "on_chat_model_stream" and node in _STREAMING_NODES:
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk is not None:
+                        content = chunk.content if hasattr(chunk, "content") else ""
+                        if content:
+                            accumulated[node] = accumulated.get(node, "") + content
+                            yield WorkflowEvent(
+                                type=WorkflowEventType.TOKEN,
+                                data={"chunk": content, "agent": node}
+                            )
+
+                elif event_type == "on_chain_end" and name == "LangGraph":
+                    output = event.get("data", {}).get("output")
+                    if isinstance(output, dict):
+                        final_state = output
+
+            # Yield final results from captured state
+            context = final_state.get("context", "")
+            if context:
+                yield WorkflowEvent(
+                    type=WorkflowEventType.CONTEXT_UPDATE,
+                    data={"context": context}
+                )
+
+            visual_artifacts = final_state.get("visual_artifacts", [])
+            response_emitted = bool(visual_artifacts)
+            if visual_artifacts:
+                yield WorkflowEvent(
+                    type=WorkflowEventType.VISUALIZATION,
+                    data={"artifacts": visual_artifacts}
+                )
+
+            if accumulated:
+                for agent_name, content in accumulated.items():
+                    if content:
+                        response_emitted = True
+                        yield WorkflowEvent(
+                            type=WorkflowEventType.RESPONSE,
+                            data={"content": content, "agent": agent_name}
+                        )
+            else:
+                result_messages = final_state.get("messages", [])
+                if isinstance(result_messages, list):
+                    for msg in result_messages:
+                        if hasattr(msg, "content") and hasattr(msg, "type") and msg.type == "ai":
+                            agent_name = msg.additional_kwargs.get("agent", "").strip("[]").lower()
+                            if agent_name in _STREAMING_NODES and msg.content:
+                                response_emitted = True
+                                yield WorkflowEvent(
+                                    type=WorkflowEventType.RESPONSE,
+                                    data={"content": msg.content, "agent": agent_name}
+                                )
+
+            if not response_emitted:
+                fallback = self._get_fallback_message(context)
+                yield WorkflowEvent(
+                    type=WorkflowEventType.RESPONSE,
+                    data={"content": fallback, "agent": "system"}
+                )
+
+            yield WorkflowEvent(
+                type=WorkflowEventType.COMPLETE,
+                data={"status": "success"}
+            )
+
+        except GraphRecursionError as e:
+            logger.error(f"Workflow exceeded recursion limit: {e}")
+            yield WorkflowEvent(
+                type=WorkflowEventType.ERROR,
+                data={"message": ERROR_RECURSION_LIMIT}
+            )
+
+        except Exception as e:
+            logger.error(f"Workflow token stream error: {e}")
+            yield WorkflowEvent(
+                type=WorkflowEventType.ERROR,
+                data={"message": str(e)}
+            )
+
 
 # Global workflow instance
 _workflow_instance = None
