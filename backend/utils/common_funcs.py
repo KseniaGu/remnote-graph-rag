@@ -2,11 +2,12 @@ import json
 import logging
 import os
 import pickle
+import threading
 from pathlib import Path
 from typing import Any
 
+import structlog
 import yaml
-from pythonjsonlogger import jsonlogger
 
 
 def write_file(file: Any, path: Path):
@@ -61,22 +62,60 @@ def read_file(path: Path) -> Any:
     return file
 
 
-def get_logger(name: str = __name__) -> logging.Logger:
-    """Gets a configured logger instance that emits structured JSON log lines.
+_configure_lock = threading.Lock()
+_configured = False
+
+_shared_processors = [
+    structlog.stdlib.add_log_level,
+    structlog.stdlib.add_logger_name,
+    structlog.processors.TimeStamper(fmt="iso"),
+    structlog.processors.StackInfoRenderer(),
+    structlog.processors.ExceptionRenderer(),
+]
+
+
+def _configure_logging() -> None:
+    """Configures structlog globally with async-compatible JSON output."""
+    global _configured
+    if _configured:
+        return
+    with _configure_lock:
+        if _configured:
+            return
+
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(
+            structlog.stdlib.ProcessorFormatter(
+                processors=[
+                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                    structlog.processors.JSONRenderer(),
+                ],
+                foreign_pre_chain=_shared_processors,
+            )
+        )
+
+        logging.root.setLevel(logging.INFO)
+        logging.root.addHandler(stream_handler)
+
+        structlog.configure(
+            processors=[
+                structlog.contextvars.merge_contextvars,
+                *_shared_processors,
+                structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+            ],
+            logger_factory=structlog.stdlib.LoggerFactory(),
+            wrapper_class=structlog.stdlib.BoundLogger,
+            cache_logger_on_first_use=True,
+        )
+
+        _configured = True
+
+
+def get_logger(name: str = __name__) -> structlog.stdlib.BoundLogger:
+    """Gets a configured structlog bound logger that emits structured JSON log lines.
 
     Args:
         name: The name of the logger. Defaults to the module name.
     """
-    logger = logging.getLogger(name)
-
-    if not logger.handlers and not logging.root.handlers:
-        handler = logging.StreamHandler()
-        formatter = jsonlogger.JsonFormatter(
-            fmt="%(asctime)s %(name)s %(levelname)s %(message)s",
-            rename_fields={"asctime": "timestamp", "levelname": "level", "name": "logger"},
-        )
-        handler.setFormatter(formatter)
-        logging.root.setLevel(logging.INFO)
-        logging.root.addHandler(handler)
-
-    return logger
+    _configure_logging()
+    return structlog.get_logger(name)

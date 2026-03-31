@@ -13,6 +13,7 @@ COLORS = {
     "text_muted": "#667781",
     "accent_blue": "#8BC6DF",
     "accent_blue_light": "#98C7DB",
+    "accent_blue_lightest": "#D5EAF3",
     "accent_purple": "#a855f7",
     "accent_green": "#00A99E",
     "accent_orange": "#f97316",

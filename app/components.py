@@ -60,7 +60,7 @@ def agent_badge_item(status: dict) -> rx.Component:
             ),
             rx.text(
                 status["name"],
-                font_size="0.75rem",
+                font_size="0.9rem",
                 font_weight="500",
                 text_transform="capitalize",
             ),
@@ -107,8 +107,8 @@ def agent_status_panel() -> rx.Component:
     return rx.vstack(
         rx.text(
             SIDEBAR_PIPELINE_HEADER,
-            font_size="0.75rem",
-            font_weight="600",
+            font_size="1rem",
+            font_weight="650",
             color=COLORS["text_secondary"],
             text_transform="uppercase",
             letter_spacing="0.05em",
@@ -671,7 +671,7 @@ def main_content() -> rx.Component:
                     APP_TAGLINE,
                     font_size="1.375rem",
                     font_weight="550",
-                    color=COLORS["accent_blue"],
+                    color=COLORS["accent_blue_lightest"],
                     font_family="'Courier New', Courier, monospace",
                 ),
                 rx.spacer(),
