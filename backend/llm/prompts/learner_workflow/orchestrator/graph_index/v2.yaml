@@ -149,6 +149,7 @@ system:
         {{ "subject_source_id": "subtree_3_leaf_0", "object_source_id": "subtree_3_leaf_0", "subject": "Self-supervised Learning", "subject_type": "METHOD", "predicate": "USES", "object": "Pretext task", "object_type": "METHOD" }},
         {{ "subject_source_id": "subtree_3_leaf_3", "object_source_id": "subtree_3_leaf_3", "subject": "SimCLR", "subject_type": "MODEL", "predicate": "IS_A", "object": "Self-supervised Learning", "object_type": "METHOD" }},
         {{ "subject_source_id": "subtree_3_leaf_7", "object_source_id": "subtree_3_leaf_7", "subject": "[2301.05712] A Survey on Self-supervised Learning", "subject_type": "PAPER", "predicate": "RELATED_TO", "object": "Self-supervised Learning", "object_type": "METHOD" }}
+      ]
     }}
 
 user: |

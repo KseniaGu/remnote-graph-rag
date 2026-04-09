@@ -102,7 +102,7 @@ class ResearcherModelSettings(BaseSettings):
         top_p=1.,
         num_predict=4096,
     )
-    prompt_version: str = "v2"
+    prompt_version: str = "v3"
 
 
 class ModelSettings(BaseSettings):
@@ -125,7 +125,7 @@ class ModelSettings(BaseSettings):
         top_k=10,
         top_p=1.,
         num_predict=2048,
-        prompt_version={"graph_index": "v2", "routing": "v2"},
+        prompt_version={"graph_index": "v2", "routing": "v3"},
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B (same instance as orchestrator)
     retriever: LocalModelSettings | BaseLLMSettings = OllamaSettings(
@@ -136,7 +136,7 @@ class ModelSettings(BaseSettings):
         top_k=20,
         top_p=0.3,
         num_predict=512,
-        prompt_version="v2"
+        prompt_version="v3"
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
 
@@ -150,7 +150,7 @@ class ModelSettings(BaseSettings):
         top_p=0.9,
         num_predict=8192,
         reasoning=True,
-        prompt_version="v2"
+        prompt_version="v3"
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (same instance as analyst)
     mentor: LocalModelSettings | BaseLLMSettings = OllamaSettings(
@@ -162,7 +162,7 @@ class ModelSettings(BaseSettings):
         top_p=0.8,
         num_predict=8192,
         reasoning=True,
-        prompt_version="v2"
+        prompt_version="v3"
     )
 
     reranker: CohereSettings | BaseLLMSettings = CohereSettings(
@@ -190,7 +190,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.,
             max_tokens=2048,
-            prompt_version={"graph_index": "v2", "routing": "v2"},
+            prompt_version={"graph_index": "v2", "routing": "v3"},
         ),
         retriever=OpenAISettings(
             role=ModelRoleType.retriever,
@@ -199,7 +199,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.,
             max_tokens=512,
-            prompt_version="v2",
+            prompt_version="v3",
         ),
         researcher=ResearcherModelSettings(
             with_tools=OpenAISettings(
@@ -226,7 +226,7 @@ def _vllm_models() -> ModelSettings:
             base_url=generation_url,
             temperature=0.15,
             max_tokens=8192,
-            prompt_version="v2",
+            prompt_version="v3",
         ),
         mentor=OpenAISettings(
             role=ModelRoleType.mentor,
@@ -235,7 +235,7 @@ def _vllm_models() -> ModelSettings:
             base_url=generation_url,
             temperature=0.7,
             max_tokens=8192,
-            prompt_version="v2",
+            prompt_version="v3",
         ),
     )
 
