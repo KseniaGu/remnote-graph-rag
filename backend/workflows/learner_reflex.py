@@ -4,13 +4,7 @@ from dataclasses import dataclass
 from typing import AsyncGenerator
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
-
-try:
-    from langgraph.checkpoint.redis import RedisSaver as _RedisSaver
-except ImportError:
-    _RedisSaver = None
 
 from backend.configs.constants import RECURSION_LIMIT
 from backend.configs.enums import WorkflowEventType
@@ -20,7 +14,7 @@ from backend.configs.models import get_model_settings
 from backend.configs.observability import LangSmithSettings
 from backend.configs.paths import PathSettings
 from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
-from backend.configs.storage import StorageSettings, RedisSettings
+from backend.configs.storage import StorageSettings
 from backend.utils.helpers import logger
 from backend.workflows.learner import LearnerWorkflow
 
@@ -78,39 +72,12 @@ class ReflexLearnerWorkflow:
                     tavily_settings,
                     kg_search_settings
                 )
-
-                checkpointer = self._build_checkpointer(storage_settings)
-                self._graph = self._workflow.run(checkpointer=checkpointer)
+                self._graph = self._workflow.run()
                 logger.info("ReflexLearnerWorkflow initialized successfully")
 
             except Exception as e:
                 logger.error(f"Failed to initialize ReflexLearnerWorkflow: {e}")
                 raise RuntimeError(f"Workflow initialization failed: {str(e)}")
-
-    @staticmethod
-    def _build_checkpointer(storage_settings: StorageSettings):
-        """Builds a checkpointer from the existing Redis config.
-
-        Returns a RedisSaver if langgraph-checkpoint-redis is installed and Redis
-        is reachable. Falls back to MemorySaver otherwise.
-        """
-        if _RedisSaver is not None:
-            try:
-                redis_cfg = storage_settings.document_storage
-                if not isinstance(redis_cfg, RedisSettings):
-                    redis_cfg = RedisSettings()
-                redis_url = redis_cfg.get_connection_url(
-                    driver="rediss" if redis_cfg.password else "redis"
-                )
-                saver = _RedisSaver.from_conn_string(redis_url)
-                saver.setup()
-                logger.info("LangGraph Redis checkpointer initialized")
-                return saver
-            except Exception as e:
-                logger.warning(f"Redis checkpointer unavailable, falling back to MemorySaver: {e}")
-        else:
-            logger.info("langgraph-checkpoint-redis not installed, using MemorySaver")
-        return MemorySaver()
 
     @staticmethod
     def _get_fallback_message(context: str) -> str:

@@ -14,8 +14,11 @@ from llama_index.storage.docstore.redis import RedisDocumentStore
 from llama_index.storage.index_store.redis import RedisIndexStore
 from llama_index.storage.kvstore.redis import RedisKVStore
 from llama_index.vector_stores.pinecone import PineconeVectorStore
-from llama_index.vector_stores.redis import RedisVectorStore
-from llama_index.vector_stores.redis.schema import RedisVectorStoreSchema
+try:
+    from llama_index.vector_stores.redis import RedisVectorStore
+    from llama_index.vector_stores.redis.schema import RedisVectorStoreSchema
+except ImportError:
+    pass
 from pinecone import Pinecone
 
 from backend.configs.constants import DEFAULT_EMBEDDING_DIM

@@ -11,6 +11,7 @@ env:
   ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
   BACKEND_SERVICE_NAME: ${{ vars.BACKEND_SERVICE_NAME }}
   FRONTEND_SERVICE_NAME: ${{ vars.FRONTEND_SERVICE_NAME }}
+  EMBED_MODEL_DIR: /mnt/models/sentence-transformers
 
 jobs:
   deploy:
@@ -89,10 +90,13 @@ jobs:
             --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
             --command reflex \
             --args run,--env,prod,--backend-only,--backend-host,0.0.0.0 \
+            --add-volume=name=models-volume,type=cloud-storage,bucket=remnote-graph-rag-models \
+            --add-volume-mount=volume=models-volume,mount-path=/mnt/models \
             --set-secrets "REDIS_HOST=redis-host:latest" \
             --set-secrets "REDIS_PORT=redis-port:latest" \
             --set-secrets "REDIS_PASSWORD=redis-password:latest" \
             --set-env-vars "REDIS_INIT_FROM_LOCAL=false" \
+            --set-secrets "MONGODB_URI=mongodb-uri:latest" \
             --set-secrets "PINECONE_API_KEY=pinecone-api-key:latest" \
             --set-secrets "PINECONE_ENVIRONMENT=pinecone-environment:latest" \
             --set-secrets "PINECONE_INDEX_NAME=pinecone-index-name:latest" \
@@ -108,7 +112,8 @@ jobs:
             --set-secrets "LANGSMITH_API_KEY=langchain-api-key:latest" \
             --set-env-vars "LANGSMITH_TRACING=true" \
             --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \
-            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com"
+            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com" \
+            --set-env-vars "HF_HOME=$EMBED_MODEL_DIR"
 
       - name: Get backend URL
         run: |

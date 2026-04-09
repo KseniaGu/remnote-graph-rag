@@ -13,7 +13,6 @@ llama-index = "^0.14.12"
 llama-index-storage-docstore-redis = "^0.4.1"
 llama-index-storage-index-store-redis = "^0.5.1"
 llama-index-embeddings-huggingface = "^0.6.1"
-llama-index-vector-stores-redis = "^0.6.2"
 llama-index-graph-stores-neo4j = "^0.5.1"
 llama-index-llms-ollama = "^0.9.1"
 llama-index-embeddings-ollama = "^0.8.6"
@@ -31,11 +30,11 @@ reflex = "^0.8.26"
 plotly = "^6.5.2"
 pymupdf = "^1.26.7"
 neo4j = "5.28.2"
+langgraph-checkpoint-mongodb = "^0.3.1"
 
 
 [tool.poetry.group.test.dependencies]
 pyvis = "^0.3.2"
-
 
 [tool.poetry.group.scripts.dependencies]
 paddleocr = { extras = ["all"], version = "^3.3.2" }

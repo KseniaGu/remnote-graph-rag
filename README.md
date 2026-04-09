@@ -52,6 +52,7 @@ Web interface built with [Reflex](https://github.com/reflex-dev/reflex) framewor
     - [Neo4j](https://neo4j.com/) database (for graph storage)
     - [Redis](https://redis.io/) server (for vector/document storage)
     - [Cohere](https://docs.cohere.com/docs/rerank) API key for Reranker model
+    - [MongoDB](https://www.mongodb.com/) instance (for LangGraph workflow state persistence)
 
 ## Prepare environment
 
@@ -91,6 +92,7 @@ configurations are also possible.
 - [**Upstash Redis**](https://upstash.com/) for document/index storage
 - [**Pinecone**](https://www.pinecone.io/) for vector storage
 - **Neo4j [Sandbox](https://neo4j.com/sandbox/)/[Aura](https://neo4j.com/product/auradb/)** for graph storage
+- **[MongoDB](https://www.mongodb.com/)** running instance (VM, Cloud SQL or other options)
 
 ### Steps
 
@@ -99,6 +101,7 @@ configurations are also possible.
     - Create Pinecone account, create an index, and note `PINECONE_API_KEY`, `PINECONE_ENVIRONMENT`,
       `PINECONE_INDEX_NAME`
     - Create Neo4j Sandbox/Aura instance and note `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `NEO4J_DATABASE`
+    - Create MongoDB instance and note `MONGODB_URI`, `MONGODB_DB_NAME` 
 
 2. **Migrate local data to cloud databases:**
     - Update the `.env` file with your cloud database credentials. Set `REDIS_INIT_FROM_LOCAL=true`,
@@ -160,4 +163,3 @@ configurations are also possible.
 - Add functionality to update personal knowledge graph (and RemNote?)
 - Fix huge cold start
 - Health checks?? 😮
-- Optimize visualization agent

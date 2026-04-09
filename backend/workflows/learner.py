@@ -3,11 +3,14 @@ import json
 import os
 from io import BytesIO
 
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.graph import StateGraph, START, END
 from langsmith import traceable
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.postprocessor.cohere_rerank import CohereRerank
 from ollama._types import ResponseError
+from pymongo import MongoClient
 from tavily import TavilyClient
 
 from backend.configs.constants import TITLE_MAX_LENGTH
@@ -53,6 +56,7 @@ class LearnerWorkflow:
         """
         self.models_settings = models_settings
         self.path_settings = path_settings
+        self.storage_settings = storage_settings
 
         self.workflow = StateGraph(State)
 
@@ -80,6 +84,7 @@ class LearnerWorkflow:
             trust_remote_code=True,
             device=self.models_settings.embedder.device,
             embed_batch_size=10,
+            local_files_only=True,
         )
         reranker = CohereRerank(
             api_key=self.models_settings.reranker.api_key.get_secret_value(),
@@ -223,6 +228,18 @@ class LearnerWorkflow:
         self.workflow.add_edge("visualizer", "orchestrator")
         self.workflow.add_edge("mentor", "orchestrator")
         self.workflow.add_edge("analyst", "orchestrator")
+
+    def get_checkpointer(self):
+        """Builds a MongoDBSaver checkpointer."""
+        try:
+            mongo_cfg = self.storage_settings.checkpoint_storage
+            client = MongoClient(mongo_cfg.uri.get_secret_value())
+            saver = MongoDBSaver(client, db_name=mongo_cfg.db_name)
+            logger.info("LangGraph MongoDB checkpointer initialized")
+            return saver
+        except Exception as e:
+            logger.warning(f"MongoDB checkpointer unavailable, falling back to MemorySaver: {e}")
+        return MemorySaver()
 
     @staticmethod
     def get_next_step(state: State) -> str:
@@ -615,7 +632,7 @@ class LearnerWorkflow:
         Returns:
             Compiled LangGraph workflow ready for invocation.
         """
-        return self.workflow.compile(checkpointer=checkpointer)
+        return self.workflow.compile(checkpointer=self.get_checkpointer())
 
     def show_graph(self, jupyter_notebook: bool = False) -> Optional[Any]:
         """Visualizes the workflow graph structure.

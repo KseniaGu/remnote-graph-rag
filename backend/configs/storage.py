@@ -76,9 +76,24 @@ class Neo4jSettings(BaseSettings):
         return f"{driver}://{self.host}:{self.port}"
 
 
+class MongoDBSettings(BaseSettings):
+    """MongoDB settings for LangGraph checkpointing."""
+    storage_type: StorageType = StorageType.mongodb
+    uri: SecretStr = SecretStr("mongodb://localhost:27017/langgraph_checkpoints")
+    db_name: str = "langgraph_checkpoints"
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_PATH),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_prefix="MONGODB_",
+    )
+
+
 class StorageSettings(BaseSettings):
     """Aggregates storage configuration settings for different storage backends."""
     document_storage: LocalStorageSettings | RedisSettings = RedisSettings()
     index_storage: LocalStorageSettings | RedisSettings = RedisSettings()
     vector_storage: LocalStorageSettings | RedisSettings | PineconeSettings = PineconeSettings()
     property_graph_storage: LocalStorageSettings | Neo4jSettings = Neo4jSettings()
+    checkpoint_storage: MongoDBSettings = MongoDBSettings()

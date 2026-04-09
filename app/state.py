@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.strings import AGENT_DESCRIPTIONS
 from backend.configs.constants import RECURSION_LIMIT
 from backend.configs.enums import WorkflowEventType
+from backend.workflows.learner_reflex import get_workflow
 
 
 def _normalize_math_delimiters(text: str) -> str:
@@ -187,9 +188,6 @@ class AppState(rx.State):
             ]
 
         try:
-            # Get workflow instance
-            from backend.workflows.learner_reflex import get_workflow
-
             workflow = get_workflow()
 
             # Prepare message history

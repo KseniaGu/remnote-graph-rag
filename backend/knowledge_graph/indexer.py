@@ -19,7 +19,10 @@ from llama_index.core.schema import MetadataMode, RelatedNodeInfo, TextNode, Nod
 from llama_index.core.vector_stores.simple import SimpleVectorStore
 from llama_index.llms.ollama import Ollama
 from llama_index.vector_stores.pinecone import PineconeVectorStore
-from llama_index.vector_stores.redis import RedisVectorStore
+try:
+    from llama_index.vector_stores.redis import RedisVectorStore
+except ImportError:
+    pass
 from tqdm import tqdm
 
 from backend.configs.constants import MAX_TOKEN_COUNTS_PER_CALL, TEST_SOURCES, MAX_DOCUMENTS_TO_INDEX, SPRING_LAYOUT_K, \
@@ -775,6 +778,11 @@ class KnowledgeGraphIndexer:
         if isinstance(self.index.vector_store, SimpleVectorStore):
             if self.index.vector_store.data.embedding_dict:
                 return
+        elif isinstance(self.index.vector_store, PineconeVectorStore):
+            # Check Pinecone index stats
+            stats = self.index.vector_store.client.describe_index_stats()
+            if stats.get("total_vector_count", 0) > 0:
+                return
         elif isinstance(self.index.vector_store, RedisVectorStore):
             # Use the sync Redis client directly to avoid asyncio.run() / ThreadPoolExecutor hacks
             try:
@@ -784,11 +792,6 @@ class KnowledgeGraphIndexer:
                     return
             except Exception:
                 pass
-        elif isinstance(self.index.vector_store, PineconeVectorStore):
-            # Check Pinecone index stats
-            stats = self.index.vector_store.client.describe_index_stats()
-            if stats.get("total_vector_count", 0) > 0:
-                return
         else:
             raise ValueError(f"Unexpected Vector Store type: {type(self.index.vector_store)}")
         self.index.vector_store.stores_text = True
