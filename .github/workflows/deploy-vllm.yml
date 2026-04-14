@@ -168,12 +168,16 @@ jobs:
             --max-instances 10 \
             --cpu-boost \
             --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+            --network=default \
+            --subnet=default \
+            --vpc-egress=private-ranges-only \
             --command reflex \
             --args run,--env,prod,--backend-only,--backend-host,0.0.0.0 \
             --set-secrets "REDIS_HOST=redis-host:latest" \
             --set-secrets "REDIS_PORT=redis-port:latest" \
             --set-secrets "REDIS_PASSWORD=redis-password:latest" \
             --set-env-vars "REDIS_INIT_FROM_LOCAL=false" \
+            --set-secrets "MONGODB_URI=mongodb-uri:latest" \
             --set-secrets "PINECONE_API_KEY=pinecone-api-key:latest" \
             --set-secrets "PINECONE_ENVIRONMENT=pinecone-environment:latest" \
             --set-secrets "PINECONE_INDEX_NAME=pinecone-index-name:latest" \
