@@ -89,6 +89,7 @@ jobs:
             --timeout 1200 \
             --min-instances 0 \
             --max-instances 2 \
+            --allow-unauthenticated \
             --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
             --add-volume=name=models-volume,type=cloud-storage,bucket=remnote-graph-rag-models \
             --add-volume-mount=volume=models-volume,mount-path=/mnt/models \
