@@ -11,6 +11,8 @@ env:
   ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
   BACKEND_SERVICE_NAME: ${{ vars.BACKEND_SERVICE_NAME }}
   FRONTEND_SERVICE_NAME: ${{ vars.FRONTEND_SERVICE_NAME }}
+  LANGSMITH_EXPORT_JOB_NAME: langsmith-export
+  LANGSMITH_EXPORT_SCHEDULER_NAME: langsmith-export-daily
   EMBED_MODEL_DIR: /mnt/models/sentence-transformers
 
 jobs:
@@ -117,6 +119,54 @@ jobs:
             --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \
             --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com" \
             --set-env-vars "HF_HOME=$EMBED_MODEL_DIR"
+
+      - name: Deploy LangSmith export Cloud Run job
+        run: |
+          gcloud run jobs deploy $LANGSMITH_EXPORT_JOB_NAME \
+            --image $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }} \
+            --project $PROJECT_ID \
+            --region $REGION \
+            --memory 512Mi \
+            --cpu 1 \
+            --task-timeout 120 \
+            --max-retries 1 \
+            --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+            --network=default \
+            --subnet=default \
+            --vpc-egress=private-ranges-only \
+            --command python \
+            --args=-m,scripts.export_langsmith_logs,--frequency,daily \
+            --set-secrets "MONGODB_URI=mongodb-uri:latest" \
+            --set-secrets "LANGSMITH_API_KEY=langchain-api-key:latest" \
+            --set-env-vars "LANGSMITH_TRACING=true" \
+            --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \
+            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com" \
+            --quiet
+
+      - name: Create Cloud Scheduler trigger for LangSmith export
+        run: |
+          if gcloud scheduler jobs describe $LANGSMITH_EXPORT_SCHEDULER_NAME \
+            --project $PROJECT_ID --location $REGION &>/dev/null; then
+            gcloud scheduler jobs update http $LANGSMITH_EXPORT_SCHEDULER_NAME \
+              --project $PROJECT_ID \
+              --location $REGION \
+              --schedule "0 2 * * *" \
+              --time-zone "UTC" \
+              --uri "https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/$LANGSMITH_EXPORT_JOB_NAME:run" \
+              --http-method POST \
+              --oauth-service-account-email ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+              --quiet
+          else
+            gcloud scheduler jobs create http $LANGSMITH_EXPORT_SCHEDULER_NAME \
+              --project $PROJECT_ID \
+              --location $REGION \
+              --schedule "0 2 * * *" \
+              --time-zone "UTC" \
+              --uri "https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/$LANGSMITH_EXPORT_JOB_NAME:run" \
+              --http-method POST \
+              --oauth-service-account-email ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
+              --quiet
+          fi
 
       - name: Get backend URL
         run: |
