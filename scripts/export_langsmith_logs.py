@@ -23,6 +23,7 @@ def _run_to_document(run) -> dict:
     """Converts a LangSmith Run object to a MongoDB-friendly dict."""
     doc = {
         "_id": str(run.id),
+        "session_id": str(run.session_id),
         "name": run.name,
         "run_type": run.run_type,
         "status": run.status,
@@ -81,7 +82,7 @@ def export_traces(frequency: str = "daily") -> int:
 
     ls_client = Client(
         api_url=ls_settings.langsmith_endpoint,
-        api_key=ls_settings.langsmith_api_key,
+        api_key=ls_settings.langsmith_api_key.get_secret_value(),
     )
 
     mongo_client = MongoClient(mongo_settings.uri.get_secret_value())
