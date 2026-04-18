@@ -21,6 +21,7 @@ from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
 from backend.configs.storage import StorageSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
+from backend.utils.helpers import add_trace_metadata
 from backend.utils.prompt_engine import PromptEngine
 from backend.workflows.agents.factory import AgentsFactory
 from backend.workflows.agents.schemas import *
@@ -384,6 +385,7 @@ class LearnerWorkflow:
             Dictionary with next_step routing decision.
         """
         ctx = state.context or ""
+        add_trace_metadata("context", ctx)
 
         # All sources exhausted (both retriever and researcher failed) → end
         if '"all_sources_exhausted": true' in ctx:
@@ -431,6 +433,7 @@ class LearnerWorkflow:
             Dictionary with updated context containing tool results.
         """
         model_name = ModelRoleType.retriever.name.upper()
+        add_trace_metadata("context", state.context or "")
         messages_to_pass = self.create_messages_to_pass(
             ModelRoleType.retriever, state, ("input_text", "conversation_history")
         )
@@ -471,6 +474,7 @@ class LearnerWorkflow:
             Dictionary with updated context containing formatted research findings.
         """
         model_name = ModelRoleType.researcher.name.upper()
+        add_trace_metadata("context", state.context or "")
         messages_to_pass = self.create_messages_to_pass(
             ModelRoleType.researcher, state, ("input_text", "context")
         )
@@ -543,6 +547,7 @@ class LearnerWorkflow:
             Dictionary with analyst's response message.
         """
         model_name = ModelRoleType.analyst.name.upper()
+        add_trace_metadata("context", state.context or "")
         messages_to_pass = self.create_messages_to_pass(ModelRoleType.analyst, state, ("input_text", "context"))
         response = await self.call_model(messages_to_pass, ModelRoleType.analyst)
 
@@ -579,6 +584,7 @@ class LearnerWorkflow:
             Dictionary with mentor's response message.
         """
         model_name = ModelRoleType.mentor.name.upper()
+        add_trace_metadata("context", state.context or "")
         messages_to_pass = self.create_messages_to_pass(
             ModelRoleType.mentor, state, ("conversation_history", "context")
         )
@@ -602,6 +608,7 @@ class LearnerWorkflow:
         Returns:
             Dictionary with updated visual_artifacts list.
         """
+        add_trace_metadata("context", state.context or "")
         try:
             tool_results = state.context
             if tool_results:

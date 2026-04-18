@@ -2,10 +2,19 @@ import json
 import re
 from typing import Any
 
+from langsmith import get_current_run_tree
+
 from backend.configs.constants import WORKFLOW_LOGGING
 from backend.utils.common_funcs import get_logger
 
 logger = get_logger(WORKFLOW_LOGGING)
+
+
+def add_trace_metadata(key: str, value: Any) -> None:
+    """Attaches a key-value pair to the active LangSmith run."""
+    run = get_current_run_tree()
+    if run:
+        run.metadata[key] = value
 
 
 def clean_json_markdown(text: str) -> str:
