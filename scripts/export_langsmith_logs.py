@@ -1,5 +1,7 @@
 import argparse
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from langsmith import Client
 from pymongo import MongoClient, UpdateOne
@@ -19,9 +21,20 @@ FREQUENCY_WINDOWS = {
 }
 
 
+def _serialize(value):
+    """Recursively converts non-JSON-serializable types to strings."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _serialize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_serialize(v) for v in value]
+    return value
+
+
 def _run_to_document(run) -> dict:
     """Converts a LangSmith Run object to a MongoDB-friendly dict."""
-    doc = {
+    return {
         "_id": str(run.id),
         "session_id": str(run.session_id),
         "name": run.name,
@@ -46,20 +59,48 @@ def _run_to_document(run) -> dict:
         "feedback_stats": run.feedback_stats,
         "exported_at": datetime.now(timezone.utc),
     }
-    return doc
 
 
-def export_traces(frequency: str = "daily") -> int:
-    """Fetches recent LangSmith traces and upserts them into MongoDB.
+def _write_json(docs: list[dict], output_path: Path) -> None:
+    output_path.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    file_path = output_path / f"langsmith_traces_{timestamp}.json"
+    serializable = [_serialize(doc) for doc in docs]
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(serializable, f, indent=2, ensure_ascii=False)
+    logger.info("JSON export written", path=str(file_path), count=len(docs))
+
+
+def _upsert_mongodb(docs: list[dict], mongo_settings: MongoDBSettings) -> None:
+    mongo_client = MongoClient(mongo_settings.uri.get_secret_value())
+    db = mongo_client[mongo_settings.db_name]
+    collection = db[COLLECTION_NAME]
+
+    collection.create_index("trace_id")
+    collection.create_index("start_time")
+
+    operations = [UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True) for doc in docs]
+    result = collection.bulk_write(operations)
+    logger.info(
+        "MongoDB upsert complete",
+        upserted=result.upserted_count,
+        modified=result.modified_count,
+    )
+    mongo_client.close()
+
+
+def export_traces(frequency: str = "daily", output: str = "mongodb", output_path: Path = Path("./exports")) -> int:
+    """Fetches recent LangSmith traces and exports them to MongoDB, JSON, or both.
 
     Args:
         frequency: One of "hourly", "daily", "weekly". Controls how far back to look.
+        output: One of "mongodb", "json", "both".
+        output_path: Directory for JSON output (used when output is "json" or "both").
 
     Returns:
-        Number of traces upserted.
+        Number of traces fetched.
     """
     ls_settings = LangSmithSettings()
-    mongo_settings = MongoDBSettings()
 
     if not ls_settings.langsmith_api_key:
         logger.error("LANGSMITH_API_KEY is not set. Aborting export.")
@@ -77,6 +118,7 @@ def export_traces(frequency: str = "daily") -> int:
         "Starting LangSmith export",
         project=project_name,
         frequency=frequency,
+        output=output,
         since=since.isoformat(),
     )
 
@@ -85,53 +127,44 @@ def export_traces(frequency: str = "daily") -> int:
         api_key=ls_settings.langsmith_api_key.get_secret_value(),
     )
 
-    mongo_client = MongoClient(mongo_settings.uri.get_secret_value())
-    db = mongo_client[mongo_settings.db_name]
-    collection = db[COLLECTION_NAME]
+    docs = [_run_to_document(run) for run in ls_client.list_runs(project_name=project_name, start_time=since)]
 
-    collection.create_index("trace_id")
-    collection.create_index("start_time")
-
-    runs = ls_client.list_runs(
-        project_name=project_name,
-        start_time=since,
-    )
-
-    operations = []
-    for run in runs:
-        doc = _run_to_document(run)
-        operations.append(
-            UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
-        )
-
-    if not operations:
+    if not docs:
         logger.info("No new traces found.")
-        mongo_client.close()
         return 0
 
-    result = collection.bulk_write(operations)
-    count = result.upserted_count + result.modified_count
-    logger.info(
-        "Export complete",
-        upserted=result.upserted_count,
-        modified=result.modified_count,
-        total=count,
-    )
+    if output in ("mongodb", "both"):
+        _upsert_mongodb(docs, MongoDBSettings())
 
-    mongo_client.close()
-    return count
+    if output in ("json", "both"):
+        _write_json(docs, output_path)
+
+    logger.info("Export complete", total=len(docs))
+    return len(docs)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Export LangSmith traces to MongoDB.")
+    parser = argparse.ArgumentParser(description="Export LangSmith traces to MongoDB and/or JSON.")
     parser.add_argument(
         "--frequency",
         choices=list(FREQUENCY_WINDOWS.keys()),
         default="daily",
         help="How far back to fetch traces (default: daily).",
     )
+    parser.add_argument(
+        "--output",
+        choices=["mongodb", "json", "both"],
+        default="mongodb",
+        help="Export destination (default: mongodb).",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=Path,
+        default=Path("./exports"),
+        help="Directory for JSON output (default: ./exports).",
+    )
     args = parser.parse_args()
-    export_traces(frequency=args.frequency)
+    export_traces(frequency=args.frequency, output=args.output, output_path=args.output_path)
 
 
 if __name__ == "__main__":
