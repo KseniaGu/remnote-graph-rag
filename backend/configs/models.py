@@ -125,7 +125,7 @@ class ModelSettings(BaseSettings):
         top_k=10,
         top_p=1.,
         num_predict=2048,
-        prompt_version={"graph_index": "v2", "routing": "v3"},
+        prompt_version={"graph_index": "v2", "routing": "v4"},
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B (same instance as orchestrator)
     retriever: LocalModelSettings | BaseLLMSettings = OllamaSettings(
@@ -162,7 +162,7 @@ class ModelSettings(BaseSettings):
         top_p=0.8,
         num_predict=8192,
         reasoning=True,
-        prompt_version="v3"
+        prompt_version="v4"
     )
 
     reranker: CohereSettings | BaseLLMSettings = CohereSettings(
@@ -190,7 +190,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.,
             max_tokens=2048,
-            prompt_version={"graph_index": "v2", "routing": "v3"},
+            prompt_version={"graph_index": "v2", "routing": "v4"},
         ),
         retriever=OpenAISettings(
             role=ModelRoleType.retriever,
@@ -235,7 +235,7 @@ def _vllm_models() -> ModelSettings:
             base_url=generation_url,
             temperature=0.7,
             max_tokens=8192,
-            prompt_version="v3",
+            prompt_version="v4",
         ),
     )
 

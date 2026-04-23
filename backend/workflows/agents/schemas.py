@@ -51,6 +51,14 @@ class State(BaseModel):
     user_score: Optional[float] = Field(
         default=None, description="The quantitative evaluation of the user's latest answer"
     )
+    retriever_empty: bool = Field(
+        default=False,
+        description="True when the Retriever returned no KB hits this turn (escalation signal for Researcher)."
+    )
+    sources_exhausted: bool = Field(
+        default=False,
+        description="True when both Retriever and Researcher failed this turn (terminal signal for Orchestrator)."
+    )
 
     @classmethod
     def get_literal_values(cls, field_name: str) -> tuple[Any, ...]:

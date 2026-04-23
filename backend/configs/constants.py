@@ -49,6 +49,8 @@ TEST_SOURCES = [
     'Backpropagation', 'Super study guide transformers and llm ADD NOTES', 'почитать про DPO, PPO, GRPO',
 ]
 MIN_RELEVANCE_SCORE = 0.1  # Retriever's threshold that is applied on the scores generated with Reranker
+MAX_SOURCE_CHARS = 1200
+RELATION_DROP_SCORE = 0.30
 
 # VISUALIZATION
 SPRING_LAYOUT_K = 0.5

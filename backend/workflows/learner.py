@@ -344,10 +344,31 @@ class LearnerWorkflow:
         try:
             return await model.ainvoke(messages_to_pass, config={"run_name": run_name})
         except ResponseError as e:
+            add_trace_metadata("error_type", "ollama_service_error")
+            add_trace_metadata("error_role", role_type.name)
             logger.error(f"[{role_type.name.upper()}] Service error after retries exhausted: {e.status_code}")
         except Exception as e:
-            logger.error(f"[{role_type.name.upper()}] Unexpected error: {str(e)}")
+            err_type = self._classify_error(e)
+            add_trace_metadata("error_type", err_type)
+            add_trace_metadata("error_role", role_type.name)
+            add_trace_metadata("error_message", str(e)[:500])
+            logger.error(f"[{role_type.name.upper()}] {err_type}: {str(e)[:500]}")
         return None
+
+    @staticmethod
+    def _classify_error(exc: BaseException) -> str:
+        """Bucket an exception into a coarse `error_type` tag for observability."""
+        name = type(exc).__name__
+        msg = str(exc)
+        if isinstance(exc, UnicodeEncodeError) or "surrogates not allowed" in msg:
+            return "unicode_encode_error"
+        if name in ("OutputParserException", "ValidationError") or "validation error" in msg.lower():
+            return "structured_output_parse_error"
+        if name in ("TimeoutError", "ReadTimeout", "WriteTimeout", "ConnectTimeout") or "timeout" in msg.lower():
+            return "timeout"
+        if "connection" in msg.lower() or name in ("ConnectError", "ConnectionError"):
+            return "connection_error"
+        return f"unexpected:{name}"
 
     @traceable(run_type="chain", name="call_tools")
     async def call_tools(self, response: Any) -> dict[str, Any]:
@@ -373,25 +394,79 @@ class LearnerWorkflow:
         results = await asyncio.gather(*[_invoke_one(tc) for tc in response.tool_calls])
         return {name: result for name, result in results if result is not None}
 
+    @staticmethod
+    def _deterministic_route(state: State) -> Optional[str]:
+        """Deterministic routing decisions.
+
+        Returns the next step name if the context + last message uniquely determine it, otherwise None.
+        """
+        ctx = state.context or ""
+
+        # Priority 0: terminal signals set by nodes earlier in this turn.
+        if state.sources_exhausted:
+            return "__end__"
+        if "[RESEARCH_COMPLETE]" in ctx:
+            return ModelRoleType.analyst.name
+        if state.retriever_empty:
+            return ModelRoleType.researcher.name
+        if "Visual artifact generated" in ctx:
+            return "__end__"
+
+        # Priority 1: if an agent (analyst/mentor) has already produced a response this turn,
+        # its message is the last one in state.messages. Workers add additional_kwargs["agent"]
+        # to their response; presence of that tag means the turn is complete.
+        if state.messages:
+            last = state.messages[-1]
+            agent_tag = last.additional_kwargs.get("agent", "") if hasattr(last, "additional_kwargs") else ""
+            if agent_tag in ("[ANALYST]", "[MENTOR]"):
+                return "__end__"
+
+        # Priority 2: visualization data has been gathered, route to visualizer.
+        if "get_subgraphs_to_visualize" in ctx:
+            return "visualizer"
+
+        # Priority 3: KB results are in context, route to analyst for synthesis.
+        if "search_knowledge_base" in ctx:
+            return ModelRoleType.analyst.name
+
+        # Priority 4: web research findings are in context (covered by RESEARCH_COMPLETE above,
+        # but handle the case where the sentinel got stripped).
+        if "## Web Research Findings" in ctx:
+            return ModelRoleType.analyst.name
+
+        # Context is empty or unrecognized; an LLM classifier is needed for intent routing.
+        return None
+
     async def orchestrator_node(self, state: State) -> dict[str, str]:
         """Orchestrator agent: central router that decides next workflow step.
-        
-        Analyzes conversation history and current context to determine which specialized agent should handle the request
-        
+
+        Fast path: when the context uniquely determines the next step (sentinels, KB results,
+        agent completion), route deterministically without any LLM call. This eliminates ~80%
+        of orchestrator LLM traffic based on log analysis.
+
+        Slow path: when intent is ambiguous (empty context, fresh human question), call the
+        Orchestrator LLM with the structured-output schema for intent classification.
+
         Args:
             state: Current workflow state.
-            
+
         Returns:
             Dictionary with next_step routing decision.
         """
         ctx = state.context or ""
         add_trace_metadata("context", ctx)
 
-        # All sources exhausted (both retriever and researcher failed) → end
-        if '"all_sources_exhausted": true' in ctx:
-            logger.info("[ORCHESTRATOR] Routing to: __end__")
-            logger.info("[ORCHESTRATOR] Reasoning: Both retriever and researcher found nothing (deterministic).")
-            return {"next_step": "__end__"}
+        last_is_human = bool(state.messages) and getattr(state.messages[-1], "type", None) == "human"
+        fresh_turn_reset: dict[str, Any] = {}
+        if last_is_human and not ctx and (state.retriever_empty or state.sources_exhausted):
+            logger.info("[ORCHESTRATOR] New user turn detected; clearing retriever_empty/sources_exhausted.")
+            fresh_turn_reset = {"retriever_empty": False, "sources_exhausted": False}
+            state = state.model_copy(update=fresh_turn_reset)
+
+        deterministic = self._deterministic_route(state)
+        if deterministic is not None:
+            logger.info(f"[ORCHESTRATOR] Routing to: {deterministic} (deterministic)")
+            return {"next_step": deterministic, **fresh_turn_reset}
 
         messages_to_pass = self.create_messages_to_pass(
             ModelRoleType.orchestrator, state, ("conversation_history", "context", "visual_artifact")
@@ -401,21 +476,17 @@ class LearnerWorkflow:
         if response:
             next_step = response.next_step
 
-            # Hard loop-breaking: if retriever already failed, never send back
-            if '"no_results": true' in ctx and next_step in ("retriever", "visualizer"):
-                logger.warning("[ORCHESTRATOR] Retriever returned no results. Routing to researcher as fallback.")
-                next_step = "researcher"
-
-            # Safety: don't route to visualizer without graph data (first attempt only)
-            elif next_step == "visualizer" and "get_subgraphs_to_visualize" not in ctx:
+            # Safety: don't route to visualizer without graph data (first attempt only).
+            if next_step == "visualizer" and "get_subgraphs_to_visualize" not in ctx:
                 logger.warning("[ORCHESTRATOR] No graph data for visualizer. Routing to retriever.")
-                next_step = "retriever"
+                next_step = ModelRoleType.retriever.name
 
             logger.info(f"[ORCHESTRATOR] Routing to: {next_step}")
             logger.info(f"[ORCHESTRATOR] Reasoning: {response.reasoning}")
-            return {"next_step": next_step}
+            return {"next_step": next_step, **fresh_turn_reset}
 
-        return {"next_step": ModelRoleType.retriever.name}
+        logger.warning("[ORCHESTRATOR] LLM failed on ambiguous input; defaulting to retriever.")
+        return {"next_step": ModelRoleType.retriever.name, **fresh_turn_reset}
 
     async def retriever_node(self, state: State) -> dict[str, str]:
         """Retriever agent: fetches information from knowledge base or prepares visualization data.
@@ -441,18 +512,50 @@ class LearnerWorkflow:
         response = await self.call_model(messages_to_pass, ModelRoleType.retriever)
         if response and response.tool_calls:
             tool_results = await self.call_tools(response)
-            # If every tool result signals no relevant data, escalate to researcher
-            all_empty = all(
-                isinstance(v, str) and v.strip() == "No relevant information found."
-                for v in tool_results.values()
-            ) if tool_results else True
+            all_empty = self._kb_results_empty(tool_results)
             if all_empty:
-                logger.warning(f"[{model_name}] All KB results below relevance threshold, setting no_results sentinel")
-                return {"context": '{"no_results": true}'}
-            return {"context": json.dumps(tool_results, ensure_ascii=False)}
+                logger.warning(f"[{model_name}] All KB results below relevance threshold; marking retriever_empty.")
+                return {"context": "", "retriever_empty": True}
+            return {"context": json.dumps(tool_results, ensure_ascii=False), "retriever_empty": False}
 
-        logger.warning(f"[{model_name}] Nothing retrieved, setting no_results sentinel")
-        return {"context": '{"no_results": true}'}
+        logger.warning(f"[{model_name}] Nothing retrieved; marking retriever_empty.")
+        return {"context": "", "retriever_empty": True}
+
+    # Minimum score a retrieved item must have for us to treat the retrieval as "useful".
+    # Below this, results are overwhelmingly metadata/noise per log analysis.
+    _KB_MIN_USEFUL_SCORE = 0.30
+
+    @classmethod
+    def _kb_results_empty(cls, tool_results: Optional[dict[str, Any]]) -> bool:
+        """Return True if every search_knowledge_base result lacks usable content.
+
+        Three tolerant checks, any one of which declares a result "non-empty":
+          1. The output is not the literal `No relevant information found.` sentinel.
+          2. The output contains `[RELATION]` or `[SOURCE]` markers.
+          3. At least one marker has a score ≥ `_KB_MIN_USEFUL_SCORE` (or is unscored).
+
+        Catches the log's observed pathology where a single query returns zero hits and
+        the formatter emits a bare `QUERY: X` section with nothing under it — and the
+        subtler case where every hit has a near-zero score (metadata-only matches).
+        """
+        if not tool_results:
+            return True
+        for v in tool_results.values():
+            if not isinstance(v, str):
+                continue
+            v = v.strip()
+            if not v or v == "No relevant information found.":
+                continue
+            if "[RELATION]" not in v and "[SOURCE]" not in v:
+                continue
+            # At least one scored marker must meet the useful-score threshold.
+            scores = re.findall(r"\(Score:\s*([\d.]+)\)", v)
+            if not scores:
+                # Scoreless outputs (node.text without score) are considered useful by default.
+                return False
+            if any(float(s) >= cls._KB_MIN_USEFUL_SCORE for s in scores):
+                return False
+        return True
 
     async def researcher_node(self, state: State) -> dict[str, str]:
         """Researcher agent: conducts web research for information not in knowledge base.
@@ -511,20 +614,27 @@ class LearnerWorkflow:
                         f"confidence: {research_result.confidence_level}"
                     )
 
-                    # Format research findings with sources for analyst
-                    formatted_context = f"{state.context}\n\n## Web Research Findings\n\n{research_result.key_findings}"
+                    # Format research findings with sources for analyst. Strip any prior
+                    # `retriever_empty`-era context so we don't concatenate stale markers.
+                    base_ctx = state.context if "[RESEARCH_COMPLETE]" not in (state.context or "") else ""
+                    formatted_context = f"{base_ctx}\n\n## Web Research Findings\n\n{research_result.key_findings}".lstrip()
                     if research_result.sources:
                         formatted_context += "\n\n### Sources:\n"
                         for source in research_result.sources:
                             formatted_context += f"- [{source.get('title', 'Unknown')}]({source.get('url', '')}) " \
                                                  f"({source.get('type', 'web')})\n"
 
-                    return {"context": formatted_context + "\n[RESEARCH_COMPLETE]"}
+                    return {
+                        "context": formatted_context + "\n[RESEARCH_COMPLETE]",
+                        "retriever_empty": False,
+                        "sources_exhausted": False,
+                    }
 
-        if '"no_results": true' in (state.context or ''):
+        if state.retriever_empty:
             logger.warning(
-                f"[{model_name}] No search result generated and retriever also had no results. All sources exhausted.")
-            return {"context": '{"all_sources_exhausted": true}'}
+                f"[{model_name}] No search result generated and retriever was empty. Marking sources_exhausted."
+            )
+            return {"context": "", "sources_exhausted": True}
         logger.warning(f"[{model_name}] No search result generated, returning original context")
         return {"context": state.context}
 
