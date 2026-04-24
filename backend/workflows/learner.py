@@ -457,7 +457,7 @@ class LearnerWorkflow:
         add_trace_metadata("context", ctx)
 
         last_is_human = bool(state.messages) and getattr(state.messages[-1], "type", None) == "human"
-        fresh_turn_reset: dict[str, Any] = {}
+        fresh_turn_reset = {}
         if last_is_human and not ctx and (state.retriever_empty or state.sources_exhausted):
             logger.info("[ORCHESTRATOR] New user turn detected; clearing retriever_empty/sources_exhausted.")
             fresh_turn_reset = {"retriever_empty": False, "sources_exhausted": False}
@@ -540,21 +540,24 @@ class LearnerWorkflow:
         """
         if not tool_results:
             return True
-        for v in tool_results.values():
-            if not isinstance(v, str):
-                continue
-            v = v.strip()
-            if not v or v == "No relevant information found.":
-                continue
-            if "[RELATION]" not in v and "[SOURCE]" not in v:
-                continue
-            # At least one scored marker must meet the useful-score threshold.
-            scores = re.findall(r"\(Score:\s*([\d.]+)\)", v)
-            if not scores:
-                # Scoreless outputs (node.text without score) are considered useful by default.
-                return False
-            if any(float(s) >= cls._KB_MIN_USEFUL_SCORE for s in scores):
-                return False
+        for k, v in tool_results.items():
+            if k == "search_knowledge_base":
+                if not isinstance(v, str):
+                    continue
+                v = v.strip()
+                if not v or v == "No relevant information found.":
+                    continue
+                if "[RELATION]" not in v and "[SOURCE]" not in v:
+                    continue
+                # At least one scored marker must meet the useful-score threshold.
+                scores = re.findall(r"\(Score:\s*([\d.]+)\)", v)
+                if not scores:
+                    # Scoreless outputs (node.text without score) are considered useful by default.
+                    return False
+                if any(float(s) >= cls._KB_MIN_USEFUL_SCORE for s in scores):
+                    return False
+            elif k == "get_subgraphs_to_visualize":
+                return not any(v[0] or v[1])
         return True
 
     async def researcher_node(self, state: State) -> dict[str, str]:
@@ -673,7 +676,7 @@ class LearnerWorkflow:
                 if stripped:
                     response.content = stripped
                     response.additional_kwargs["agent"] = f"[{model_name}]"
-                    return {"messages": [response]}
+                    return {"messages": [response], "context": ""}
 
         logger.warning(
             f"[{model_name}] No meaningful response generated, returning empty messages for fallback handling")
@@ -740,12 +743,9 @@ class LearnerWorkflow:
 
         return {"visual_artifacts": state.visual_artifacts, "context": "Visualization failed"}
 
-    def run(self, checkpointer=None) -> Any:
+    def run(self) -> Any:
         """Compiles and returns the executable workflow graph.
-        
-        Args:
-            checkpointer: Optional LangGraph checkpointer for state persistence (e.g. RedisSaver).
-            
+
         Returns:
             Compiled LangGraph workflow ready for invocation.
         """
@@ -801,7 +801,9 @@ if __name__ == '__main__':
     workflow = LearnerWorkflow(models_settings, path_settings, storage_settings, tavily_settings, kg_search_settings)
     graph = workflow.run()
     # workflow.show_graph()
-    messages = ('Visualize my knowledge about neural networks',)
+    # messages = ('Visualize my knowledge about neural networks',)
+    messages = ("Research the latest developments in LLM fine-tuning",)
+    # messages = ("What information do I have about attention mechanism?",)
     # "What information do I have about EAGLE?",
     # "What information do I have about attention mechanism?",
     # "Tell me please more about VAE",
@@ -809,7 +811,8 @@ if __name__ == '__main__':
 
     try:
         for message in messages:
-            state = asyncio.run(graph.ainvoke({"messages": [message]}, config={"recursion_limit": 25}))
+            state = asyncio.run(graph.ainvoke({"messages": [message]},
+                                              config={"recursion_limit": 25, "configurable": {"thread_id": 1}}))
     except GraphRecursionError as e:
         logger.error(f"Workflow exceeded recursion limit: {e}")
 
