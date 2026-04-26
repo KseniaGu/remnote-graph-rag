@@ -811,8 +811,9 @@ if __name__ == '__main__':
 
     try:
         for message in messages:
-            state = asyncio.run(graph.ainvoke({"messages": [message]},
-                                              config={"recursion_limit": 25, "configurable": {"thread_id": 1}}))
+            state = asyncio.run(
+                graph.ainvoke({"messages": [message]}, config={"recursion_limit": 25, "configurable": {"thread_id": 1}})
+            )
     except GraphRecursionError as e:
         logger.error(f"Workflow exceeded recursion limit: {e}")
 
