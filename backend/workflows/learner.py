@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -13,7 +14,7 @@ from ollama._types import ResponseError
 from pymongo import MongoClient
 from tavily import TavilyClient
 
-from backend.configs.constants import TITLE_MAX_LENGTH
+from backend.configs.constants import TITLE_MAX_LENGTH, DEFAULT_RECENT_MESSAGE_LIMIT
 from backend.configs.enums import ModelRoleType, PromptType
 from backend.configs.models import ModelSettings
 from backend.configs.paths import PathSettings
@@ -23,6 +24,7 @@ from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
 from backend.utils.helpers import add_trace_metadata
 from backend.utils.prompt_engine import PromptEngine
+from backend.utils.session_memory import compress_text
 from backend.workflows.agents.factory import AgentsFactory
 from backend.workflows.agents.schemas import *
 from backend.workflows.agents.tools import *
@@ -79,24 +81,38 @@ class LearnerWorkflow:
             kg_search_settings: Knowledge graph search configuration.
             storage_settings: Storage backend settings.
         """
-        embedder = HuggingFaceEmbedding(
-            self.models_settings.embedder.model_path,
-            cache_folder=os.environ.get("HF_HOME"),
-            trust_remote_code=True,
-            device=self.models_settings.embedder.device,
-            embed_batch_size=10,
-            local_files_only=True,
-        )
-        reranker = CohereRerank(
-            api_key=self.models_settings.reranker.api_key.get_secret_value(),
-            model=self.models_settings.reranker.model_name,
-            top_n=self.models_settings.reranker.top_n,
-        )
-        kg_storage = KnowledgeGraphStorage(
-            self.path_settings,
-            storage_settings,
-            embedding_dim=self.models_settings.embedder.embedding_dim,
-        )
+
+        def _create_embedder():
+            return HuggingFaceEmbedding(
+                self.models_settings.embedder.model_path,
+                cache_folder=os.environ.get("HF_HOME"),
+                trust_remote_code=True,
+                device=self.models_settings.embedder.device,
+                embed_batch_size=10,
+                local_files_only=True,
+            )
+
+        def _create_reranker():
+            return CohereRerank(
+                api_key=self.models_settings.reranker.api_key.get_secret_value(),
+                model=self.models_settings.reranker.model_name,
+                top_n=self.models_settings.reranker.top_n,
+            )
+
+        def _create_kg_storage():
+            return KnowledgeGraphStorage(
+                self.path_settings,
+                storage_settings,
+                embedding_dim=self.models_settings.embedder.embedding_dim,
+            )
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            embedder_future = executor.submit(_create_embedder)
+            reranker_future = executor.submit(_create_reranker)
+            kg_storage_future = executor.submit(_create_kg_storage)
+            embedder = embedder_future.result()
+            reranker = reranker_future.result()
+            kg_storage = kg_storage_future.result()
         logger.info("Knowledge graph storage initialized")
 
         self.knowledge_graph_indexer = KnowledgeGraphIndexer(
@@ -256,11 +272,12 @@ class LearnerWorkflow:
 
     @staticmethod
     @traceable(run_type="chain", name="format_conversation_history")
-    def format_conversation_history(messages: list) -> str:
+    def format_conversation_history(messages: list, max_message_chars: int = 1200) -> str:
         """Formats conversation messages into a readable history string.
         
         Args:
             messages: List of conversation messages.
+            max_message_chars: Maximum content length per message before deterministic compression.
             
         Returns:
             Formatted conversation history with agent labels and content.
@@ -269,11 +286,22 @@ class LearnerWorkflow:
         for message in messages:
             text += f"<message role={message.additional_kwargs.get('agent', message.type)}>\n"
             text += "<content>\n"
-            text += f"{message.content}\n"
+            text += f"{compress_text(str(message.content), max_message_chars)}\n"
             text += "</content>\n"
             text += "</message>"
 
         return text
+
+    @staticmethod
+    def _with_session_summary(conversation_history: str, session_summary: str) -> str:
+        if not session_summary:
+            return conversation_history
+        return (
+            "<older_conversation_summary>\n"
+            f"{session_summary}\n"
+            "</older_conversation_summary>\n\n"
+            f"{conversation_history}"
+        )
 
     @traceable(run_type="chain", name="create_messages_to_pass")
     def create_messages_to_pass(
@@ -281,7 +309,7 @@ class LearnerWorkflow:
             role_type: ModelRoleType,
             state: State,
             prompt_template_arguments: tuple,
-            conversation_history_limit: int = 4
+            conversation_history_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT
     ) -> list[tuple[str, str]]:
         """Creates formatted message list for agent invocation.
         
@@ -314,8 +342,12 @@ class LearnerWorkflow:
                 prompt_kwargs["context"] += "\nVisual artifact generated"
 
         if "conversation_history" in prompt_template_arguments:
-            prompt_kwargs["conversation_history"] = self.format_conversation_history(
+            conversation_history = self.format_conversation_history(
                 state.messages[-conversation_history_limit:]
+            )
+            prompt_kwargs["conversation_history"] = self._with_session_summary(
+                conversation_history,
+                state.session_summary,
             )
 
         prompt, system_prompt = self.prompts[role_type]
@@ -409,7 +441,7 @@ class LearnerWorkflow:
             return ModelRoleType.analyst.name
         if state.retriever_empty:
             return ModelRoleType.researcher.name
-        if "Visual artifact generated" in ctx:
+        if "Visual artifact generated" in ctx or "Visualization failed" in ctx:
             return "__end__"
 
         # Priority 1: if an agent (analyst/mentor) has already produced a response this turn,

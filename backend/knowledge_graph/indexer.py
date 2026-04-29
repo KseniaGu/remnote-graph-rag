@@ -1,5 +1,5 @@
 import json
-import math
+import os
 import re
 from itertools import chain
 from typing import Any, Optional
@@ -19,6 +19,7 @@ from llama_index.core.schema import MetadataMode, RelatedNodeInfo, TextNode, Nod
 from llama_index.core.vector_stores.simple import SimpleVectorStore
 from llama_index.llms.ollama import Ollama
 from llama_index.vector_stores.pinecone import PineconeVectorStore
+
 try:
     from llama_index.vector_stores.redis import RedisVectorStore
 except ImportError:
@@ -234,7 +235,7 @@ class KnowledgeGraphIndexer:
             if subtree_label == current_subtree_label:
                 merged_text += node_text
             else:
-                merged_text += self.node_id_to_path[node_id] + "\n" + node_text
+                merged_text += " > ".join(self.node_id_to_path[node_id]) + "\n" + node_text
                 current_subtree_label = subtree_label
 
         # Remove all child nodes, all their texts are already gathered in merged_text
@@ -640,7 +641,6 @@ class KnowledgeGraphIndexer:
                 opacity=0.6,
             ))
 
-
         edge_trace = go.Scatter(
             x=edge_x,
             y=edge_y,
@@ -794,6 +794,7 @@ class KnowledgeGraphIndexer:
                 pass
         else:
             raise ValueError(f"Unexpected Vector Store type: {type(self.index.vector_store)}")
+
         self.index.vector_store.stores_text = True
         document_ids = list(self.index.storage_context.docstore.docs.keys())
         documents = self.get_document_nodes(document_ids)
@@ -881,7 +882,10 @@ class KnowledgeGraphIndexer:
             vector_store=self.storage_context.vector_store
         )
         logger.info("Property Graph Index loaded")
-        self.get_embeddings()
+        if os.environ.get("ENV") == "DEV":
+            self.get_embeddings()
+        else:
+            logger.info("Skipping embedding validation on index load outside DEV")
 
     def get_retriever(self, retriever_params: dict = None) -> BaseRetriever:
         """Gets retriever engine.

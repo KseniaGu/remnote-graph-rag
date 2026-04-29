@@ -1,4 +1,6 @@
+import asyncio
 import re
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -6,18 +8,73 @@ import plotly.graph_objects as go
 import reflex as rx
 from pydantic import BaseModel
 
-from app.strings import AGENT_DESCRIPTIONS
-from backend.configs.constants import RECURSION_LIMIT
+from app.strings import AGENT_DESCRIPTIONS, QUICK_ACTIONS, QUICK_ACTION_CACHE_POLICIES
+from backend.configs.constants import RECURSION_LIMIT, CACHED_AGENT_REPLAY_LATENCY, CACHED_TOKENS_REPLAY_LATENCY, \
+    DEFAULT_RECENT_MESSAGE_LIMIT
 from backend.configs.enums import WorkflowEventType
+from backend.utils.cache import get_quick_action_cache, normalize_quick_action_prompt
+from backend.utils.helpers import logger
+from backend.utils.session_memory import get_session_memory_store
 from backend.workflows.learner_reflex import get_workflow
 
 
 def _normalize_math_delimiters(text: str) -> str:
-    """Converts LaTeX \\[...\\] and \\(...\\) delimiters to $$...$$ and $...$
-    so remark-math can render them."""
+    """Converts LaTeX \\[...\\] and \\(...\\) delimiters to $$...$$ and $...$ so remark-math can render them."""
     text = re.sub(r'\\\[(.+?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
     text = re.sub(r'\\\((.+?)\\\)', r'$\1$', text, flags=re.DOTALL)
     return text
+
+
+def _build_quick_action_policy_map() -> dict[str, dict[str, Any]]:
+    policy_map: dict[str, dict[str, Any]] = {}
+    quick_action_prompts = {action for _, _, action in QUICK_ACTIONS}
+    for raw_policy in QUICK_ACTION_CACHE_POLICIES:
+        policy = dict(raw_policy)
+        prompt = str(policy.get("prompt", ""))
+        if not prompt or prompt not in quick_action_prompts or not bool(policy.get("enabled", True)):
+            continue
+        raw_aliases = policy.get("aliases", [])
+        aliases = raw_aliases if isinstance(raw_aliases, (list, tuple)) else []
+        candidates = [prompt, *aliases]
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                policy_map[normalize_quick_action_prompt(candidate)] = policy
+    return policy_map
+
+
+QUICK_ACTION_POLICY_BY_PROMPT = _build_quick_action_policy_map()
+
+
+def _get_quick_action_cache_policy(prompt: str) -> dict[str, Any] | None:
+    return QUICK_ACTION_POLICY_BY_PROMPT.get(normalize_quick_action_prompt(prompt))
+
+
+def _message_to_memory_payload(message: "Message") -> dict[str, str]:
+    return {
+        "role": message.role,
+        "content": message.content,
+        "agent": message.agent,
+        "timestamp": message.timestamp,
+    }
+
+
+def _cached_response_chunks(content: str, chunk_size: int = 24) -> list[str]:
+    """Splits cached content into small chunks so cache hits feel like live streaming."""
+    if not content:
+        return []
+    return [content[i:i + chunk_size] for i in range(0, len(content), chunk_size)]
+
+
+async def _persist_session_messages(session_id: str, messages: list[dict[str, str]]) -> None:
+    if not session_id:
+        return
+    try:
+        await asyncio.to_thread(
+            lambda: get_session_memory_store().replace_messages(session_id, messages)
+        )
+    except Exception as e:
+        logger.warning(f"Persisting session messages failed: {e}")
+        pass
 
 
 class Message(BaseModel):
@@ -58,6 +115,7 @@ class AppState(rx.State):
 
     # Session state
     session_started: bool = False
+    session_id: str = ""
     error_message: str = ""
 
     # Streaming state
@@ -152,6 +210,7 @@ class AppState(rx.State):
         """Clears the chat history."""
         self.messages = []
         self.agent_history = []
+        self.session_id = ""
         # self.current_context = "" # It's hidden now
         self.visual_artifacts = []
         self.selected_plot_index = 0
@@ -162,6 +221,50 @@ class AppState(rx.State):
         """Clears the error message."""
         self.error_message = ""
 
+    async def _replay_cached_agent_history(self, agent_history: list[str]) -> None:
+        """Replays cached agent activity into the sidebar without running the workflow."""
+        for agent_name in agent_history:
+            if not agent_name:
+                continue
+            async with self:
+                self.active_agent = agent_name
+                if agent_name not in self.agent_history:
+                    self.agent_history = self.agent_history + [agent_name]
+            await asyncio.sleep(CACHED_AGENT_REPLAY_LATENCY)
+        async with self:
+            self.active_agent = ""
+
+    async def _stream_cached_response(self, response: dict[str, str]) -> None:
+        """Streams a cached assistant response through the same UI state as live tokens."""
+        agent_name = response.get("agent", "cache")
+        content = response.get("content", "")
+        rendered_content = _normalize_math_delimiters(content)
+
+        async with self:
+            self.active_agent = agent_name if agent_name != "system" else ""
+            self.streaming_agent = agent_name
+            self.streaming_content = ""
+            if agent_name and agent_name != "system" and agent_name not in self.agent_history:
+                self.agent_history = self.agent_history + [agent_name]
+
+        for chunk in _cached_response_chunks(rendered_content):
+            async with self:
+                self.streaming_content = self.streaming_content + chunk
+            await asyncio.sleep(CACHED_TOKENS_REPLAY_LATENCY)
+
+        async with self:
+            self.active_agent = ""
+            self.streaming_content = ""
+            self.streaming_agent = ""
+            self.messages = self.messages + [
+                Message(
+                    content=rendered_content,
+                    role="assistant",
+                    agent=agent_name,
+                    timestamp=datetime.now().strftime("%H:%M")
+                )
+            ]
+
     @rx.event(background=True)
     async def send_message(self):
         """Sends a message and process the response."""
@@ -169,9 +272,15 @@ class AppState(rx.State):
             return
 
         user_message = self.current_input.strip()
+        quick_action_policy = _get_quick_action_cache_policy(user_message)
+        should_cache_quick_action = len(self.messages) == 0 and quick_action_policy is not None
+        cache_prompt = str(quick_action_policy.get("prompt", user_message)) if quick_action_policy else user_message
 
         async with self:
             self.current_input = ""
+            if not self.session_id:
+                self.session_id = str(uuid.uuid4())
+            session_id = self.session_id
 
         async with self:
             self.is_processing = True
@@ -188,19 +297,64 @@ class AppState(rx.State):
             ]
 
         try:
+            if should_cache_quick_action:
+                try:
+                    cached = await asyncio.to_thread(lambda: get_quick_action_cache().get(cache_prompt))
+                except Exception as e:
+                    logger.warning(f"Quick-action cache lookup failed: {e}")
+                    cached = None
+                if cached:
+                    cached_responses = cached.get("responses", [])
+                    cached_visual_artifacts = cached.get("visual_artifacts", [])
+                    cached_agent_history = cached.get("agent_history", [])
+                    if not cached_agent_history:
+                        cached_agent_history = [
+                            response.get("agent", "")
+                            for response in cached_responses
+                            if response.get("agent")
+                        ]
+                        if cached_visual_artifacts:
+                            cached_agent_history.append("visualizer")
+                    await self._replay_cached_agent_history(cached_agent_history)
+                    async with self:
+                        if cached_visual_artifacts:
+                            self.visual_artifacts = self.visual_artifacts + cached_visual_artifacts
+                            self.selected_plot_index = len(self.visual_artifacts) - 1
+                            self.show_visualization = True
+                    for response in cached_responses:
+                        await self._stream_cached_response(response)
+                    async with self:
+                        messages_for_memory = [_message_to_memory_payload(msg) for msg in self.messages]
+                    await _persist_session_messages(session_id, messages_for_memory)
+                    return
+
             workflow = get_workflow()
 
             # Prepare message history
+            recent_messages = self.messages[:-1][-DEFAULT_RECENT_MESSAGE_LIMIT:]
             message_history = [
                 {"role": msg.role, "content": msg.content}
-                for msg in self.messages[:-1]  # Exclude the message we just added
+                for msg in recent_messages
             ]
+            cache_responses: list[dict[str, str]] = []
+            cache_visual_artifacts: list[dict[str, Any]] = []
+            cache_context = ""
+            cache_error = False
+            try:
+                session_summary = await asyncio.to_thread(
+                    lambda: get_session_memory_store().get_prompt_summary(session_id, user_message)
+                )
+            except Exception as e:
+                logger.warning(f"Loading session summary failed: {e}")
+                session_summary = ""
 
             # Stream through workflow with per-token updates
             async for event in workflow.stream_with_tokens(
                     user_message=user_message,
                     message_history=message_history,
-                    recursion_limit=RECURSION_LIMIT
+                    recursion_limit=RECURSION_LIMIT,
+                    session_id=session_id,
+                    session_summary=session_summary,
             ):
                 async with self:
                     if event.type == WorkflowEventType.AGENT_START:
@@ -231,17 +385,22 @@ class AppState(rx.State):
                     #         self.current_context = raw
 
                     elif event.type == WorkflowEventType.VISUALIZATION:
-                        self.visual_artifacts = self.visual_artifacts + event.data["artifacts"]
+                        artifacts = event.data["artifacts"]
+                        cache_visual_artifacts.extend(artifacts)
+                        self.visual_artifacts = self.visual_artifacts + artifacts
                         self.selected_plot_index = len(self.visual_artifacts) - 1
                         self.show_visualization = True
 
                     elif event.type == WorkflowEventType.RESPONSE:
                         agent_name = event.data.get("agent", "")
+                        content = event.data["content"]
+                        if agent_name != "system":
+                            cache_responses.append({"content": content, "agent": agent_name})
                         self.streaming_content = ""
                         self.streaming_agent = ""
                         self.messages = self.messages + [
                             Message(
-                                content=_normalize_math_delimiters(event.data["content"]),
+                                content=_normalize_math_delimiters(content),
                                 role="assistant",
                                 agent=agent_name,
                                 timestamp=datetime.now().strftime("%H:%M")
@@ -249,7 +408,44 @@ class AppState(rx.State):
                         ]
 
                     elif event.type == WorkflowEventType.ERROR:
+                        cache_error = True
                         self.error_message = event.data.get("message", "Unknown error occurred")
+
+                    elif event.type == WorkflowEventType.CONTEXT_UPDATE:
+                        cache_context = event.data.get("context", "")
+
+            if should_cache_quick_action and not cache_error:
+                async with self:
+                    cache_agent_history = list(self.agent_history)
+                ttl_seconds = quick_action_policy.get("ttl_seconds") if quick_action_policy else None
+                try:
+                    ttl_seconds = int(ttl_seconds) if ttl_seconds is not None else None
+                except (TypeError, ValueError):
+                    ttl_seconds = None
+                responses_to_cache = (
+                    cache_responses if bool(quick_action_policy.get("cache_responses", True)) else []
+                )
+                artifacts_to_cache = (
+                    cache_visual_artifacts if bool(quick_action_policy.get("cache_visual_artifacts", True)) else []
+                )
+                try:
+                    await asyncio.to_thread(
+                        lambda: get_quick_action_cache().set(
+                            cache_prompt,
+                            responses_to_cache,
+                            artifacts_to_cache,
+                            cache_context,
+                            agent_history=cache_agent_history,
+                            ttl_seconds=ttl_seconds,
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Quick-action cache persistence failed: {e}")
+                    pass
+
+            async with self:
+                messages_for_memory = [_message_to_memory_payload(msg) for msg in self.messages]
+            await _persist_session_messages(session_id, messages_for_memory)
 
         except Exception as e:
             async with self:
@@ -262,6 +458,8 @@ class AppState(rx.State):
                         timestamp=datetime.now().strftime("%H:%M")
                     )
                 ]
+                messages_for_memory = [_message_to_memory_payload(msg) for msg in self.messages]
+            await _persist_session_messages(session_id, messages_for_memory)
         finally:
             async with self:
                 self.is_processing = False

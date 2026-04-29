@@ -1,6 +1,7 @@
 import threading
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import AsyncGenerator
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
@@ -29,24 +30,12 @@ class WorkflowEvent:
 class ReflexLearnerWorkflow:
     """Reflex-compatible wrapper for LearnerWorkflow with streaming support."""
 
-    _instance = None
-    _initialized = False
     _init_lock = threading.Lock()
 
-    def __new__(cls):
-        """Singleton pattern to ensure only one workflow instance exists."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        """Initializes the workflow (only runs once due to singleton)."""
-        if ReflexLearnerWorkflow._initialized:
-            return
-
+        """Initializes the lightweight wrapper; heavy workflow setup is lazy."""
         self._workflow = None
         self._graph = None
-        ReflexLearnerWorkflow._initialized = True
 
     def _ensure_initialized(self):
         """Ensures the workflow is initialized, thread-safe."""
@@ -62,9 +51,7 @@ class ReflexLearnerWorkflow:
                 models_settings = get_model_settings()
                 path_settings = PathSettings()
                 kg_search_settings = KnowledgeGraphSearchSettings()
-
                 storage_settings = StorageSettings()
-
                 self._workflow = LearnerWorkflow(
                     models_settings,
                     path_settings,
@@ -105,7 +92,9 @@ class ReflexLearnerWorkflow:
             self,
             user_message: str,
             message_history: list[dict],
-            recursion_limit: int = RECURSION_LIMIT
+            recursion_limit: int = RECURSION_LIMIT,
+            session_id: str = "",
+            session_summary: str = "",
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """
         Processes a user message through the workflow and yield events.
@@ -114,6 +103,8 @@ class ReflexLearnerWorkflow:
             user_message: The user's message
             message_history: Previous messages in the conversation
             recursion_limit: Maximum recursion depth for the graph
+            session_id: Session ID.
+            session_summary: Session's conversation history summary.
             
         Yields:
             WorkflowEvent: Events during workflow execution
@@ -125,8 +116,11 @@ class ReflexLearnerWorkflow:
         messages.append(HumanMessage(content=user_message))
 
         thread_id = str(uuid.uuid4())
-        config = {"recursion_limit": recursion_limit, "configurable": {"thread_id": thread_id}}
-        initial_state = {"messages": messages}
+        configurable = {"thread_id": thread_id}
+        if session_id:
+            configurable["checkpoint_ns"] = session_id
+        config = {"recursion_limit": recursion_limit, "configurable": configurable}
+        initial_state = {"messages": messages, "session_summary": session_summary}
 
         try:
             # Track which agents are being called
@@ -198,7 +192,9 @@ class ReflexLearnerWorkflow:
             self,
             user_message: str,
             message_history: list[dict],
-            recursion_limit: int = RECURSION_LIMIT
+            recursion_limit: int = RECURSION_LIMIT,
+            session_id: str = "",
+            session_summary: str = "",
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """Streams workflow execution with detailed status updates.
         
@@ -211,8 +207,11 @@ class ReflexLearnerWorkflow:
         messages.append(HumanMessage(content=user_message))
 
         thread_id = str(uuid.uuid4())
-        config = {"recursion_limit": recursion_limit, "configurable": {"thread_id": thread_id}}
-        initial_state = {"messages": messages}
+        configurable = {"thread_id": thread_id}
+        if session_id:
+            configurable["checkpoint_ns"] = session_id
+        config = {"recursion_limit": recursion_limit, "configurable": configurable}
+        initial_state = {"messages": messages, "session_summary": session_summary}
 
         try:
             final_state = {}
@@ -297,7 +296,9 @@ class ReflexLearnerWorkflow:
             self,
             user_message: str,
             message_history: list[dict],
-            recursion_limit: int = RECURSION_LIMIT
+            recursion_limit: int = RECURSION_LIMIT,
+            session_id: str = "",
+            session_summary: str = "",
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """Streams workflow execution with per-token updates for analyst/mentor responses.
 
@@ -312,8 +313,11 @@ class ReflexLearnerWorkflow:
         messages.append(HumanMessage(content=user_message))
 
         thread_id = str(uuid.uuid4())
-        config = {"recursion_limit": recursion_limit, "configurable": {"thread_id": thread_id}}
-        initial_state = {"messages": messages}
+        configurable = {"thread_id": thread_id}
+        if session_id:
+            configurable["checkpoint_ns"] = session_id
+        config = {"recursion_limit": recursion_limit, "configurable": configurable}
+        initial_state = {"messages": messages, "session_summary": session_summary}
 
         _AGENT_NODES = {"orchestrator", "retriever", "researcher", "analyst", "mentor", "visualizer"}
         _STREAMING_NODES = {"analyst", "mentor"}
@@ -420,13 +424,7 @@ class ReflexLearnerWorkflow:
             )
 
 
-# Global workflow instance
-_workflow_instance = None
-
-
+@lru_cache(maxsize=1)
 def get_workflow() -> ReflexLearnerWorkflow:
-    """Get the singleton workflow instance."""
-    global _workflow_instance
-    if _workflow_instance is None:
-        _workflow_instance = ReflexLearnerWorkflow()
-    return _workflow_instance
+    """Returns the process-local workflow wrapper."""
+    return ReflexLearnerWorkflow()

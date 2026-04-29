@@ -1,4 +1,5 @@
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import redis
@@ -90,10 +91,12 @@ class KnowledgeGraphStorage:
                     port=self.storage_settings.document_storage.port,
                     namespace="llama_index",
                 )
-            # The least resource demanding way to check whether Redis cloud storage is empty
-            storage_is_empty = document_storage._kvstore._redis_client.dbsize() == 0
+            if self.storage_settings.document_storage.init_from_local:
+                storage_is_empty = document_storage._kvstore._redis_client.dbsize() == 0
+            else:
+                storage_is_empty = False
 
-            if self.storage_settings.document_storage.init_from_local and storage_is_empty:
+            if storage_is_empty:
                 local_path_to_check = kwargs.get("local_storage", self.path_settings.local_storage_dir)
                 if self.not_empty(local_path_to_check):
                     local_document_storage = SimpleDocumentStore.from_persist_dir(
@@ -135,13 +138,16 @@ class KnowledgeGraphStorage:
                     port=self.storage_settings.index_storage.port,
                     namespace="llama_index",
                 )
-            try:
-                index_storage.get_index_struct()
+            if self.storage_settings.index_storage.init_from_local:
+                try:
+                    index_storage.get_index_struct()
+                    storage_is_empty = False
+                except AssertionError:
+                    storage_is_empty = True
+            else:
                 storage_is_empty = False
-            except AssertionError:
-                storage_is_empty = True
 
-            if self.storage_settings.index_storage.init_from_local and storage_is_empty:
+            if storage_is_empty:
                 local_path_to_check = kwargs.get("local_storage", self.path_settings.local_storage_dir)
                 local_index_storage = SimpleIndexStore.from_persist_dir(persist_dir=str(local_path_to_check))
                 index_storage.add_index_struct(local_index_storage.get_index_struct())
@@ -172,7 +178,7 @@ class KnowledgeGraphStorage:
             embedding_dim = kwargs.get("embedding_dim", DEFAULT_EMBEDDING_DIM)
             schema = RedisVectorStoreSchema()
             schema.fields["vector"].attrs.dims = embedding_dim
-            if self.storage_settings.index_storage.password:
+            if self.storage_settings.vector_storage.password:
                 redis_connection = self.storage_settings.vector_storage.get_connection_url(driver="rediss")
             else:
                 redis_connection = self.storage_settings.vector_storage.get_connection_url()
@@ -217,8 +223,13 @@ class KnowledgeGraphStorage:
                 url=self.storage_settings.property_graph_storage.get_connection_url(),
                 database=self.storage_settings.property_graph_storage.database,
             )
-            not_empty = property_graph_storage.structured_query("MATCH (n) RETURN count(n) > 0 AS not_empty LIMIT 1")[0]
-            not_empty = not_empty.get("not_empty", False)
+            if self.storage_settings.property_graph_storage.init_from_local:
+                not_empty = property_graph_storage.structured_query(
+                    "MATCH (n) RETURN count(n) > 0 AS not_empty LIMIT 1"
+                )[0]
+                not_empty = not_empty.get("not_empty", False)
+            else:
+                not_empty = True
 
             if self.storage_settings.property_graph_storage.init_from_local and not not_empty:
                 local_path_to_check = kwargs.get("local_storage", self.path_settings.local_storage_dir)
@@ -243,9 +254,19 @@ class KnowledgeGraphStorage:
         Args:
             **kwargs: Additional arguments passed to storage initialization methods.
         """
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            docstore_future = executor.submit(self.get_document_storage, **kwargs)
+            index_store_future = executor.submit(self.get_index_storage, **kwargs)
+            vector_store_future = executor.submit(self.get_vector_storage, **kwargs)
+            property_graph_store_future = executor.submit(self.get_property_graph_storage, **kwargs)
+            docstore = docstore_future.result()
+            index_store = index_store_future.result()
+            vector_store = vector_store_future.result()
+            property_graph_store = property_graph_store_future.result()
+
         self.storage_context = StorageContext.from_defaults(
-            docstore=self.get_document_storage(**kwargs),
-            index_store=self.get_index_storage(**kwargs),
-            vector_store=self.get_vector_storage(**kwargs),
-            property_graph_store=self.get_property_graph_storage(**kwargs),
+            docstore=docstore,
+            index_store=index_store,
+            vector_store=vector_store,
+            property_graph_store=property_graph_store,
         )

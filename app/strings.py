@@ -48,6 +48,43 @@ QUICK_ACTIONS: list[tuple[str, str, str]] = [
     ("network", "Visualize concepts", "Visualize my knowledge about neural networks"),
 ]
 
+# Cache policy for quick actions. The prompt field must match the third item in
+# QUICK_ACTIONS; aliases let future buttons or wording variants share one cache key.
+QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
+    {
+        "prompt": "Quiz me on Transformer architecture",
+        "enabled": True,
+        "ttl_seconds": 7 * 24 * 60 * 60,
+        "cache_responses": True,
+        "cache_visual_artifacts": False,
+        "aliases": [],
+    },
+    {
+        "prompt": "What information do I have about attention mechanisms?",
+        "enabled": True,
+        "ttl_seconds": 7 * 24 * 60 * 60,
+        "cache_responses": True,
+        "cache_visual_artifacts": False,
+        "aliases": [],
+    },
+    {
+        "prompt": "Research the latest developments in LLM fine-tuning",
+        "enabled": True,
+        "ttl_seconds": 2 * 24 * 60 * 60,
+        "cache_responses": True,
+        "cache_visual_artifacts": False,
+        "aliases": [],
+    },
+    {
+        "prompt": "Visualize my knowledge about neural networks",
+        "enabled": True,
+        "ttl_seconds": 7 * 24 * 60 * 60,
+        "cache_responses": True,
+        "cache_visual_artifacts": True,
+        "aliases": [],
+    },
+]
+
 # ---------------------------------------------------------------------------
 # Visualization panel
 # ---------------------------------------------------------------------------
