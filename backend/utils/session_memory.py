@@ -66,6 +66,24 @@ def build_extractive_summary(
     return compress_text(summary, max_chars)
 
 
+_MISSING = object()
+
+
+def make_bson_safe(value: Any) -> Any:
+    """Converts framework proxy wrappers into plain BSON-encodable containers."""
+    wrapped = getattr(value, "__wrapped__", _MISSING)
+    if wrapped is not _MISSING and wrapped is not value:
+        return make_bson_safe(wrapped)
+
+    if isinstance(value, dict):
+        return {str(key): make_bson_safe(item) for key, item in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [make_bson_safe(item) for item in value]
+
+    return value
+
+
 def is_context_dependent_turn(text: str) -> bool:
     """Heuristic for whether older conversation memory is likely useful."""
     normalized = re.sub(r"\s+", " ", text.casefold())
@@ -168,30 +186,53 @@ class SessionMemoryStore:
             self,
             session_id: str,
             messages: list[dict[str, str]],
-            recent_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT
+            recent_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
+            session_history: Optional[list[dict[str, Any]]] = None,
+            recent_maps: Optional[list[dict[str, Any]]] = None,
+            visual_artifacts: Optional[list[dict[str, Any]]] = None,
     ) -> bool:
-        """Persists full browser-session messages and a compact older-history summary."""
+        """Persists browser-session messages, summary, and optional UI restore metadata."""
         safe_session_id = normalize_session_id(session_id)
         if not safe_session_id:
             return False
 
         now = datetime.now(timezone.utc)
-        older_messages = messages[:-recent_limit] if len(messages) > recent_limit else []
+        safe_messages = make_bson_safe(messages)
+        older_messages = safe_messages[:-recent_limit] if len(safe_messages) > recent_limit else []
         summary = build_extractive_summary(older_messages)
         doc = {
             "_id": safe_session_id,
             "schema_version": SESSION_MEMORY_SCHEMA_VERSION,
-            "messages": messages,
+            "messages": safe_messages,
             "summary": summary,
-            "message_count": len(messages),
+            "message_count": len(safe_messages),
             "updated_at": now,
             "expires_at": now + timedelta(seconds=DEFAULT_SESSION_MEMORY_TTL_SECONDS),
         }
+        if session_history is not None:
+            doc["session_history"] = make_bson_safe(session_history)
+        if recent_maps is not None:
+            doc["recent_maps"] = make_bson_safe(recent_maps)
+        if visual_artifacts is not None:
+            doc["visual_artifacts"] = make_bson_safe(visual_artifacts)
 
         try:
             self._get_collection().replace_one({"_id": safe_session_id}, doc, upsert=True)
         except Exception as e:
             logger.warning(f"Session memory write failed: {e}")
+            return False
+        return True
+
+    def delete(self, session_id: str) -> bool:
+        """Deletes a persisted browser-session memory document."""
+        safe_session_id = normalize_session_id(session_id)
+        if not safe_session_id:
+            return False
+
+        try:
+            self._get_collection().delete_one({"_id": safe_session_id})
+        except Exception as e:
+            logger.warning(f"Session memory delete failed: {e}")
             return False
         return True
 

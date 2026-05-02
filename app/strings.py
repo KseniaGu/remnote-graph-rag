@@ -9,14 +9,22 @@ Update this file to change any label, placeholder, header, or tooltip text.
 # ---------------------------------------------------------------------------
 APP_NAME = "AI Practice"
 APP_PAGE_TITLE = "AI Practice | Graph RAG"
-APP_TAGLINE = "Study AI using your personal knowledge base"
+APP_TAGLINE = "Study from your personal knowledge graph"
 
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 SIDEBAR_PIPELINE_HEADER = "Agent Pipeline"
-SIDEBAR_BTN_CLEAR_CHAT = "Clear Chat"
+SIDEBAR_BTN_CLEAR_CHAT = "Clear Session"
 SIDEBAR_BTN_TOGGLE_GRAPH = "Toggle Graph"
+
+# ---------------------------------------------------------------------------
+# Workspaces
+# ---------------------------------------------------------------------------
+WORKSPACE_STUDY_LABEL = "Study Session"
+WORKSPACE_STUDY_SUBTITLE = "Ask, retrieve, synthesize, and practice from your notes"
+WORKSPACE_GRAPH_LABEL = "Knowledge Graph"
+WORKSPACE_GRAPH_SUBTITLE = "Explore relationships discovered from your study session"
 
 # ---------------------------------------------------------------------------
 # Agent tooltip descriptions (keyed by agent name as used in the workflow)
@@ -33,19 +41,19 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Chat area
 # ---------------------------------------------------------------------------
-CHAT_EMPTY_HEADING = "Start your study session"
-CHAT_EMPTY_SUBTEXT = "Ask questions, practice concepts, or explore your knowledge graph"
-CHAT_INPUT_PLACEHOLDER = "Ask a question or request practice..."
+CHAT_EMPTY_HEADING = "Start from a concept"
+CHAT_EMPTY_SUBTEXT = "Ask a question, request interview practice, or map relationships from your notes."
+CHAT_INPUT_PLACEHOLDER = "Ask your knowledge base..."
 CHAT_PROCESSING_LABEL = "Processing"
 
 # ---------------------------------------------------------------------------
 # Quick action buttons: list of (icon_name, button_label, prefilled_action)
 # ---------------------------------------------------------------------------
 QUICK_ACTIONS: list[tuple[str, str, str]] = [
-    ("graduation-cap", "Quiz me on Transformers", "Quiz me on Transformer architecture"),
+    ("graduation-cap", "Practice a concept", "Quiz me on Transformer architecture"),
     ("search", "Search my notes", "What information do I have about attention mechanisms?"),
-    ("globe", "Research a topic", "Research the latest developments in LLM fine-tuning"),
-    ("network", "Visualize concepts", "Visualize my knowledge about neural networks"),
+    ("book-open-text", "Research a topic", "Research the latest developments in LLM fine-tuning"),
+    ("network", "Map relationships", "Visualize my knowledge about neural networks"),
 ]
 
 # Cache policy for quick actions. The prompt field must match the third item in
@@ -89,6 +97,13 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
 # Visualization panel
 # ---------------------------------------------------------------------------
 VIZ_PANEL_TITLE = "Knowledge Graph"
+GRAPH_UPDATED_NOTICE = "Knowledge graph updated from this session"
+GRAPH_UPDATED_ACTION = "View graph"
+GRAPH_UNAVAILABLE_HEADING = "Knowledge graph unavailable"
+GRAPH_LOADING_HEADING = "Preparing knowledge graph"
+GRAPH_LOADING_SUBTEXT = "Searching graph data and arranging the visualization."
+GRAPH_EMPTY_HEADING = "No knowledge graph yet"
+GRAPH_EMPTY_SUBTEXT = "Ask to map relationships from your notes, then the graph will appear here."
 
 # ---------------------------------------------------------------------------
 # Context debug panel

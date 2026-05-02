@@ -2,6 +2,7 @@ import reflex as rx
 from starlette.responses import JSONResponse
 
 from app.components import sidebar, main_content, error_toast
+from app.state import AppState
 from app.strings import APP_PAGE_TITLE
 from app.styles import COLORS, GLOBAL_STYLES
 from backend.configs.constants import FAVICON_URL
@@ -37,15 +38,15 @@ def index() -> rx.Component:
             theme: 'dark',
             themeVariables: {
                 darkMode: true,
-                background: '#0b141a',
-                mainBkg: '#1f2c34',
-                primaryColor: '#1f2c34',
-                primaryTextColor: '#e9edef',
-                primaryBorderColor: '#2a3942',
-                lineColor: '#8696a0',
-                secondaryColor: '#202c33',
-                tertiaryColor: '#0b141a',
-                edgeLabelBackground: '#1f2c34',
+                background: '#061216',
+                mainBkg: '#10242b',
+                primaryColor: '#10242b',
+                primaryTextColor: '#f3fbff',
+                primaryBorderColor: '#24434d',
+                lineColor: '#7f99a4',
+                secondaryColor: '#0d1d23',
+                tertiaryColor: '#061216',
+                edgeLabelBackground: '#10242b',
                 fontSize: '14px'
             },
             securityLevel: 'loose'
@@ -85,8 +86,8 @@ app = rx.App(
     ),
     stylesheets=[
         "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
+        "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap",
         "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
-        "https://fonts.googleapis.com/css2?family=Hi+Melody&display=swap"
     ],
     head_components=[
         rx.el.script(src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"),
@@ -94,7 +95,7 @@ app = rx.App(
     ],
 )
 
-app.add_page(index, title=APP_PAGE_TITLE)
+app.add_page(index, title=APP_PAGE_TITLE, on_load=AppState.initialize_session)
 
 
 # Register health probe endpoint on Reflex's internal API instance
