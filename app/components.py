@@ -265,28 +265,29 @@ def submission_error_notice() -> rx.Component:
             rx.hstack(
                 rx.icon("circle-alert", size=16, color=COLORS["accent_red"]),
                 rx.vstack(
-                    rx.text("Submission failed", font_size="0.875rem", font_weight="650"),
-                    rx.text(AppState.error_message, font_size="0.8rem", color=COLORS["text_secondary"]),
+                    rx.text("Submission failed", class_name="submission-error-title"),
+                    rx.text(AppState.error_message, class_name="submission-error-detail"),
                     spacing="0",
                     align="start",
+                    min_width="0",
+                    flex="1",
                 ),
-                rx.spacer(),
                 rx.icon_button(
                     rx.icon("x", size=14),
                     on_click=AppState.clear_error,
                     size="1",
                     variant="ghost",
+                    class_name="submission-error-close",
                 ),
                 width="100%",
                 spacing="3",
-                align="center",
+                align="start",
             ),
             class_name="submission-error",
             style={
                 "border": f"1px solid {COLORS['accent_red']}50",
-                "padding": "0.75rem 1rem",
+                "padding": "0.75rem 0.85rem",
                 "width": "100%",
-                "max_width": "960px",
             },
         ),
         rx.fragment(),
@@ -1016,42 +1017,6 @@ def chat_input() -> rx.Component:
         background=rx.cond(~AppState.has_messages, "transparent", COLORS["bg_card"]),
         border_top=rx.cond(~AppState.has_messages, "none", f"1px solid {COLORS['border']}"),
         class_name=rx.cond(~AppState.has_messages, "empty-session-composer", "chat-composer"),
-    )
-
-
-def error_toast() -> rx.Component:
-    """Error message toast."""
-    return rx.cond(
-        AppState.error_message != "",
-        surface(
-            rx.hstack(
-                rx.icon("circle-alert", size=18, color=COLORS["accent_red"]),
-                rx.text(AppState.error_message, font_size="0.875rem"),
-                rx.icon_button(
-                    rx.icon("x", size=14),
-                    on_click=AppState.clear_error,
-                    size="1",
-                    variant="ghost",
-                ),
-                spacing="3",
-                align="center",
-                justify="between",
-                width="100%",
-            ),
-            style={
-                "position": "fixed",
-                "bottom": "100px",
-                "left": "50%",
-                "transform": "translateX(-50%)",
-                "border": f"1px solid {COLORS['accent_red']}50",
-                "border_radius": "8px",
-                "padding": "0.75rem 1rem",
-                "color": COLORS["text_primary"],
-                "z_index": "1000",
-                "max_width": "90%",
-            },
-        ),
-        rx.fragment(),
     )
 
 

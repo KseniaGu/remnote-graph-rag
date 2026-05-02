@@ -1,7 +1,7 @@
 import reflex as rx
 from starlette.responses import JSONResponse
 
-from app.components import sidebar, main_content, error_toast
+from app.components import sidebar, main_content
 from app.state import AppState
 from app.strings import APP_PAGE_TITLE
 from app.styles import COLORS, GLOBAL_STYLES
@@ -68,7 +68,6 @@ def index() -> rx.Component:
 """),
         sidebar(),
         main_content(),
-        error_toast(),
         style={
             "min_height": "100vh",
             "background": COLORS["bg_dark"],

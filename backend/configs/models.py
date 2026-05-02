@@ -85,7 +85,7 @@ class ResearcherModelSettings(BaseSettings):
     # vLLM self-hosted alternative: Qwen3.5-9B (provider=vllm, base_url=VLLM_ROUTING_URL)
     with_tools: BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.researcher,
-        model_name="qwen3.5:cloud",
+        model_name="nemotron-3-super:cloud",
         temperature=0.0,
         num_ctx=8192,
         top_k=20,
@@ -95,7 +95,7 @@ class ResearcherModelSettings(BaseSettings):
     # vLLM self-hosted alternative: Qwen3.5-9B (same instance as with_tools)
     structured: BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.researcher,
-        model_name="qwen3.5:cloud",
+        model_name="nemotron-3-super:cloud",
         temperature=0.0,
         num_ctx=8192,
         top_k=50,
@@ -119,7 +119,7 @@ class ModelSettings(BaseSettings):
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B on port 8001, provider=LLMProviderType.vllm, base_url="http://<VLLM_HOST>:8001/v1"
     orchestrator: LocalModelSettings | BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.orchestrator,
-        model_name="qwen3.5:cloud",
+        model_name="nemotron-3-super:cloud",
         tokenizer_model_name="Qwen/Qwen3.5-9B",
         temperature=0.,
         top_k=10,
@@ -130,7 +130,7 @@ class ModelSettings(BaseSettings):
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B (same instance as orchestrator)
     retriever: LocalModelSettings | BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.retriever,
-        model_name="qwen3.5:cloud",
+        model_name="nemotron-3-super:cloud",
         temperature=0.0,
         num_ctx=8192,
         top_k=20,
@@ -143,7 +143,7 @@ class ModelSettings(BaseSettings):
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (Q4) on port 8002, provider=LLMProviderType.vllm, base_url="http://<VLLM_HOST>:8002/v1"
     analyst: LocalModelSettings | BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.analyst,
-        model_name="qwen3.5:cloud",
+        model_name="nemotron-3-super:cloud",
         temperature=0.15,
         num_ctx=32768,
         top_k=40,
@@ -155,7 +155,7 @@ class ModelSettings(BaseSettings):
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (same instance as analyst)
     mentor: LocalModelSettings | BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.mentor,
-        model_name="qwen3.5:cloud",
+        model_name="nemotron-3-super:cloud",
         temperature=0.7,
         num_ctx=8192,
         top_k=40,

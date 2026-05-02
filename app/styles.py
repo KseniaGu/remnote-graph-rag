@@ -396,7 +396,35 @@ body {
 }
 
 .submission-error {
-    margin-bottom: 0.25rem;
+    background: rgba(32, 13, 17, 0.72) !important;
+    box-shadow: none !important;
+    color: var(--color-text-primary);
+    margin-bottom: 0.15rem;
+}
+
+.submission-error svg {
+    flex: 0 0 auto;
+    margin-top: 0.15rem;
+}
+
+.submission-error-title {
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.submission-error-detail {
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.submission-error-close {
+    align-self: flex-start;
+    color: var(--color-text-secondary);
+    flex: 0 0 auto;
 }
 
 .workspace-view {
@@ -528,9 +556,11 @@ body {
 
 .agent-activity-list {
     align-items: center;
+    border-left: 1px solid rgba(167, 186, 196, 0.24);
     justify-content: flex-end;
     margin-left: auto;
     min-width: 0;
+    padding-left: 0.95rem;
     row-gap: 0.35rem;
 }
 
@@ -942,8 +972,10 @@ body {
     }
 
     .agent-activity-list {
+        border-left: 0;
         justify-content: flex-start;
         margin-left: 0;
+        padding-left: 0;
     }
 
     .processing-status-group {
