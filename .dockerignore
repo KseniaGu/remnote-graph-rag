@@ -17,6 +17,7 @@ build
 !.env.example
 .web
 .states
+.docker-build
 data/
 storage/
 *.log

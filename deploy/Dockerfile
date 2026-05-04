@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM python:3.11-slim as builder
 
 ENV HF_HOME=/home/appuser/.cache/huggingface
@@ -20,8 +22,6 @@ COPY . .
 
 RUN reflex init
 
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='sentence-transformers/all-MiniLM-L6-v2', local_files_only=False, cache_dir='/home/appuser/.cache/huggingface')"
-
 
 FROM python:3.11-slim
 
@@ -33,7 +33,7 @@ RUN adduser --disabled-password --no-create-home appuser
 
 WORKDIR /app
 
-COPY --from=builder $HF_HOME $HF_HOME
+COPY --from=model-cache / /home/appuser/.cache/huggingface/
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.local/share/reflex /home/appuser/.local/share/reflex
