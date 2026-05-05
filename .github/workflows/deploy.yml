@@ -214,6 +214,7 @@ jobs:
             --allow-unauthenticated \
             --memory 512Mi \
             --cpu 1 \
+            --service-account ${{ secrets.CLOUD_RUN_SERVICE_ACCOUNT }} \
             --timeout 300 \
             --min-instances 0 \
             --max-instances 10 \
