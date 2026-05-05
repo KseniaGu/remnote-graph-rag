@@ -112,7 +112,7 @@ class ModelSettings(BaseSettings):
     """
     embedder: LocalModelSettings | BaseLLMSettings = LocalModelSettings(
         role=ModelRoleType.embedder,
-        model_path="/home/appuser/.cache/huggingface/sentence-transformers/all-MiniLM-L6-v2",
+        model_path="sentence-transformers/all-MiniLM-L6-v2",
         embedding_dim=384
     )
 
