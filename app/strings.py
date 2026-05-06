@@ -53,7 +53,7 @@ QUICK_ACTIONS: list[tuple[str, str, str]] = [
     ("graduation-cap", "Practice a concept", "Quiz me on Transformer architecture"),
     ("search", "Search my notes", "What information do I have about attention mechanisms?"),
     ("book-open-text", "Research a topic", "Research the latest developments in LLM fine-tuning"),
-    ("network", "Map relationships", "Visualize my knowledge about neural networks"),
+    ("network", "Map relationships", "Visualize my knowledge about backpropagation algorithm"),
 ]
 
 # Cache policy for quick actions. The prompt field must match the third item in
