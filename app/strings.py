@@ -56,11 +56,20 @@ QUICK_ACTIONS: list[tuple[str, str, str]] = [
     ("network", "Map relationships", "Visualize my knowledge about backpropagation algorithm"),
 ]
 
-# Cache policy for quick actions. The prompt field must match the third item in
-# QUICK_ACTIONS; aliases let future buttons or wording variants share one cache key.
+
+def _quick_action_prompt(label: str) -> str:
+    """Returns the prefilled prompt for a configured quick-action label."""
+    for _, quick_action_label, prompt in QUICK_ACTIONS:
+        if quick_action_label == label:
+            return prompt
+    raise ValueError(f"Unknown quick action label: {label}")
+
+
+# Cache policy for quick actions. Prompt values are derived from QUICK_ACTIONS;
+# aliases let future buttons or wording variants share one cache key.
 QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
     {
-        "prompt": "Quiz me on Transformer architecture",
+        "prompt": _quick_action_prompt("Practice a concept"),
         "enabled": True,
         "ttl_seconds": 7 * 24 * 60 * 60,
         "cache_responses": True,
@@ -68,7 +77,7 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
         "aliases": [],
     },
     {
-        "prompt": "What information do I have about attention mechanisms?",
+        "prompt": _quick_action_prompt("Search my notes"),
         "enabled": True,
         "ttl_seconds": 7 * 24 * 60 * 60,
         "cache_responses": True,
@@ -76,7 +85,7 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
         "aliases": [],
     },
     {
-        "prompt": "Research the latest developments in LLM fine-tuning",
+        "prompt": _quick_action_prompt("Research a topic"),
         "enabled": True,
         "ttl_seconds": 2 * 24 * 60 * 60,
         "cache_responses": True,
@@ -84,7 +93,7 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
         "aliases": [],
     },
     {
-        "prompt": "Visualize my knowledge about neural networks",
+        "prompt": _quick_action_prompt("Map relationships"),
         "enabled": True,
         "ttl_seconds": 7 * 24 * 60 * 60,
         "cache_responses": True,
