@@ -42,9 +42,6 @@ COPY --from=builder /root/.local/share/reflex /home/appuser/.local/share/reflex
 
 COPY --from=builder /app /app
 
-RUN test -f "${EMBEDDER_MODEL_PATH}/modules.json" \
-    && test -f "${EMBEDDER_MODEL_PATH}/config.json"
-
 RUN chown -R appuser:appuser /app /home/appuser
 
 USER appuser

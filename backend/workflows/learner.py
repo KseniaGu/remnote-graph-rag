@@ -80,22 +80,12 @@ class LearnerWorkflow:
             kg_search_settings: Knowledge graph search configuration.
             storage_settings: Storage backend settings.
         """
-        embedder_settings = self.models_settings.embedder
-        if isinstance(embedder_settings, LocalModelSettings):
-            embedder_settings.validate_local_model_files()
-            logger.info("Loading embedder model", **embedder_settings.diagnostics())
-        else:
-            logger.info(
-                "Loading embedder model",
-                embedder_model_path=embedder_settings.model_path,
-                embedder_settings_type=type(embedder_settings).__name__,
-            )
 
         def _create_embedder():
             return HuggingFaceEmbedding(
-                embedder_settings.model_path,
+                self.models_settings.embedder.model_path,
                 trust_remote_code=True,
-                device=embedder_settings.device,
+                device=self.models_settings.embedder.device,
                 embed_batch_size=10,
                 local_files_only=True,
             )
