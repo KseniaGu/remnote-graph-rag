@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
@@ -22,6 +21,7 @@ from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
 from backend.configs.storage import StorageSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
+from backend.utils.embedder_model import describe_embedder_model_path, resolve_embedder_model_path
 from backend.utils.helpers import add_trace_metadata
 from backend.utils.prompt_engine import PromptEngine
 from backend.utils.session_memory import compress_text
@@ -83,9 +83,10 @@ class LearnerWorkflow:
         """
 
         def _create_embedder():
+            embedder_model_path = resolve_embedder_model_path(self.models_settings.embedder.model_path)
+            logger.info("Resolved embedder model path", **describe_embedder_model_path(embedder_model_path))
             return HuggingFaceEmbedding(
-                self.models_settings.embedder.model_path,
-                cache_folder=os.environ.get("HF_HOME"),
+                embedder_model_path,
                 trust_remote_code=True,
                 device=self.models_settings.embedder.device,
                 embed_batch_size=10,

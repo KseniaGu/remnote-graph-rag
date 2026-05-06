@@ -27,18 +27,23 @@ FROM python:3.11-slim
 
 ENV HF_HOME=/home/appuser/.cache/huggingface
 ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
 ENV PYTHONUNBUFFERED=1
+ENV EMBEDDER_MODEL_PATH=/app/models/all-MiniLM-L6-v2
 
 RUN adduser --disabled-password --no-create-home appuser
 
 WORKDIR /app
 
-COPY --from=model-cache / /home/appuser/.cache/huggingface/
+COPY --from=model-cache /all-MiniLM-L6-v2/ /app/models/all-MiniLM-L6-v2/
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.local/share/reflex /home/appuser/.local/share/reflex
 
 COPY --from=builder /app /app
+
+RUN test -f "${EMBEDDER_MODEL_PATH}/modules.json" \
+    && test -f "${EMBEDDER_MODEL_PATH}/config.json"
 
 RUN chown -R appuser:appuser /app /home/appuser
 
