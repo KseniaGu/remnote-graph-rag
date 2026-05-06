@@ -1,6 +1,7 @@
 import os
+from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from backend.configs.constants import ENV_PATH
@@ -70,10 +71,53 @@ class LocalModelSettings(BaseSettings):
 
     Contains settings for models that are run locally rather than through an API.
     """
-    role: ModelRoleType
-    model_path: str = "nomic-ai/nomic-embed-text-v2-moe"
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_PATH),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_prefix="EMBEDDER_",
+    )
+
+    role: ModelRoleType = ModelRoleType.embedder
+    model_path: str = "sentence-transformers/all-MiniLM-L6-v2"
     device: str | None = None
-    embedding_dim: int | None = None
+    embedding_dim: int | None = 384
+
+    def validate_local_model_files(self) -> None:
+        """Raises a clear startup error if a local model directory is incomplete."""
+        if not self.is_local_path:
+            return
+
+        missing_files = [
+            file_name
+            for file_name in ("modules.json", "config.json")
+            if not (Path(self.model_path) / file_name).is_file()
+        ]
+        if missing_files:
+            missing = ", ".join(missing_files)
+            raise FileNotFoundError(
+                f"Embedder model path {self.model_path} is missing required files: {missing}."
+            )
+
+    @property
+    def is_local_path(self) -> bool:
+        """Returns whether model_path should be treated as a local filesystem path."""
+        model_path = Path(self.model_path)
+        return model_path.is_absolute() or model_path.exists()
+
+    def diagnostics(self) -> dict:
+        """Returns safe model path diagnostics for startup logs."""
+        model_path = Path(self.model_path)
+        return {
+            "embedder_model_path": self.model_path,
+            "embedder_model_path_exists": model_path.exists(),
+            "embedder_model_path_is_dir": model_path.is_dir(),
+            "embedder_model_modules_json_exists": (model_path / "modules.json").exists(),
+            "embedder_model_config_json_exists": (model_path / "config.json").exists(),
+            "hf_home": os.environ.get("HF_HOME", ""),
+            "hf_hub_offline": os.environ.get("HF_HUB_OFFLINE", ""),
+            "transformers_offline": os.environ.get("TRANSFORMERS_OFFLINE", ""),
+        }
 
 
 class ResearcherModelSettings(BaseSettings):
@@ -110,11 +154,7 @@ class ModelSettings(BaseSettings):
 
     Centralized configuration for all model-related settings.
     """
-    embedder: LocalModelSettings | BaseLLMSettings = LocalModelSettings(
-        role=ModelRoleType.embedder,
-        model_path="sentence-transformers/all-MiniLM-L6-v2",
-        embedding_dim=384
-    )
+    embedder: LocalModelSettings | BaseLLMSettings = Field(default_factory=LocalModelSettings)
 
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B on port 8001, provider=LLMProviderType.vllm, base_url="http://<VLLM_HOST>:8001/v1"
     orchestrator: LocalModelSettings | BaseLLMSettings = OllamaSettings(

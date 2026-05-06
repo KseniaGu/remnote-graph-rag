@@ -15,13 +15,12 @@ from tavily import TavilyClient
 
 from backend.configs.constants import TITLE_MAX_LENGTH, DEFAULT_RECENT_MESSAGE_LIMIT
 from backend.configs.enums import ModelRoleType, PromptType
-from backend.configs.models import ModelSettings
+from backend.configs.models import LocalModelSettings, ModelSettings
 from backend.configs.paths import PathSettings
 from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
 from backend.configs.storage import StorageSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
-from backend.utils.embedder_model import describe_embedder_model_path, resolve_embedder_model_path
 from backend.utils.helpers import add_trace_metadata
 from backend.utils.prompt_engine import PromptEngine
 from backend.utils.session_memory import compress_text
@@ -81,14 +80,22 @@ class LearnerWorkflow:
             kg_search_settings: Knowledge graph search configuration.
             storage_settings: Storage backend settings.
         """
+        embedder_settings = self.models_settings.embedder
+        if isinstance(embedder_settings, LocalModelSettings):
+            embedder_settings.validate_local_model_files()
+            logger.info("Loading embedder model", **embedder_settings.diagnostics())
+        else:
+            logger.info(
+                "Loading embedder model",
+                embedder_model_path=embedder_settings.model_path,
+                embedder_settings_type=type(embedder_settings).__name__,
+            )
 
         def _create_embedder():
-            embedder_model_path = resolve_embedder_model_path(self.models_settings.embedder.model_path)
-            logger.info("Resolved embedder model path", **describe_embedder_model_path(embedder_model_path))
             return HuggingFaceEmbedding(
-                embedder_model_path,
+                embedder_settings.model_path,
                 trust_remote_code=True,
-                device=self.models_settings.embedder.device,
+                device=embedder_settings.device,
                 embed_batch_size=10,
                 local_files_only=True,
             )
