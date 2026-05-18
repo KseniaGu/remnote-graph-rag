@@ -71,7 +71,7 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
     {
         "prompt": _quick_action_prompt("Practice a concept"),
         "enabled": True,
-        "ttl_seconds": 7 * 24 * 60 * 60,
+        "ttl_seconds": 14 * 24 * 60 * 60,
         "cache_responses": True,
         "cache_visual_artifacts": False,
         "aliases": [],
@@ -79,7 +79,7 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
     {
         "prompt": _quick_action_prompt("Search my notes"),
         "enabled": True,
-        "ttl_seconds": 7 * 24 * 60 * 60,
+        "ttl_seconds": 14 * 24 * 60 * 60,
         "cache_responses": True,
         "cache_visual_artifacts": False,
         "aliases": [],
@@ -87,7 +87,7 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
     {
         "prompt": _quick_action_prompt("Research a topic"),
         "enabled": True,
-        "ttl_seconds": 2 * 24 * 60 * 60,
+        "ttl_seconds": 14 * 24 * 60 * 60,
         "cache_responses": True,
         "cache_visual_artifacts": False,
         "aliases": [],
@@ -95,7 +95,7 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
     {
         "prompt": _quick_action_prompt("Map relationships"),
         "enabled": True,
-        "ttl_seconds": 7 * 24 * 60 * 60,
+        "ttl_seconds": 14 * 24 * 60 * 60,
         "cache_responses": True,
         "cache_visual_artifacts": True,
         "aliases": [],
