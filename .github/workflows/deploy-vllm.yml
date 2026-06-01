@@ -204,11 +204,11 @@ jobs:
             --set-secrets "PINECONE_ENVIRONMENT=pinecone-environment:latest" \
             --set-secrets "PINECONE_INDEX_NAME=pinecone-index-name:latest" \
             --set-env-vars "PINECONE_INIT_FROM_LOCAL=false" \
-            --set-secrets "NEO4J_URI=neo4j-uri:latest" \
-            --set-secrets "NEO4J_USERNAME=neo4j-username:latest" \
-            --set-secrets "NEO4J_PASSWORD=neo4j-password:latest" \
-            --set-secrets "NEO4J_DATABASE=neo4j-database:latest" \
-            --set-env-vars "NEO4J_INIT_FROM_LOCAL=false" \
+            --set-secrets "MEMGRAPH_URI=memgraph-uri:latest" \
+            --set-secrets "MEMGRAPH_USERNAME=memgraph-username:latest" \
+            --set-secrets "MEMGRAPH_PASSWORD=memgraph-password:latest" \
+            --set-secrets "MEMGRAPH_DATABASE=memgraph-database:latest" \
+            --set-env-vars "MEMGRAPH_INIT_FROM_LOCAL=false" \
             --set-secrets "TAVILY_API_KEY=tavily-api-key:latest" \
             --set-secrets "COHERE_API_KEY=cohere-api-key:latest" \
             --set-secrets "LANGSMITH_API_KEY=langchain-api-key:latest" \

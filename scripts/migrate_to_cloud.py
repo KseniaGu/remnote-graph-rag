@@ -3,8 +3,8 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from backend.configs.models import ModelSettings
 from backend.configs.paths import PathSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
-from backend.configs.storage import LocalStorageSettings
-from backend.configs.storage import StorageSettings, RedisSettings, Neo4jSettings
+from backend.configs.storage import LocalStorageSettings, StorageSettings, RedisSettings, Neo4jSettings, \
+    MemgraphSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
 from backend.utils.helpers import get_logger
@@ -27,7 +27,8 @@ def main():
         # There is no convenient method to migrate the nodes with embeddings from local vector store to the cloud one
         # (as far as I know). So we migrate documents, index and graph, and further migrate vectors when loading the index
         vector_storage=PineconeSettings(),
-        property_graph_storage=Neo4jSettings(),
+        # property_graph_storage=Neo4jSettings(),
+        property_graph_storage=MemgraphSettings(),
     )
     models_settings = ModelSettings()
     kg_search_settings = KnowledgeGraphSearchSettings()

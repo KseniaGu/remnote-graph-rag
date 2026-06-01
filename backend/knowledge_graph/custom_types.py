@@ -3,8 +3,16 @@ from typing import Optional
 
 from llama_index.core.graph_stores import LabelledNode, EntityNode, Relation, ChunkNode
 from llama_index.core.graph_stores.types import Triplet
+from llama_index.graph_stores.memgraph import MemgraphPropertyGraphStore
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 from llama_index.graph_stores.neo4j.neo4j_property_graph import BASE_NODE_LABEL, BASE_ENTITY_LABEL, remove_empty_values
+
+
+def _clean_graph_properties(properties: dict | None) -> dict:
+    cleaned = dict(properties or {})
+    cleaned.pop("embedding", None)
+    cleaned.pop("id", None)
+    return remove_empty_values(cleaned)
 
 
 class CustomNeo4jPropertyGraphStore(Neo4jPropertyGraphStore):
@@ -141,6 +149,153 @@ class CustomNeo4jPropertyGraphStore(Neo4jPropertyGraphStore):
                         name=record["name"],
                         label=record["type"],
                         properties=remove_empty_values(record["properties"]),
+                    )
+                )
+
+        return nodes
+
+
+class CustomMemgraphPropertyGraphStore(MemgraphPropertyGraphStore):
+    """Custom Memgraph Property Graph Store with support for ChunkNode relationships."""
+
+    def get_rel_map(
+            self,
+            graph_nodes: list[LabelledNode],
+            depth: int = 2,
+            limit: int = 30,
+            ignore_rels: Optional[list[str]] = None,
+    ) -> list[Triplet]:
+        """Gets depth-aware relationship map for all node types including ChunkNodes."""
+        triples = []
+
+        ids = [node.id for node in graph_nodes]
+        response = self.structured_query(
+            f"""
+            WITH $ids AS id_list
+            UNWIND range(0, size(id_list) - 1) AS idx
+            MATCH (e:`{BASE_NODE_LABEL}`)
+            WHERE e.id = id_list[idx]
+            MATCH p=(e)-[r*1..{depth}]-(other)
+            WHERE ALL(rel in relationships(p) WHERE type(rel) <> 'MENTIONS')
+            UNWIND relationships(p) AS rel
+            WITH distinct rel, idx
+            WITH startNode(rel) AS source,
+                type(rel) AS type,
+                rel{{.*}} AS rel_properties,
+                endNode(rel) AS endNode,
+                idx
+            LIMIT toInteger($limit)
+            RETURN source.id AS source_id,
+                CASE
+                    WHEN labels(source)[0] IN ['{BASE_ENTITY_LABEL}', '{BASE_NODE_LABEL}'] THEN
+                        CASE
+                            WHEN size(labels(source)) > 2 THEN labels(source)[2]
+                            WHEN size(labels(source)) > 1 THEN labels(source)[1]
+                            ELSE NULL
+                        END
+                    ELSE labels(source)[0]
+                END AS source_type,
+                properties(source) AS source_properties,
+                type,
+                rel_properties,
+                endNode.id AS target_id,
+                CASE
+                    WHEN labels(endNode)[0] IN ['{BASE_ENTITY_LABEL}', '{BASE_NODE_LABEL}'] THEN
+                        CASE
+                            WHEN size(labels(endNode)) > 2 THEN labels(endNode)[2]
+                            WHEN size(labels(endNode)) > 1 THEN labels(endNode)[1]
+                            ELSE NULL
+                        END
+                    ELSE labels(endNode)[0]
+                END AS target_type,
+                properties(endNode) AS target_properties,
+                idx
+            ORDER BY idx
+            LIMIT toInteger($limit)
+            """,
+            param_map={"ids": ids, "limit": limit},
+        )
+        response = response if response else []
+
+        ignore_rels = ignore_rels or []
+        for record in response:
+            if record["type"] in ignore_rels:
+                continue
+
+            source = EntityNode(
+                name=record["source_id"],
+                label=record["source_type"],
+                properties=_clean_graph_properties(record["source_properties"]),
+            )
+            target = EntityNode(
+                name=record["target_id"],
+                label=record["target_type"],
+                properties=_clean_graph_properties(record["target_properties"]),
+            )
+            rel = Relation(
+                source_id=record["source_id"],
+                target_id=record["target_id"],
+                label=record["type"],
+                properties=remove_empty_values(record["rel_properties"]),
+            )
+            triples.append([source, rel, target])
+
+        return triples
+
+    def get(self, properties: Optional[dict] = None, ids: Optional[list[str]] = None) -> list[LabelledNode]:
+        """Get Memgraph nodes with correct ChunkNode and EntityNode reconstruction."""
+        cypher_statement = f"MATCH (e:`{BASE_NODE_LABEL}`) "
+
+        params = {}
+        cypher_statement += "WHERE e.id IS NOT NULL "
+
+        if ids:
+            cypher_statement += "AND e.id in $ids "
+            params["ids"] = ids
+
+        if properties:
+            prop_list = []
+            for i, prop in enumerate(properties):
+                prop_list.append(f"e.`{prop}` = $property_{i}")
+                params[f"property_{i}"] = properties[prop]
+            cypher_statement += " AND " + " AND ".join(prop_list)
+
+        cypher_statement += f"""
+            RETURN
+            e.id AS name,
+            CASE
+                WHEN labels(e)[0] IN ['{BASE_ENTITY_LABEL}', '{BASE_NODE_LABEL}'] THEN
+                    CASE
+                        WHEN size(labels(e)) > 2 THEN labels(e)[2]
+                        WHEN size(labels(e)) > 1 THEN labels(e)[1]
+                        ELSE NULL
+                    END
+                ELSE labels(e)[0]
+            END AS type,
+            properties(e) AS properties
+        """
+
+        response = self.structured_query(cypher_statement, param_map=params)
+        response = response if response else []
+
+        nodes = []
+        for record in response:
+            node_properties = _clean_graph_properties(record["properties"])
+            if "text" in node_properties or record["type"] is None:
+                text = node_properties.pop("text", "")
+                nodes.append(
+                    ChunkNode(
+                        id_=record["name"],
+                        text=text,
+                        properties=node_properties,
+                    )
+                )
+            else:
+                nodes.append(
+                    EntityNode(
+                        name=record["name"],
+                        label=record["type"],
+                        properties=node_properties,
                     )
                 )
 

@@ -49,7 +49,7 @@ Web interface built with [Reflex](https://github.com/reflex-dev/reflex) framewor
 3. **Required services:**
     - [Ollama](https://ollama.com/library?sort=newest) server (for local LLM inference, but Ollama Cloud can also be
       used)
-    - [Neo4j](https://neo4j.com/) database (for graph storage)
+    - [Memgraph](https://memgraph.com/) database (default graph storage; Neo4j is still supported as a fallback)
     - [Redis](https://redis.io/) server (for vector/document storage)
     - [Cohere](https://docs.cohere.com/docs/rerank) API key for Reranker model
     - [MongoDB](https://www.mongodb.com/) instance (for LangGraph workflow state persistence)
@@ -62,7 +62,7 @@ Web interface built with [Reflex](https://github.com/reflex-dev/reflex) framewor
 
 Both scripts will save the data to the local storage by default (the path is specified in the
 `backend.configs.paths.PathSettings.local_storage_dir` parameter). See the comments in the scripts to use non-local
-storage (Redis and Neo4j).
+storage (Redis and Memgraph/Neo4j).
 
 ## Running the application locally
 
@@ -91,7 +91,7 @@ configurations are also possible.
   with billing enabled
 - [**Upstash Redis**](https://upstash.com/) for document/index storage
 - [**Pinecone**](https://www.pinecone.io/) for vector storage
-- **Neo4j [Sandbox](https://neo4j.com/sandbox/)/[Aura](https://neo4j.com/product/auradb/)** for graph storage
+- **Neo4j [Sandbox](https://neo4j.com/sandbox/)/[Aura](https://neo4j.com/product/auradb/) or [Memgraph](https://memgraph.com/)** for graph storage
 - **[MongoDB](https://www.mongodb.com/)** running instance (VM, Cloud SQL or other options)
 
 ### Steps
@@ -100,14 +100,14 @@ configurations are also possible.
     - Create Upstash Redis instance and note `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
     - Create Pinecone account, create an index, and note `PINECONE_API_KEY`, `PINECONE_ENVIRONMENT`,
       `PINECONE_INDEX_NAME`
-    - Create Neo4j Sandbox/Aura instance and note `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `NEO4J_DATABASE`
+    - Create Neo4j or Memgraph instance and note `<db>_URI`, `<db>_USERNAME`, `<db>_PASSWORD`, `<db>_DATABASE`, where <db> is one of `(NEO4J, MEMGRAPH)`
     - Create MongoDB instance and note `MONGODB_URI`, `MONGODB_DB_NAME` 
 
 2. **Migrate local data to cloud databases:**
     - Update the `.env` file with your cloud database credentials. Set `REDIS_INIT_FROM_LOCAL=true`,
-      `PINECONE_INIT_FROM_LOCAL=true`, and `NEO4J_INIT_FROM_LOCAL=true`.
+      `PINECONE_INIT_FROM_LOCAL=true`, and `MEMGRAPH_INIT_FROM_LOCAL=true`.
     - Run the `scripts.migrate_to_cloud.py` script. This will migrate documents/indexes to Redis, vectors to Pinecone,
-      and the property graph to Neo4j.
+      and the property graph to Memgraph.
 
 3. **Configure [GitHub Actions](https://github.com/features/actions):**
     - Create an Artifact Registry Docker repository in `REGION` (e.g. `europe-west1`).

@@ -15,6 +15,7 @@ from llama_index.storage.docstore.redis import RedisDocumentStore
 from llama_index.storage.index_store.redis import RedisIndexStore
 from llama_index.storage.kvstore.redis import RedisKVStore
 from llama_index.vector_stores.pinecone import PineconeVectorStore
+
 try:
     from llama_index.vector_stores.redis import RedisVectorStore
     from llama_index.vector_stores.redis.schema import RedisVectorStoreSchema
@@ -26,14 +27,14 @@ from backend.configs.constants import DEFAULT_EMBEDDING_DIM
 from backend.configs.enums import StorageType
 from backend.configs.paths import PathSettings
 from backend.configs.storage import StorageSettings
-from backend.knowledge_graph.custom_types import CustomNeo4jPropertyGraphStore
+from backend.knowledge_graph.custom_types import CustomMemgraphPropertyGraphStore, CustomNeo4jPropertyGraphStore
 from backend.utils.helpers import make_json_serializable
 
 
 class KnowledgeGraphStorage:
     """Manages storage backends for knowledge graph components.
     
-    Supports local, Redis, and Neo4j storage backends for documents, indices, vectors, and property graphs.
+    Supports local, Redis, Neo4j, and Memgraph storage backends for documents, indices, vectors, and property graphs.
     """
 
     def __init__(self, path_settings: PathSettings, storage_settings: StorageSettings, **kwargs) -> None:
@@ -199,14 +200,14 @@ class KnowledgeGraphStorage:
     def get_property_graph_storage(self, **kwargs) -> Any:
         """Gets property graph storage backend.
         
-        Supports local and Neo4j storage. Uses custom Neo4j store for ChunkNode support.
+        Supports local, Neo4j, and Memgraph storage. Uses custom graph stores for ChunkNode support.
         Can initialize from local storage if configured.
         
         Args:
             **kwargs: Additional arguments including optional local_storage path.
             
         Returns:
-            Property graph storage instance (SimplePropertyGraphStore or CustomNeo4jPropertyGraphStore).
+            Property graph storage instance.
         """
         if self.storage_settings.property_graph_storage.storage_type == StorageType.local:
             storage_path = self.storage_settings.property_graph_storage.storage_path
@@ -223,30 +224,42 @@ class KnowledgeGraphStorage:
                 url=self.storage_settings.property_graph_storage.get_connection_url(),
                 database=self.storage_settings.property_graph_storage.database,
             )
-            if self.storage_settings.property_graph_storage.init_from_local:
-                not_empty = property_graph_storage.structured_query(
-                    "MATCH (n) RETURN count(n) > 0 AS not_empty LIMIT 1"
-                )[0]
-                not_empty = not_empty.get("not_empty", False)
-            else:
-                not_empty = True
-
-            if self.storage_settings.property_graph_storage.init_from_local and not not_empty:
-                local_path_to_check = kwargs.get("local_storage", self.path_settings.local_storage_dir)
-                if self.not_empty(local_path_to_check):
-                    local_property_graph_storage = SimplePropertyGraphStore.from_persist_dir(
-                        persist_dir=str(local_path_to_check)
-                    )
-                    nodes = local_property_graph_storage.get()
-                    for node in nodes:
-                        node = make_json_serializable(node, "properties")
-
-                    property_graph_storage.upsert_nodes(nodes)
-                    property_graph_storage.upsert_relations(list(local_property_graph_storage.graph.relations.values()))
+            self._init_remote_property_graph_from_local(property_graph_storage, **kwargs)
+        elif self.storage_settings.property_graph_storage.storage_type == StorageType.memgraph:
+            # Memgraph uses the Bolt protocol and remains compatible with the graph traversal query shape.
+            property_graph_storage = CustomMemgraphPropertyGraphStore(
+                username=self.storage_settings.property_graph_storage.username.get_secret_value(),
+                password=self.storage_settings.property_graph_storage.password.get_secret_value(),
+                url=self.storage_settings.property_graph_storage.get_connection_url(),
+                database=self.storage_settings.property_graph_storage.database,
+            )
+            self._init_remote_property_graph_from_local(property_graph_storage, **kwargs)
         else:
-            raise ValueError("Only Local and Neo4j storage types are supported for Index Storage")
+            raise ValueError("Only Local, Neo4j, and Memgraph storage types are supported for Property Graph Storage")
 
         return property_graph_storage
+
+    def _init_remote_property_graph_from_local(self, property_graph_storage: Any, **kwargs) -> None:
+        if self.storage_settings.property_graph_storage.init_from_local:
+            not_empty = property_graph_storage.structured_query(
+                "MATCH (n) RETURN count(n) > 0 AS not_empty LIMIT 1"
+            )[0]
+            not_empty = not_empty.get("not_empty", False)
+        else:
+            not_empty = True
+
+        if self.storage_settings.property_graph_storage.init_from_local and not not_empty:
+            local_path_to_check = kwargs.get("local_storage", self.path_settings.local_storage_dir)
+            if self.not_empty(local_path_to_check):
+                local_property_graph_storage = SimplePropertyGraphStore.from_persist_dir(
+                    persist_dir=str(local_path_to_check)
+                )
+                nodes = local_property_graph_storage.get()
+                for node in nodes:
+                    node = make_json_serializable(node, "properties")
+
+                property_graph_storage.upsert_nodes(nodes)
+                property_graph_storage.upsert_relations(list(local_property_graph_storage.graph.relations.values()))
 
     def _init_storage_context(self, **kwargs):
         """Initializes the storage context with all storage backends.

@@ -76,6 +76,30 @@ class Neo4jSettings(BaseSettings):
         return f"{driver}://{self.host}:{self.port}"
 
 
+class MemgraphSettings(BaseSettings):
+    """Memgraph graph database settings configuration."""
+    storage_type: StorageType = StorageType.memgraph
+    username: SecretStr = SecretStr("")
+    password: SecretStr = SecretStr("")
+    database: str = "memgraph"
+    uri: str = ""  # Full URI (e.g., bolt://memgraph-host:7687) - takes precedence
+    host: str = "localhost"
+    port: int = 7687
+    init_from_local: bool = False
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_PATH),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_prefix="MEMGRAPH_",
+    )
+
+    def get_connection_url(self, driver: str = "bolt") -> str:
+        if self.uri:
+            return self.uri.replace("neo4j+s://", "bolt+s://").replace("neo4j://", "bolt://")
+        return f"{driver}://{self.host}:{self.port}"
+
+
 class MongoDBSettings(BaseSettings):
     """MongoDB settings for LangGraph checkpointing."""
     storage_type: StorageType = StorageType.mongodb
@@ -95,5 +119,5 @@ class StorageSettings(BaseSettings):
     document_storage: LocalStorageSettings | RedisSettings = RedisSettings()
     index_storage: LocalStorageSettings | RedisSettings = RedisSettings()
     vector_storage: LocalStorageSettings | RedisSettings | PineconeSettings = PineconeSettings()
-    property_graph_storage: LocalStorageSettings | Neo4jSettings = Neo4jSettings()
+    property_graph_storage: LocalStorageSettings | Neo4jSettings | MemgraphSettings = MemgraphSettings()
     checkpoint_storage: MongoDBSettings = MongoDBSettings()
