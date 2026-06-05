@@ -1,0 +1,22 @@
+{
+  "name": "remnote-graph-rag",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/remnote-graph-rag",
+
+  "runServices": ["memgraph", "mongodb"],
+  "shutdownAction": "stopCompose",
+
+  "forwardPorts": [3000, 8000, 7687, 27017],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ]
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh"
+}

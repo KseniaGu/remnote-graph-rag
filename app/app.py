@@ -98,7 +98,7 @@ app.add_page(index, title=APP_PAGE_TITLE, on_load=AppState.initialize_session)
 
 
 # Register health probe endpoint on Reflex's internal API instance
-async def healthz():
+async def healthz(request):
     """Health probe endpoint for Cloud Run startup and liveness checks."""
     from backend.health import is_healthy
     if is_healthy():

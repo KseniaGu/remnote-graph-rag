@@ -1,0 +1,45 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspaces/remnote-graph-rag:cached
+      - hf-cache:/home/vscode/.cache/huggingface
+    env_file:
+      - ../.env
+    environment:
+      HF_HOME: /home/vscode/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /home/vscode/.cache/huggingface/sentence-transformers
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+    depends_on:
+      - memgraph
+      - mongodb
+
+  memgraph:
+    image: memgraph/memgraph-mage:latest
+    ports:
+      - "7687:7687"
+      - "7444:7444"
+    volumes:
+      - memgraph-data:/var/lib/memgraph
+      - memgraph-log:/var/log/memgraph
+      - memgraph-etc:/etc/memgraph
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongodb-data:/data/db
+
+volumes:
+  hf-cache:
+  memgraph-data:
+  memgraph-log:
+  memgraph-etc:
+  mongodb-data:
