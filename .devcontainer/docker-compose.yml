@@ -14,8 +14,16 @@ services:
       SENTENCE_TRANSFORMERS_HOME: /home/vscode/.cache/huggingface/sentence-transformers
       POETRY_VIRTUALENVS_IN_PROJECT: "true"
     depends_on:
+      - redis
       - memgraph
       - mongodb
+
+  redis:
+    image: redis/redis-stack-server:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
 
   memgraph:
     image: memgraph/memgraph-mage:latest
@@ -39,6 +47,7 @@ services:
 
 volumes:
   hf-cache:
+  redis-data:
   memgraph-data:
   memgraph-log:
   memgraph-etc:

@@ -4,10 +4,20 @@
   "service": "app",
   "workspaceFolder": "/workspaces/remnote-graph-rag",
 
-  "runServices": ["memgraph", "mongodb"],
+  "runServices": [
+    "redis",
+    "memgraph",
+    "mongodb"
+  ],
   "shutdownAction": "stopCompose",
 
-  "forwardPorts": [3000, 8000, 7687, 27017],
+  "forwardPorts": [
+    3000,
+    8000,
+    6379,
+    7687,
+    27017
+   ],
 
   "customizations": {
     "vscode": {
