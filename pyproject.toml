@@ -39,8 +39,10 @@ langgraph-checkpoint-mongodb = "^0.3.1"
 pyvis = "^0.3.2"
 
 [tool.poetry.group.scripts.dependencies]
-paddleocr = { extras = ["all"], version = "^3.3.2" }
+paddleocr = "^3.6.0"
+paddlex = { extras = ["ocr"], version = "^3.6.1" }
 paddlepaddle = "^3.2.2" # To use GPU: install paddlepaddle-gpu instead
+trafilatura = "^2.1.0"
 
 [build-system]
 requires = ["poetry-core"]

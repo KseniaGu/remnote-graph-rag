@@ -55,6 +55,8 @@ class OllamaSettings(BaseLLMSettings):
     top_k: int = 40
     top_p: float = 0.5
     num_predict: int = 128
+    request_timeout: float = 600.0
+    keep_alive: str | float | None = "30s"
     base_url: str = "https://ollama.com"
 
 

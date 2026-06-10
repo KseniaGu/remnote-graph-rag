@@ -860,12 +860,16 @@ class KnowledgeGraphIndexer:
             nodes=documents,
             storage_context=self.storage_context,
             # vector_store=self.storage_context.vector_store,
+            vector_store=self.storage_context.vector_store,
             embed_model=self.embedder,
             kg_extractors=[implicit_extractor],
             use_async=False,
             show_progress=True,
             embed_kg_nodes=False,
         )
+        if self.index.vector_store is None and self.storage_context.vector_store is not None:
+            # Some LlamaIndex versions expose index.vector_store only when _embed_kg_nodes is true.
+            setattr(self.index, "_embed_kg_nodes", True)
 
         # Here is the more intelligent processing that uses LLM on a limited number of generated graph nodes.
         self.process_implicit_graph(model, graph_index_prompt)
@@ -944,6 +948,119 @@ class KnowledgeGraphIndexer:
 
 if __name__ == '__main__':
     ...
+    import argparse
+    from pathlib import Path
+
+    from backend.configs.enums import ModelRoleType, PromptType
+    from backend.configs.models import ModelSettings
+    from backend.configs.storage import LocalStorageSettings, StorageSettings
+    from backend.knowledge_graph.storage import KnowledgeGraphStorage
+    from backend.utils.prompt_engine import PromptEngine
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
+    parser = argparse.ArgumentParser(description="Build a local property graph index from an existing parsed docstore.")
+    parser.add_argument("--output-root", default=None, help="Isolated run root containing storage/.")
+    parser.add_argument("--local-storage-dir", default=None, help="Directory with parsed local storage files.")
+    parser.add_argument("--raw-data-dir", default=None, help="Optional raw data directory recorded in PathSettings.")
+    parser.add_argument("--parsed-pdfs-dir", default=None, help="Optional parsed PDFs directory recorded in PathSettings.")
+    parser.add_argument("--parsed-images-dir", default=None, help="Optional parsed images directory recorded in PathSettings.")
+    parser.add_argument("--parsed-texts-dir", default=None, help="Optional parsed texts directory recorded in PathSettings.")
+    parser.add_argument("--embedder-model-path", default=None, help="Optional local HuggingFace embedder path.")
+    parser.add_argument("--ollama-model-name", default="qwen3.5:4b-mlx", help="Local Ollama model for graph processing.")
+    parser.add_argument("--ollama-base-url", default="http://127.0.0.1:11434", help="Ollama base URL.")
+    parser.add_argument("--ollama-request-timeout", type=float, default=600.0, help="Ollama request timeout in seconds.")
+    parser.add_argument("--ollama-context-window", type=int, default=8192, help="Context window passed to LlamaIndex/Ollama.")
+    parser.add_argument("--ollama-num-predict", type=int, default=1024, help="Ollama num_predict runtime option.")
+    parser.add_argument("--ollama-keep-alive", default="30s", help="Ollama keep_alive value.")
+    parser.add_argument("--ollama-num-batch", type=int, default=None, help="Optional Ollama num_batch runtime option.")
+    args = parser.parse_args()
+
+    output_root = Path(args.output_root) if args.output_root else None
+    default_paths = PathSettings()
+    path_settings = PathSettings(
+        raw_data_dir=Path(args.raw_data_dir)
+        if args.raw_data_dir
+        else (output_root / "raw" / "AI Research" if output_root else default_paths.raw_data_dir),
+        parsed_pdfs_dir=Path(args.parsed_pdfs_dir)
+        if args.parsed_pdfs_dir
+        else (output_root / "parsed_pdfs" if output_root else default_paths.parsed_pdfs_dir),
+        parsed_images_dir=Path(args.parsed_images_dir)
+        if args.parsed_images_dir
+        else (output_root / "parsed_images" if output_root else default_paths.parsed_images_dir),
+        parsed_texts_dir=Path(args.parsed_texts_dir)
+        if args.parsed_texts_dir
+        else (output_root / "parsed_texts" if output_root else default_paths.parsed_texts_dir),
+        local_storage_dir=Path(args.local_storage_dir)
+        if args.local_storage_dir
+        else (output_root / "storage" if output_root else default_paths.local_storage_dir),
+    )
+
+    local_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir)
+    storage_settings = StorageSettings(
+        document_storage=local_storage,
+        index_storage=local_storage,
+        vector_storage=local_storage,
+        property_graph_storage=local_storage,
+    )
+    models_settings = ModelSettings()
+    kg_search_settings = KnowledgeGraphSearchSettings()
+
+    kg_storage = KnowledgeGraphStorage(path_settings, storage_settings)
+    embedder_model_path = args.embedder_model_path or models_settings.embedder.model_path
+    embedder = HuggingFaceEmbedding(
+        embedder_model_path,
+        trust_remote_code=True,
+        device=models_settings.embedder.device,
+        embed_batch_size=5,
+        local_files_only=bool(args.embedder_model_path),
+    )
+
+    prompt_engine = PromptEngine(path_settings.prompts_dir)
+    role_settings = getattr(models_settings, ModelRoleType.orchestrator.name)
+    prompt_version = role_settings.prompt_version["graph_index"]
+    graph_index_prompt, graph_index_system_prompt = prompt_engine.render(
+        PromptType.learner_workflow, ModelRoleType.orchestrator, prompt_version, "graph_index"
+    )
+    role_num_ctx = getattr(role_settings, "num_ctx", 8192)
+    role_request_timeout = getattr(role_settings, "request_timeout", 600.0)
+    role_top_k = getattr(role_settings, "top_k", 10)
+    role_top_p = getattr(role_settings, "top_p", 1.0)
+    role_num_predict = getattr(role_settings, "num_predict", 1024)
+    role_keep_alive = getattr(role_settings, "keep_alive", None)
+
+    llm_params = {
+        "model": args.ollama_model_name or role_settings.model_name,
+        "base_url": args.ollama_base_url or role_settings.base_url,
+        "temperature": role_settings.temperature,
+        "context_window": args.ollama_context_window or role_num_ctx,
+        "request_timeout": args.ollama_request_timeout or role_request_timeout,
+        "additional_kwargs": {
+            "top_k": role_top_k,
+            "top_p": role_top_p,
+            "num_predict": args.ollama_num_predict or role_num_predict,
+        },
+    }
+    if args.ollama_keep_alive is not None:
+        llm_params["keep_alive"] = args.ollama_keep_alive
+    elif role_keep_alive is not None:
+        llm_params["keep_alive"] = role_keep_alive
+    if args.ollama_num_batch is not None:
+        llm_params["additional_kwargs"]["num_batch"] = args.ollama_num_batch
+
+    knowledge_graph_indexer = KnowledgeGraphIndexer(
+        kg_storage.storage_context,
+        path_settings,
+        storage_settings.document_storage.storage_type,
+        kg_search_settings,
+        embedder,
+        None,
+        test_setup=False,
+    )
+    knowledge_graph_indexer.build_index(
+        llm=llm_params,
+        graph_index_prompt=graph_index_system_prompt["system_instruction"] + "\n" + graph_index_prompt,
+    )
+    print(f"Property graph index built in {path_settings.local_storage_dir}")
     """
     from backend.utils.prompt_engine import PromptEngine
     from backend.configs.storage import StorageSettings

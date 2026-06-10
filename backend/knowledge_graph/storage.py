@@ -18,9 +18,13 @@ from llama_index.vector_stores.pinecone import PineconeVectorStore
 
 try:
     from llama_index.vector_stores.redis import RedisVectorStore
-    from llama_index.vector_stores.redis.schema import RedisVectorStoreSchema
 except ImportError:
-    pass
+    RedisVectorStore = None
+
+try:
+    from redisvl.schema import IndexSchema
+except ImportError:
+    IndexSchema = None
 from pinecone import Pinecone
 
 from backend.configs.constants import DEFAULT_EMBEDDING_DIM
@@ -29,6 +33,39 @@ from backend.configs.paths import PathSettings
 from backend.configs.storage import StorageSettings
 from backend.knowledge_graph.custom_types import CustomMemgraphPropertyGraphStore, CustomNeo4jPropertyGraphStore
 from backend.utils.helpers import make_json_serializable
+
+
+def _get_redis_vector_schema(embedding_dim: int) -> Any:
+    """Build the Redis vector-store schema without depending on LlamaIndex internals."""
+    if IndexSchema is None:
+        raise ImportError("Redis vector storage requires redisvl. Run `poetry install --only main --no-root`.")
+
+    schema = {
+        "index": {
+            "name": "llama_index",
+            "prefix": "llama_index/vector",
+            "key_separator": "_",
+            "storage_type": "hash",
+        },
+        "fields": [
+            {"type": "tag", "name": "id", "attrs": {"sortable": False}},
+            {"type": "tag", "name": "doc_id", "attrs": {"sortable": False}},
+            {"type": "text", "name": "text", "attrs": {"weight": 1.0}},
+            {
+                "type": "vector",
+                "name": "vector",
+                "attrs": {
+                    "dims": embedding_dim,
+                    "algorithm": "flat",
+                    "distance_metric": "cosine",
+                },
+            },
+        ],
+    }
+
+    if hasattr(IndexSchema, "from_dict"):
+        return IndexSchema.from_dict(schema)
+    return IndexSchema(**schema)
 
 
 class KnowledgeGraphStorage:
@@ -176,9 +213,13 @@ class KnowledgeGraphStorage:
             else:
                 vector_storage = SimpleVectorStore()
         elif self.storage_settings.vector_storage.storage_type == StorageType.redis:
+            if RedisVectorStore is None:
+                raise ImportError(
+                    "Redis vector storage requires llama-index-vector-stores-redis. "
+                    "Run `poetry install --only main --no-root`."
+                )
             embedding_dim = kwargs.get("embedding_dim", DEFAULT_EMBEDDING_DIM)
-            schema = RedisVectorStoreSchema()
-            schema.fields["vector"].attrs.dims = embedding_dim
+            schema = _get_redis_vector_schema(embedding_dim)
             if self.storage_settings.vector_storage.password:
                 redis_connection = self.storage_settings.vector_storage.get_connection_url(driver="rediss")
             else:

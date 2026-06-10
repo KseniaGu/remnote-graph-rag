@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-import fitz
+import pymupdf as fitz
 import requests
 from trafilatura import fetch_url, extract
 
@@ -272,11 +272,20 @@ def save_text_by_url(name: Optional[str], url: str, output_dir: Path) -> tuple[T
         clean_name = clean_name[-FILENAME_LENGTH_MAX:] if len(clean_name) > FILENAME_LENGTH_MAX else clean_name
     file_path = output_dir / f"{clean_name}.md"
     if file_path.exists():
-        return TextParsingStatus.file_exists, file_path
+        if file_path.stat().st_size > 0:
+            return TextParsingStatus.file_exists, file_path
+        logger.warning(f"Existing text parse output is empty for {url}: {file_path}")
+        return TextParsingStatus.failed, Path()
 
     try:
         downloaded = fetch_url(url)
+        if downloaded is None:
+            logger.warning(f"No downloadable text content found for {url}")
+            return TextParsingStatus.failed, Path()
         result = extract(downloaded, output_format="markdown", with_metadata=True)
+        if not isinstance(result, str) or not result.strip():
+            logger.warning(f"No extractable markdown content found for {url}")
+            return TextParsingStatus.failed, Path()
         write_file(result, file_path)
         return TextParsingStatus.success, file_path
     except Exception:
