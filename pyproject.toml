@@ -43,6 +43,7 @@ paddleocr = "^3.6.0"
 paddlex = { extras = ["ocr"], version = "^3.6.1" }
 paddlepaddle = "^3.2.2" # To use GPU: install paddlepaddle-gpu instead
 trafilatura = "^2.1.0"
+huggingface-hub = "^1.20.1"
 
 [build-system]
 requires = ["poetry-core"]
