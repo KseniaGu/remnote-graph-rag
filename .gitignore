@@ -41,3 +41,4 @@ poetry.lock
 credentials.json
 secrets.yml
 .venv/
+.agents/

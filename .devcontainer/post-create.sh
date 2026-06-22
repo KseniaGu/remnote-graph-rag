@@ -5,11 +5,13 @@ export POETRY_REQUESTS_TIMEOUT="${POETRY_REQUESTS_TIMEOUT:-120}"
 export PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-120}"
 export POETRY_KEYRING_ENABLED=false
 export POETRY_CACHE_DIR="${POETRY_CACHE_DIR:-/home/vscode/.cache/pypoetry}"
+export POETRY_VIRTUALENVS_PATH="${POETRY_VIRTUALENVS_PATH:-/home/vscode/envs}"
 
-sudo mkdir -p /home/vscode/.cache "$HF_HOME" "$POETRY_CACHE_DIR" .venv
-sudo chown -R vscode:vscode /home/vscode/.cache .venv
+sudo mkdir -p /home/vscode/.cache "$HF_HOME" "$POETRY_CACHE_DIR" "$POETRY_VIRTUALENVS_PATH"
+sudo chown -R vscode:vscode /home/vscode/.cache "$POETRY_VIRTUALENVS_PATH"
 
-poetry config virtualenvs.in-project true
+poetry config virtualenvs.in-project false
+poetry config virtualenvs.path "$POETRY_VIRTUALENVS_PATH"
 poetry config keyring.enabled false
 poetry config installer.parallel false
 

@@ -3,22 +3,19 @@
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspaces/remnote-graph-rag",
-
   "runServices": [
     "redis",
     "memgraph",
     "mongodb"
   ],
   "shutdownAction": "stopCompose",
-
   "forwardPorts": [
     3000,
     8000,
     6379,
     7687,
     27017
-   ],
-
+  ],
   "customizations": {
     "vscode": {
       "extensions": [
@@ -27,6 +24,30 @@
       ]
     }
   },
-
-  "postCreateCommand": "bash .devcontainer/post-create.sh"
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "portsAttributes": {
+    "3000": {
+      "label": "Reflex frontend",
+      "onAutoForward": "openBrowser"
+    },
+    "8000": {
+      "label": "Reflex backend",
+      "onAutoForward": "notify"
+    },
+    "6379": {
+      "label": "Redis",
+      "onAutoForward": "silent"
+    },
+    "7687": {
+      "label": "Memgraph Bolt",
+      "onAutoForward": "silent"
+    },
+    "27017": {
+      "label": "MongoDB",
+      "onAutoForward": "silent"
+    }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  }
 }
