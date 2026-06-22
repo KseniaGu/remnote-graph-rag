@@ -10,12 +10,13 @@ from backend.configs.constants import PDF_PAGES_NUM_MAX
 # Need paddlepaddle-gpu version installed
 GPU_AVAILABLE = paddle.device.is_compiled_with_cuda()
 _PADDLEX_MODEL_CACHE = Path.home() / ".paddlex" / "official_models"
+_TEXT_RECOGNITION_MODEL_NAME = "eslav_PP-OCRv5_mobile_rec"
 _MODEL_DIR_OVERRIDES = {
     "layout_detection_model_dir": "PP-DocLayout_plus-L",
     "region_detection_model_dir": "PP-DocBlockLayout",
     "text_detection_model_dir": "PP-OCRv5_server_det",
     "textline_orientation_model_dir": "PP-LCNet_x1_0_textline_ori",
-    "text_recognition_model_dir": "PP-OCRv5_server_rec",
+    "text_recognition_model_dir": "eslav_PP-OCRv5_mobile_rec",
     "table_classification_model_dir": "PP-LCNet_x1_0_table_cls",
     "wired_table_structure_recognition_model_dir": "SLANeXt_wired",
     "wireless_table_structure_recognition_model_dir": "SLANet_plus",
@@ -42,6 +43,7 @@ class PaddleOCRPipeline:
         """Initializes the PaddleOCR pipeline."""
         self.pipeline = PPStructureV3(
             device="gpu" if GPU_AVAILABLE else "cpu",
+            text_recognition_model_name=_TEXT_RECOGNITION_MODEL_NAME,
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_chart_recognition=False,
