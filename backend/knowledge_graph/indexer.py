@@ -51,7 +51,6 @@ class KnowledgeGraphIndexer:
             document_storage_type: StorageType,
             kg_search_settings: KnowledgeGraphSearchSettings,
             embedder: Any,
-            reranker: Any,
             tokenizer: Optional[Any] = None,
             test_setup: bool = True
     ) -> None:
@@ -63,7 +62,6 @@ class KnowledgeGraphIndexer:
             document_storage_type: Type of storage (local or remote).
             kg_search_settings: Knowledge graph search configuration.
             embedder: Embedding model for vector representations.
-            reranker: Reranker model for result refinement.
             tokenizer: Optional tokenizer for token counting.
             test_setup: Whether to use test configuration with limited documents.
         """
@@ -73,7 +71,6 @@ class KnowledgeGraphIndexer:
         self.kg_search_settings = kg_search_settings
 
         self.embedder = embedder
-        self.reranker = reranker
         self.tokenizer = tokenizer
 
         self.index = None

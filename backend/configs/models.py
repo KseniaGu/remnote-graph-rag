@@ -150,7 +150,7 @@ class ModelSettings(BaseSettings):
         top_k=20,
         top_p=0.3,
         num_predict=512,
-        prompt_version="v3"
+        prompt_version="v4"
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
 

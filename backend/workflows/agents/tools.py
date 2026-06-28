@@ -1,29 +1,20 @@
-import ast
-import re
 from typing import Any
 
 from langchain_core.tools import tool
 
-from backend.configs.constants import WORKFLOW_LOGGING, MIN_RELEVANCE_SCORE, MAX_SOURCE_CHARS, RELATION_DROP_SCORE
+from backend.configs.constants import WORKFLOW_LOGGING, MIN_RELEVANCE_SCORE
+from backend.workflows.agents.retrieval_evidence import (
+    QueryEvidenceResult,
+    evidence_from_retrieved_node,
+    format_search_results,
+    format_visualization_results,
+)
 from backend.utils.helpers import get_logger
 
 logger = get_logger(WORKFLOW_LOGGING)
 
 
-def _smart_truncate(text: str, limit: int) -> str:
-    """Truncates `text` to at most `limit` chars, preferring a sentence boundary."""
-    if len(text) <= limit:
-        return text
-    cut = text[:limit]
-    # Prefer last sentence-ending punctuation within the budget, but only if it saves more than a tiny tail — otherwise hard-cut.
-    for sep in (". ", "! ", "? ", "\n"):
-        idx = cut.rfind(sep)
-        if idx >= int(limit * 0.6):
-            return cut[: idx + len(sep)].rstrip() + " …[truncated]"
-    return cut.rstrip() + " …[truncated]"
-
-
-def search_knowledge_base(retriever: Any, reranker: Any):
+def search_knowledge_base(retriever: Any = None, reranker: Any = None, analyst_pipeline: Any = None):
     @tool("search_knowledge_base")
     def _search_knowledge_base(queries: list[str]):
         """Searches the knowledge base using advanced graph and vector retrieval.
@@ -52,134 +43,39 @@ def search_knowledge_base(retriever: Any, reranker: Any):
             [SOURCE] Classical computer vision relied on manually engineered features...
             [SOURCE PATH] CV History > Classical Era > Feature Extraction
         """
+        if analyst_pipeline is not None:
+            return analyst_pipeline.search(queries)
 
-        def _clean(s: str) -> str:
-            # Strip lone UTF-16 surrogates so downstream JSON/httpx encoding never fails, normalize whitespace.
-            return s.encode("utf-8", "ignore").decode("utf-8")
+        if retriever is None:
+            return "No relevant information found."
 
-        evidence_lines = []
-        found_any = False
-        seen_sources_global: set[str] = set()  # dedupe source bodies across the whole result
-        seen_paths_global: set[str] = set()
+        query_results: list[QueryEvidenceResult] = []
 
         for query in queries:
             nodes = retriever.retrieve(query)
-            try:
-                nodes = reranker.postprocess_nodes(nodes, query_str=query)
-            except Exception:
-                logger.error("Rerank failed, using top 10 raw results.", exc_info=True)
+            if reranker is not None:
+                try:
+                    nodes = reranker.postprocess_nodes(nodes, query_str=query)
+                except Exception:
+                    logger.error("Rerank failed, using top 10 raw results.", exc_info=True)
+                    nodes = nodes[:10]
+            else:
                 nodes = nodes[:10]
 
             nodes = [
                 n for n in nodes
-                if n.score is None or n.score >= MIN_RELEVANCE_SCORE
+                if getattr(n, "score", None) is None or getattr(n, "score") >= MIN_RELEVANCE_SCORE
             ]
 
-            # Collected relations/sources for this query.
-            query_lines: list[str] = []
+            evidence_items = []
+            for rank, node_with_score in enumerate(nodes, start=1):
+                evidence_items.extend(
+                    evidence_from_retrieved_node(node_with_score, query=query, rank=rank)
+                )
 
-            for node_with_score in nodes:
-                node = node_with_score.node
-                score = node_with_score.score or 0.0
+            query_results.append(QueryEvidenceResult(query=query, items=evidence_items))
 
-                relation_text = None
-                source_text = None
-                paths = []
-
-                if "->" in node.text:
-                    if "Here are some facts extracted from the provided text:" in node.text:
-                        _, relations, source_node_text = node.text.split("\n\n")
-                        node_path = node.metadata.get("path", [])
-                        relations = set(relations.split("\n"))
-                        parsed_relations: list[str] = []
-                        for relation in relations:
-                            properties = re.findall(r'\(\{.*?\}\)', relation, re.DOTALL)
-                            id_to_name = {}
-                            if properties:
-                                for property_ in set(properties):
-                                    relation = relation.replace(property_, '')
-                                    try:
-                                        property_ = ast.literal_eval(property_)
-                                        if "name" in property_ and "entity_name" in property_:
-                                            id_to_name[property_["name"]] = property_["entity_name"]
-                                    except Exception:
-                                        logger.error("Failed to parse node properties.", exc_info=True)
-                                        pass
-                                for k, v in id_to_name.items():
-                                    relation = relation.replace(k, v)
-                            parsed_relations.append(relation.replace("  ", " ").strip())
-                        relation_text = "\n".join(
-                            f"[RELATION] {r} (Score: {score:.2f})" for r in parsed_relations
-                        )
-                        source_text = source_node_text.strip()
-                        if node_path:
-                            paths = [" > ".join(node_path)]
-                    else:
-                        # CHILD/PARENT entries. The PARENT row is redundant with CHILD.
-                        if "PARENT" in node.text:
-                            continue
-                        # Drop low-score CHILD rows — they're mostly metadata (url:, hostname:).
-                        if score < RELATION_DROP_SCORE:
-                            continue
-
-                        node_pair: list[str] = []
-                        parsed_paths: list[list[str]] = []
-                        properties = re.findall(r'\(\{.*?\}\)', node.text, re.DOTALL)
-                        text = None
-
-                        if properties:
-                            for property_ in properties[::2]:
-                                try:
-                                    property_ = ast.literal_eval(property_)
-                                except Exception:
-                                    logger.error("Failed to parse node property.", exc_info=True)
-                                    continue
-
-                                if "text" in property_:
-                                    node_pair.append(property_["text"])
-
-                                if "path" in property_:
-                                    try:
-                                        parsed_paths.append(ast.literal_eval(property_["path"]))
-                                    except Exception:
-                                        logger.error("Failed to parse node property's path.", exc_info=True)
-                            if len(node_pair) == 2:
-                                text = node_pair[0] + " -> CHILD -> " + node_pair[1]
-
-                        if not text:
-                            continue
-
-                        relation_text = f"[RELATION] {text} (Score: {score:.2f})"
-                        paths = [" > ".join(p) for p in parsed_paths[:2]]
-                else:
-                    source_text = node.text
-                    relation_text = None
-
-                if relation_text:
-                    query_lines.append(_clean(relation_text))
-
-                if source_text:
-                    clipped = _smart_truncate(source_text.strip(), MAX_SOURCE_CHARS)
-                    dedup_key = clipped[:120]  # first ~120 chars is plenty to spot dupes
-                    if dedup_key not in seen_sources_global:
-                        seen_sources_global.add(dedup_key)
-                        score_tag = f" (Score: {score:.2f})" if "->" not in (node.text or "") else ""
-                        query_lines.append(f"[SOURCE]{score_tag} {_clean(clipped)}")
-
-                for p in paths:
-                    if p and p not in seen_paths_global:
-                        seen_paths_global.add(p)
-                        query_lines.append(f"[SOURCE PATH] {_clean(p)}")
-
-                found_any = True
-
-            if query_lines:
-                evidence_lines.append(f"QUERY: {query}\n" + "\n".join(query_lines))
-
-        if not found_any:
-            return "No relevant information found."
-
-        return "RETRIEVER RESULTS:\n\n" + "\n\n".join(evidence_lines)
+        return format_search_results(query_results)
 
     return _search_knowledge_base
 
@@ -236,7 +132,7 @@ def deep_web_research(search_engine: Any):
     return _deep_web_research
 
 
-def get_subgraphs_to_visualize(retriever: Any):
+def get_subgraphs_to_visualize(retriever: Any = None, visualizer_pipeline: Any = None):
     @tool("get_subgraphs_to_visualize")
     def _get_subgraphs_to_visualize(queries: list[str]):
         """Retrieves subgraphs for visualization based on multiple search queries.
@@ -263,18 +159,23 @@ def get_subgraphs_to_visualize(retriever: Any):
             queries = ["machine learning", "neural networks", "deep learning"]
             Returns: (['node1', 'node2', ...], [('ML', 'USES', 'Neural Networks'), ...])
         """
-        all_nodes, all_triplets = [], []
+        if visualizer_pipeline is not None:
+            return visualizer_pipeline.visualize(queries)
+
+        if retriever is None:
+            return [], [], queries
+
+        query_results: list[QueryEvidenceResult] = []
 
         for query in queries:
             retrieved_nodes = retriever.retrieve(query)
+            evidence_items = []
 
-            for node in retrieved_nodes:
-                if "->" in node.text:
-                    node_1, relation, node_2 = node.text.split(" -> ")
-                    all_triplets.append((node_1.strip(), relation.strip(), node_2.strip()))
-                else:
-                    all_nodes.append(node.node_id)
+            for rank, node in enumerate(retrieved_nodes, start=1):
+                evidence_items.extend(evidence_from_retrieved_node(node, query=query, rank=rank))
 
-        return list(set(all_nodes)), list(set(all_triplets)), queries
+            query_results.append(QueryEvidenceResult(query=query, items=evidence_items))
+
+        return format_visualization_results(query_results)
 
     return _get_subgraphs_to_visualize

@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.errors import GraphRecursionError
 
 from backend.configs.constants import RECURSION_LIMIT
+from backend.configs.constants import VISUALIZATION_EMPTY_CONTEXT
 from backend.configs.enums import WorkflowEventType
 from backend.configs.messages import FALLBACK_ALL_SOURCES_EXHAUSTED, FALLBACK_VISUALIZATION_FAILED, \
     FALLBACK_NO_RESULTS, FALLBACK_DEFAULT, ERROR_RECURSION_LIMIT
@@ -71,6 +72,8 @@ class ReflexLearnerWorkflow:
         """Returns a user-facing fallback message based on the workflow context."""
         if '"all_sources_exhausted": true' in context:
             return FALLBACK_ALL_SOURCES_EXHAUSTED
+        if VISUALIZATION_EMPTY_CONTEXT in context:
+            return FALLBACK_VISUALIZATION_FAILED
         if "Visualization failed" in context:
             return FALLBACK_VISUALIZATION_FAILED
         if '"no_results": true' in context:

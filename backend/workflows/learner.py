@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
@@ -13,7 +14,7 @@ from ollama._types import ResponseError
 from pymongo import MongoClient
 from tavily import TavilyClient
 
-from backend.configs.constants import TITLE_MAX_LENGTH, DEFAULT_RECENT_MESSAGE_LIMIT
+from backend.configs.constants import TITLE_MAX_LENGTH, DEFAULT_RECENT_MESSAGE_LIMIT, VISUALIZATION_EMPTY_CONTEXT
 from backend.configs.enums import ModelRoleType, PromptType
 from backend.configs.models import LocalModelSettings, ModelSettings
 from backend.configs.paths import PathSettings
@@ -24,9 +25,11 @@ from backend.knowledge_graph.storage import KnowledgeGraphStorage
 from backend.utils.helpers import add_trace_metadata
 from backend.utils.prompt_engine import PromptEngine
 from backend.utils.session_memory import compress_text
+from backend.workflows.agents.analyst_retrieval import AnalystRetrievalPipeline
 from backend.workflows.agents.factory import AgentsFactory
 from backend.workflows.agents.schemas import *
 from backend.workflows.agents.tools import *
+from backend.workflows.agents.visualizer_retrieval import VisualizerRetrievalPipeline
 
 logger = get_logger(WORKFLOW_LOGGING)
 
@@ -90,13 +93,6 @@ class LearnerWorkflow:
                 local_files_only=True,
             )
 
-        def _create_reranker():
-            return CohereRerank(
-                api_key=self.models_settings.reranker.api_key.get_secret_value(),
-                model=self.models_settings.reranker.model_name,
-                top_n=self.models_settings.reranker.top_n,
-            )
-
         def _create_kg_storage():
             return KnowledgeGraphStorage(
                 self.path_settings,
@@ -106,10 +102,8 @@ class LearnerWorkflow:
 
         with ThreadPoolExecutor(max_workers=3) as executor:
             embedder_future = executor.submit(_create_embedder)
-            reranker_future = executor.submit(_create_reranker)
             kg_storage_future = executor.submit(_create_kg_storage)
             embedder = embedder_future.result()
-            reranker = reranker_future.result()
             kg_storage = kg_storage_future.result()
         logger.info("Knowledge graph storage initialized")
 
@@ -119,7 +113,6 @@ class LearnerWorkflow:
             kg_storage.storage_settings.document_storage.storage_type,
             kg_search_settings,
             embedder,
-            reranker,
         )
         logger.info("Knowledge graph indexer initialized")
 
@@ -155,14 +148,9 @@ class LearnerWorkflow:
         - Retriever: bound with KB search and visualization tools
         """
         # Initialize tools
-        base_kb_search_tool = search_knowledge_base(
-            self.knowledge_graph_indexer.get_retriever(), self.knowledge_graph_indexer.reranker
-        )
+        base_kb_search_tool = self._build_kb_search_tool()
         web_search_tool = deep_web_research(self.search_engine)
-        visualizer_retriever_params = self.knowledge_graph_indexer.kg_search_settings.visualizer_retriever_params
-        visualizer_kb_search_tool = get_subgraphs_to_visualize(
-            self.knowledge_graph_indexer.get_retriever(visualizer_retriever_params)
-        )
+        visualizer_kb_search_tool = self._build_visualizer_tool()
         self.tools = {tool.name: tool for tool in (base_kb_search_tool, web_search_tool, visualizer_kb_search_tool)}
 
         # Load prompts and initialize models for each agent role
@@ -196,6 +184,7 @@ class LearnerWorkflow:
                     self.researcher_structured.with_structured_output(ResearchResult),
                     provider=model_settings.structured.provider,
                 )
+                continue
             else:
                 model = AgentsFactory.get_llm_by_role(model_settings)
 
@@ -205,7 +194,31 @@ class LearnerWorkflow:
                 elif role_type == ModelRoleType.retriever:
                     model = model.bind_tools([base_kb_search_tool, visualizer_kb_search_tool])
 
-                setattr(self, role_type.name, AgentsFactory.add_retry(model, provider=model_settings.provider))
+            setattr(self, role_type.name, AgentsFactory.add_retry(model, provider=model_settings.provider))
+
+    def _build_kb_search_tool(self):
+        mode = self.knowledge_graph_indexer.kg_search_settings.analyst_retrieval_mode
+        if mode == "optimized":
+            analyst_retrieval_pipeline = AnalystRetrievalPipeline(self.knowledge_graph_indexer)
+            return search_knowledge_base(analyst_pipeline=analyst_retrieval_pipeline)
+        if mode == "legacy_vector_context":
+            legacy_retriever = self.knowledge_graph_indexer.get_retriever(
+                self.knowledge_graph_indexer.kg_search_settings.retriever_params
+            )
+            return search_knowledge_base(retriever=legacy_retriever)
+        raise ValueError(f"Unsupported analyst retrieval mode: {mode}")
+
+    def _build_visualizer_tool(self):
+        mode = self.knowledge_graph_indexer.kg_search_settings.visualizer_retrieval_mode
+        if mode == "optimized":
+            visualizer_retrieval_pipeline = VisualizerRetrievalPipeline(self.knowledge_graph_indexer)
+            return get_subgraphs_to_visualize(visualizer_pipeline=visualizer_retrieval_pipeline)
+        if mode == "legacy_vector_context":
+            legacy_retriever = self.knowledge_graph_indexer.get_retriever(
+                self.knowledge_graph_indexer.kg_search_settings.visualizer_retriever_params
+            )
+            return get_subgraphs_to_visualize(retriever=legacy_retriever)
+        raise ValueError(f"Unsupported visualizer retrieval mode: {mode}")
 
     def _init_nodes(self):
         """Initializes workflow graph nodes and edges.
@@ -439,7 +452,7 @@ class LearnerWorkflow:
             return ModelRoleType.analyst.name
         if state.retriever_empty:
             return ModelRoleType.researcher.name
-        if "Visual artifact generated" in ctx or "Visualization failed" in ctx:
+        if "Visual artifact generated" in ctx or "Visualization failed" in ctx or VISUALIZATION_EMPTY_CONTEXT in ctx:
             return "__end__"
 
         # Priority 1: if an agent (analyst/mentor) has already produced a response this turn,
@@ -587,7 +600,11 @@ class LearnerWorkflow:
                 if any(float(s) >= cls._KB_MIN_USEFUL_SCORE for s in scores):
                     return False
             elif k == "get_subgraphs_to_visualize":
-                return not any(v[0] or v[1])
+                # Visualization retrieval is a terminal workflow path even when
+                # no focused subgraph exists. Preserve the tool result so the
+                # Visualizer node can emit a clean no-graph outcome instead of
+                # treating the request as an empty KB search and retrying.
+                return False
         return True
 
     async def researcher_node(self, state: State) -> dict[str, str]:
@@ -758,6 +775,12 @@ class LearnerWorkflow:
                 visualizer_tool_results = json.loads(tool_results).get("get_subgraphs_to_visualize")
                 if visualizer_tool_results:
                     nodes, relation_triplets, queries = visualizer_tool_results
+                    if not nodes and not relation_triplets:
+                        logger.warning("[VISUALIZER] No focused graph data found.")
+                        return {
+                            "visual_artifacts": state.visual_artifacts,
+                            "context": VISUALIZATION_EMPTY_CONTEXT,
+                        }
                     title = " & ".join(queries)
                     title = (title[:TITLE_MAX_LENGTH] + "…") if len(title) > TITLE_MAX_LENGTH else title
                     plotly_figure = self.knowledge_graph_indexer.get_graph_visualization(
