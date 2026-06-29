@@ -23,8 +23,13 @@ from backend.data_processing.llm_postprocess import (
     CONCEPT_MERGE_REVIEW_FILENAME,
     CONCEPT_REGISTRY_FILENAME,
     DECISIONS_FILENAME,
+    DEFAULT_CONCEPT_RESOLUTION_NUM_PREDICT,
+    DEFAULT_GRAPH_NUM_PREDICT,
+    DEFAULT_LLM_NUM_CTX,
+    DEFAULT_LLM_NUM_PREDICT,
     DEFAULT_SMOKE_LIMIT,
     DEFAULT_PROMPT_VERSION,
+    DEFAULT_QUALITY_NUM_PREDICT,
     FAILURES_FILENAME,
     GRAPH_PREVIEW_FILENAME,
     RELATION_REGISTRY_FILENAME,
@@ -208,6 +213,26 @@ class LLMPostprocessTests(unittest.TestCase):
 
         self.assertEqual(0, full_args.limit)
         self.assertEqual(0, full_args.concept_resolution_limit)
+
+    def test_optimized_pipeline_defaults_follow_selected_llm_run_settings(self) -> None:
+        argv = [
+            "run_optimized_postprocess_pipeline.py",
+            "--raw-data-dir",
+            "raw",
+            "--output-root",
+            "out",
+        ]
+        with patch.object(sys, "argv", argv):
+            args = parse_optimized_pipeline_args()
+
+        self.assertEqual(DEFAULT_LLM_NUM_CTX, args.num_ctx)
+        self.assertEqual(DEFAULT_LLM_NUM_PREDICT, args.num_predict)
+        self.assertEqual(DEFAULT_QUALITY_NUM_PREDICT, effective_num_predict(args, "quality"))
+        self.assertEqual(DEFAULT_GRAPH_NUM_PREDICT, effective_num_predict(args, "graph"))
+        self.assertEqual(
+            DEFAULT_CONCEPT_RESOLUTION_NUM_PREDICT,
+            effective_num_predict(args, "concept_resolution"),
+        )
 
     def test_optimized_pipeline_pass_specific_num_predict_args(self) -> None:
         argv = [

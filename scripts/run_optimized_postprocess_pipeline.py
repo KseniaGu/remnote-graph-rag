@@ -30,8 +30,19 @@ from backend.data_processing.concept_registry import (
 )
 from backend.data_processing.llm_postprocess import (
     CACHE_DIRNAME,
+    DEFAULT_CONCEPT_RESOLUTION_NUM_PREDICT,
+    DEFAULT_GRAPH_NUM_PREDICT,
+    DEFAULT_LLM_BASE_URL,
+    DEFAULT_LLM_NUM_CTX,
+    DEFAULT_LLM_NUM_PREDICT,
+    DEFAULT_LLM_TEMPERATURE,
+    DEFAULT_LLM_TOP_K,
+    DEFAULT_LLM_TOP_P,
+    DEFAULT_MAX_BATCH_CHARS,
+    DEFAULT_MAX_BATCH_CHUNKS,
     DEFAULT_MODEL_NAME,
     DEFAULT_PROMPT_VERSION,
+    DEFAULT_QUALITY_NUM_PREDICT,
     DEFAULT_SMOKE_LIMIT,
     ChunkAction,
     ChunkEnrichmentDecision,
@@ -136,30 +147,30 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--prompt-dir", type=Path, default=ROOT / "backend" / "llm" / "prompts")
-    parser.add_argument("--max-batch-chunks", type=int, default=1)
-    parser.add_argument("--max-batch-chars", type=int, default=9000)
-    parser.add_argument("--base-url", default="https://ollama.com")
-    parser.add_argument("--temperature", type=float, default=0.0)
-    parser.add_argument("--top-k", type=int, default=10)
-    parser.add_argument("--top-p", type=float, default=0.1)
-    parser.add_argument("--num-ctx", type=int, default=8192)
-    parser.add_argument("--num-predict", type=int, default=4096)
+    parser.add_argument("--max-batch-chunks", type=int, default=DEFAULT_MAX_BATCH_CHUNKS)
+    parser.add_argument("--max-batch-chars", type=int, default=DEFAULT_MAX_BATCH_CHARS)
+    parser.add_argument("--base-url", default=DEFAULT_LLM_BASE_URL)
+    parser.add_argument("--temperature", type=float, default=DEFAULT_LLM_TEMPERATURE)
+    parser.add_argument("--top-k", type=int, default=DEFAULT_LLM_TOP_K)
+    parser.add_argument("--top-p", type=float, default=DEFAULT_LLM_TOP_P)
+    parser.add_argument("--num-ctx", type=int, default=DEFAULT_LLM_NUM_CTX)
+    parser.add_argument("--num-predict", type=int, default=DEFAULT_LLM_NUM_PREDICT)
     parser.add_argument(
         "--quality-num-predict",
         type=int,
-        default=None,
+        default=DEFAULT_QUALITY_NUM_PREDICT,
         help="Override --num-predict for the quality pass.",
     )
     parser.add_argument(
         "--graph-num-predict",
         type=int,
-        default=None,
+        default=DEFAULT_GRAPH_NUM_PREDICT,
         help="Override --num-predict for the graph pass.",
     )
     parser.add_argument(
         "--concept-resolution-num-predict",
         type=int,
-        default=None,
+        default=DEFAULT_CONCEPT_RESOLUTION_NUM_PREDICT,
         help="Override --num-predict for LLM concept adjudication calls.",
     )
     return parser.parse_args()
