@@ -59,41 +59,36 @@ class AgentsFactory:
         api_key = model_settings.api_key.get_secret_value() if model_settings.api_key else None
 
         if provider == LLMProviderType.ollama:
-            role_params = model_settings.model_dump(
-                include={"temperature", "top_k", "top_p", "num_predict", "base_url", "num_ctx"}
-            )
             return ChatOllama(
                 model=model_settings.model_name,
                 client_kwargs={
                     "headers": {"Authorization": f"Bearer {api_key}"}
                 } if api_key else {},
-                **role_params,
+                **model_settings.ollama_chat_params(),
             )
 
         if provider == LLMProviderType.vllm:
             async_auth_client = GoogleAuthAsyncClient(target_audience=model_settings.base_url)
-            role_params = model_settings.model_dump(include={"temperature", "top_p", "max_tokens"})
             return ChatOpenAI(
                 model=model_settings.model_name,
                 api_key=api_key or "EMPTY",
                 base_url=f"{model_settings.base_url}/v1",
                 http_async_client=async_auth_client,
-                **role_params,
+                **model_settings.vllm_chat_params(),
             )
 
         if provider == LLMProviderType.openai:
-            role_params = model_settings.model_dump(include={"temperature", "top_p", "max_tokens", "base_url"})
             return ChatOpenAI(
                 model=model_settings.model_name,
                 api_key=api_key,
-                **role_params,
+                **model_settings.openai_chat_params(),
             )
 
         if provider == LLMProviderType.gemini:
             return ChatGoogleGenerativeAI(
                 model=model_settings.model_name,
                 google_api_key=api_key,
-                temperature=model_settings.temperature,
+                **model_settings.gemini_chat_params(),
             )
 
         raise ValueError(f"Unsupported LLM provider: {provider}")

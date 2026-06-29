@@ -8,6 +8,7 @@ from llama_index.core.schema import NodeWithScore, TextNode
 from llama_index.core.vector_stores import MetadataFilter, MetadataFilters, VectorStoreQuery
 
 from backend.configs.constants import MAX_SOURCE_CHARS, MIN_RELEVANCE_SCORE, WORKFLOW_LOGGING
+from backend.configs.models import RerankerSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.utils.helpers import get_logger
 from backend.workflows.agents.retrieval_evidence import NormalizedMetadata, normalize_metadata
@@ -98,10 +99,12 @@ class AnalystRetrievalPipeline:
         self,
         knowledge_graph_indexer: Any,
         settings: KnowledgeGraphSearchSettings | None = None,
+        reranker_settings: Any | None = None,
         reranker: Any | None = None,
     ) -> None:
         self.indexer = knowledge_graph_indexer
         self.settings = settings or knowledge_graph_indexer.kg_search_settings
+        self.reranker_settings = reranker_settings or RerankerSettings()
         self.embedder = knowledge_graph_indexer.embedder
         self.storage_context = knowledge_graph_indexer.storage_context
         self.vector_store = self._resolve_vector_store()
@@ -688,14 +691,7 @@ class AnalystRetrievalPipeline:
 
         if self.settings.analyst_reranker_mode == "sentence_transformers":
             try:
-                reranker = SentenceTransformerReranker(
-                    model_name=self.settings.analyst_reranker_model,
-                    top_n=self.settings.analyst_reranker_top_n,
-                    batch_size=self.settings.analyst_reranker_batch_size,
-                    device=self.settings.analyst_reranker_device,
-                    local_files_only=self.settings.analyst_reranker_local_files_only,
-                    trust_remote_code=self.settings.analyst_reranker_trust_remote_code,
-                )
+                reranker = SentenceTransformerReranker(**self.reranker_settings.sentence_transformer_params())
             except Exception as exc:
                 logger.warning(
                     f"Sentence-transformers Analyst reranker initialization failed; deterministic ranking will be used. Error: {exc}"
@@ -715,16 +711,17 @@ class AnalystRetrievalPipeline:
                 logger.warning("LLMRerank/Ollama imports failed; Analyst reranker disabled.", exc_info=True)
                 return None
 
+            reranker_params = self.reranker_settings.ollama_llm_rerank_params()
             reranker_llm = Ollama(
-                model=self.settings.analyst_reranker_model,
-                base_url=self.settings.analyst_reranker_base_url,
-                request_timeout=self.settings.analyst_reranker_request_timeout,
+                model=reranker_params["model"],
+                base_url=reranker_params["base_url"],
+                request_timeout=reranker_params["request_timeout"],
                 temperature=0.0,
             )
             reranker = LLMRerank(
                 llm=reranker_llm,
-                choice_batch_size=self.settings.analyst_reranker_choice_batch_size,
-                top_n=self.settings.analyst_reranker_top_n,
+                choice_batch_size=reranker_params["choice_batch_size"],
+                top_n=reranker_params["top_n"],
             )
 
             if not self._reranker_health_check(reranker):

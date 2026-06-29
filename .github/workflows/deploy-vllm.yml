@@ -13,7 +13,7 @@ env:
   VLLM_GENERATION_SERVICE_NAME: vllm-generation
   VLLM_MODEL_PATH: /mnt/models/qwen-9b
   MODEL_BUCKET_NAME: ${{ vars.MODEL_BUCKET_NAME }}
-  EMBED_MODEL_BUILD_DIR: .docker-build/huggingface
+  MODEL_CACHE_BUILD_DIR: .docker-build/sentence-transformers
 
 jobs:
   deploy:
@@ -144,28 +144,28 @@ jobs:
           echo "Routing:    ${VLLM_ROUTING_URL}"
           echo "Generation: ${VLLM_GENERATION_URL}"
 
-      - name: Download embedding model from Cloud Storage
+      - name: Download retrieval models from Cloud Storage
         run: |
           set -euo pipefail
-          rm -rf "$EMBED_MODEL_BUILD_DIR"
-          mkdir -p "$EMBED_MODEL_BUILD_DIR"
-          gcloud storage rsync --recursive "gs://$MODEL_BUCKET_NAME/sentence-transformers" "$EMBED_MODEL_BUILD_DIR"
+          rm -rf "$MODEL_CACHE_BUILD_DIR"
+          mkdir -p "$MODEL_CACHE_BUILD_DIR"
+          gcloud storage rsync --recursive "gs://$MODEL_BUCKET_NAME/sentence-transformers" "$MODEL_CACHE_BUILD_DIR"
 
-          if [ -d "$EMBED_MODEL_BUILD_DIR/sentence-transformers" ]; then
-            echo "Unexpected nested sentence-transformers directory under $EMBED_MODEL_BUILD_DIR"
-            find "$EMBED_MODEL_BUILD_DIR" -maxdepth 2 -type d | sort
+          if [ -d "$MODEL_CACHE_BUILD_DIR/sentence-transformers" ]; then
+            echo "Unexpected nested sentence-transformers directory under $MODEL_CACHE_BUILD_DIR"
+            find "$MODEL_CACHE_BUILD_DIR" -maxdepth 2 -type d | sort
             exit 1
           fi
 
-          if [ -z "$(find "$EMBED_MODEL_BUILD_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-            echo "No embedding model files were copied from gs://$MODEL_BUCKET_NAME/sentence-transformers"
+          if [ -z "$(find "$MODEL_CACHE_BUILD_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+            echo "No retrieval model files were copied from gs://$MODEL_BUCKET_NAME/sentence-transformers"
             exit 1
           fi
 
       - name: Build backend Docker image
         run: |
           DOCKER_BUILDKIT=1 docker build \
-            --build-context model-cache="$EMBED_MODEL_BUILD_DIR" \
+            --build-context model-cache="$MODEL_CACHE_BUILD_DIR" \
             -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }} \
             -f deploy/Dockerfile .
 
@@ -218,7 +218,7 @@ jobs:
             --set-env-vars "LLM_PIPELINE=vllm" \
             --set-env-vars "VLLM_ROUTING_URL=${{ env.VLLM_ROUTING_URL }}" \
             --set-env-vars "VLLM_GENERATION_URL=${{ env.VLLM_GENERATION_URL }}" \
-            --set-env-vars "VLLM_MODEL_PATH=$VLLM_MODEL_PATH" \
+            --set-env-vars "VLLM_MODEL_PATH=$VLLM_MODEL_PATH"
 
       - name: Get backend URL
         run: |

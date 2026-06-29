@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any
+from typing import Any, TypeVar
 
 from langsmith import get_current_run_tree
 
@@ -8,6 +8,15 @@ from backend.configs.constants import WORKFLOW_LOGGING
 from backend.utils.common_funcs import get_logger
 
 logger = get_logger(WORKFLOW_LOGGING)
+
+T = TypeVar("T")
+
+
+def require_dependency(dependency: T | None, error_details: str) -> T:
+    """Returns an optional dependency or raises a clear import error."""
+    if dependency is None:
+        raise ImportError(error_details)
+    return dependency
 
 
 def add_trace_metadata(key: str, value: Any) -> None:

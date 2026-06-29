@@ -281,25 +281,9 @@ class LLMPostprocessTests(unittest.TestCase):
             base_url="https://ollama.com",
         )
 
-    def test_optimized_pipeline_uses_split_v7_and_v9_prompts_with_v6_fallback(self) -> None:
+    def test_optimized_pipeline_uses_default_split_prompts(self) -> None:
         args = self._optimized_pass_args()
 
-        self.assertEqual("remnote_postprocess", resolved_prompt_name_for_pass(args, "quality"))
-        self.assertEqual("remnote_postprocess", resolved_prompt_name_for_pass(args, "graph"))
-
-        args.prompt_version = "v7"
-        self.assertEqual("remnote_postprocess_quality", resolved_prompt_name_for_pass(args, "quality"))
-        self.assertEqual("remnote_postprocess_graph", resolved_prompt_name_for_pass(args, "graph"))
-
-        quality_prompt, quality_name = load_prompt_for_pass(args, "quality")
-        graph_prompt, graph_name = load_prompt_for_pass(args, "graph")
-
-        self.assertEqual("remnote_postprocess_quality", quality_name)
-        self.assertEqual("remnote_postprocess_graph", graph_name)
-        self.assertIn("Do not extract graph concepts or relations", quality_prompt[1])
-        self.assertIn("Existing predicates are preferred", graph_prompt[1])
-
-        args.prompt_version = "v9"
         self.assertEqual("remnote_postprocess_quality", resolved_prompt_name_for_pass(args, "quality"))
         self.assertEqual("remnote_postprocess_graph", resolved_prompt_name_for_pass(args, "graph"))
 
@@ -803,41 +787,15 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual(1, len(projection.nodes))
         self.assertEqual([], projection.edges)
 
-    def test_prompt_v6_documents_existing_and_proposed_predicate_contract(self) -> None:
-        prompt_text = (
-            ROOT
-            / "backend"
-            / "llm"
-            / "prompts"
-            / "learner_workflow"
-            / "orchestrator"
-            / "remnote_postprocess"
-            / "v6.yaml"
+    def test_production_split_prompt_preserves_final_v9_contract(self) -> None:
+        # The tracked v1 prompt files are the production rename of the final experimental v9 split prompts.
+        prompt_root = ROOT / "backend" / "llm" / "prompts" / "learner_workflow" / "orchestrator"
+        quality_prompt = (
+            prompt_root / "remnote_postprocess_quality" / f"{DEFAULT_PROMPT_VERSION}.yaml"
         ).read_text(encoding="utf-8")
-
-        self.assertIn('Use predicate_status "existing" only for the exact existing predicate labels', prompt_text)
-        self.assertIn("Use PART_OF, not IS_PART_OF", prompt_text)
-        self.assertIn("do not automatically make those words existing predicate labels", prompt_text)
-
-    def test_prompt_v7_quality_and_graph_prompts_have_separate_contracts(self) -> None:
-        prompt_root = ROOT / "backend" / "llm" / "prompts" / "learner_workflow" / "orchestrator"
-        quality_prompt = (prompt_root / "remnote_postprocess_quality" / "v7.yaml").read_text(encoding="utf-8")
-        graph_prompt = (prompt_root / "remnote_postprocess_graph" / "v7.yaml").read_text(encoding="utf-8")
-
-        self.assertIn("Do not extract graph concepts or relations in the quality pass", quality_prompt)
-        self.assertIn('"concepts": []', quality_prompt)
-        self.assertIn('"relations": []', quality_prompt)
-        self.assertNotIn("Existing predicates are preferred", quality_prompt)
-        self.assertIn("Existing predicates are preferred", graph_prompt)
-        self.assertIn("predicate_status", graph_prompt)
-        self.assertIn("relation_phrase", graph_prompt)
-        self.assertIn("retrieval_usefulness", graph_prompt)
-        self.assertIn("visualization_usefulness", graph_prompt)
-
-    def test_prompt_v9_keeps_split_contract_and_simpler_graph_budget(self) -> None:
-        prompt_root = ROOT / "backend" / "llm" / "prompts" / "learner_workflow" / "orchestrator"
-        quality_prompt = (prompt_root / "remnote_postprocess_quality" / "v9.yaml").read_text(encoding="utf-8")
-        graph_prompt = (prompt_root / "remnote_postprocess_graph" / "v9.yaml").read_text(encoding="utf-8")
+        graph_prompt = (
+            prompt_root / "remnote_postprocess_graph" / f"{DEFAULT_PROMPT_VERSION}.yaml"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("Do not extract graph concepts or relations in the quality pass", quality_prompt)
         self.assertIn('"concepts": []', quality_prompt)
@@ -852,8 +810,8 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("Do not create standalone nodes for local variables, indexed tensors", graph_prompt)
         self.assertNotIn("connect at least half", graph_prompt)
 
-    def test_default_prompt_version_is_v6(self) -> None:
-        self.assertEqual("v6", DEFAULT_PROMPT_VERSION)
+    def test_default_prompt_version_is_production_v1(self) -> None:
+        self.assertEqual("v1", DEFAULT_PROMPT_VERSION)
 
     def test_parse_repairs_missing_decisions_array_closure(self) -> None:
         raw = valid_backprop_response()

@@ -39,7 +39,7 @@ from backend.data_processing.parser_optimized import (
 
 
 SCHEMA_VERSION = "1.1"
-DEFAULT_PROMPT_VERSION = "v6"
+DEFAULT_PROMPT_VERSION = "v1"
 DEFAULT_MODEL_NAME = "nemotron-3-super:cloud"
 DEFAULT_SMOKE_LIMIT = 15
 

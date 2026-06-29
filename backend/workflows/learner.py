@@ -126,10 +126,8 @@ class LearnerWorkflow:
             graph_index_prompt, graph_index_system_prompt = self.prompt_engine.render(
                 PromptType.learner_workflow, ModelRoleType.orchestrator, prompt_version, "graph_index"
             )
-            role_params = role_settings.model_dump(include={"temperature", "top_k", "top_p", "base_url"})
-            llm_params = {"model": role_settings.model_name, **role_params}
             self.knowledge_graph_indexer.build_index(
-                llm=llm_params,
+                llm=role_settings.graph_index_ollama_params(),
                 graph_index_prompt=graph_index_system_prompt["system_instruction"] + "\n" + graph_index_prompt,
             )
             logger.info("Knowledge graph index built successfully")
@@ -199,7 +197,11 @@ class LearnerWorkflow:
     def _build_kb_search_tool(self):
         mode = self.knowledge_graph_indexer.kg_search_settings.analyst_retrieval_mode
         if mode == "optimized":
-            analyst_retrieval_pipeline = AnalystRetrievalPipeline(self.knowledge_graph_indexer)
+            reranker_settings = getattr(getattr(self, "models_settings", None), "reranker", None)
+            analyst_retrieval_pipeline = AnalystRetrievalPipeline(
+                self.knowledge_graph_indexer,
+                reranker_settings=reranker_settings,
+            )
             return search_knowledge_base(analyst_pipeline=analyst_retrieval_pipeline)
         if mode == "legacy_vector_context":
             legacy_retriever = self.knowledge_graph_indexer.get_retriever(

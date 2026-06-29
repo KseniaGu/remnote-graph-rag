@@ -1,5 +1,5 @@
 _meta:
-  version: "8.0-quality"
+  version: "1.0-quality"
   description: "Lightweight RemNote quality gate for optimized two-pass postprocessing."
   model_settings:
     model: "nemotron-3-super:cloud"

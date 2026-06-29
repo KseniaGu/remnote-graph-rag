@@ -25,6 +25,7 @@ langchain-ollama = "^1.0.1"
 langchain-openai = "^1.1.0"
 langchain-google-genai = "^4.2.0"
 langsmith = "^0.7.0"
+sentence-transformers = "^5.5.1"
 tenacity = "^9.1.0"
 structlog = "^24.0.0"
 tavily-python = "^0.7.17"
@@ -44,6 +45,7 @@ paddlex = { extras = ["ocr"], version = "^3.6.1" }
 paddlepaddle = "^3.2.2" # To use GPU: install paddlepaddle-gpu instead
 trafilatura = "^2.1.0"
 huggingface-hub = "^1.20.1"
+networkx = "^3.6.1"
 
 [build-system]
 requires = ["poetry-core"]

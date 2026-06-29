@@ -22,6 +22,15 @@ class TavilySettings(BaseSettings):
 
 class KnowledgeGraphSearchSettings(BaseSettings):
     """Knowledge graph search settings configuration."""
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_PATH),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_prefix="KG_SEARCH_",
+        populate_by_name=True,
+    )
+
     analyst_retrieval_mode: RetrievalPipelineMode = "optimized"
     visualizer_retrieval_mode: RetrievalPipelineMode = "optimized"
     retriever_params: dict = {
@@ -53,21 +62,12 @@ class KnowledgeGraphSearchSettings(BaseSettings):
     analyst_graph_depth: int = 1
     analyst_graph_relation_limit: int = 30
     analyst_reranker_mode: Literal["disabled", "sentence_transformers", "ollama_llm_rerank"] = "sentence_transformers"
-    analyst_reranker_model: str = "models/Qwen3-Reranker-0.6B"
-    analyst_reranker_device: str | None = None
-    analyst_reranker_batch_size: int = 8
-    analyst_reranker_local_files_only: bool = True
-    analyst_reranker_trust_remote_code: bool = True
     analyst_source_rerank_candidate_k: int = 10
     analyst_source_rerank_max_chars: int = 1200
     analyst_relation_reranker_enabled: bool = False
     analyst_relation_rerank_candidate_k: int = 8
     analyst_relation_rerank_max_chars: int = 1000
     analyst_relation_require_source_evidence: bool = True
-    analyst_reranker_base_url: str = "http://localhost:11434"
-    analyst_reranker_request_timeout: float = 60.0
-    analyst_reranker_choice_batch_size: int = 8
-    analyst_reranker_top_n: int = 12
     visualizer_anchor_top_k: int = 3
     visualizer_anchor_min_score: float = 0.50
     visualizer_source_candidate_k: int = 20

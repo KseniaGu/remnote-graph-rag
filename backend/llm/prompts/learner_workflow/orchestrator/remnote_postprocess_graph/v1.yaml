@@ -1,6 +1,6 @@
 _meta:
-  version: "8.0-graph"
-  description: "More connected grounded RemNote graph extraction for optimized two-pass postprocessing."
+  version: "1.0-graph"
+  description: "Simpler connected grounded RemNote graph extraction for optimized two-pass postprocessing."
   model_settings:
     model: "nemotron-3-super:cloud"
     temperature: 0.0
@@ -21,7 +21,7 @@ system:
     - Produce exactly one decision per input chunk_id. Copy chunk_id exactly.
     - The final response must be complete parseable JSON.
     - Use null for cleaned_embedding_text and cleaned_display_text unless a short cleanup is needed.
-    - chunk_summary <= 22 words. reason <= 14 words. description <= 12 words.
+    - chunk_summary <= 25 words. reason <= 15 words. description <= 15 words.
     - Keep graph output grounded. Omit weak concepts and unsupported relations.
 
     Default action:
@@ -32,28 +32,26 @@ system:
 
     Graph extraction budget:
     - Low-value, noisy, caption-only, source-card, or metadata-heavy chunks: 0-2 concepts and 0-1 relations.
-    - Normal useful chunks: 3-6 concepts and 2-4 relations when grounded.
-    - Dense technical, list, or table-like chunks: 4-7 concepts and 3-5 relations when grounded.
-    - When 3+ concepts are extracted, try to connect at least half of them to another extracted concept if the input supports it.
-    - These are ceilings, not quotas. Never add a relation only to fill the budget.
+    - Normal useful chunks: 3-5 concepts and 2-3 relations when grounded.
+    - Dense technical, list, or table-like chunks: 4-6 concepts and 2-4 relations when grounded.
+    - These are ceilings, not quotas. Never add a concept or relation only to fill the budget.
 
     Concept rules:
     - Extract graph-visible academic, technical, paper, method, model, task, formula, tool, problem, or component nodes.
     - Prefer concepts useful for answer generation, retrieval expansion, or visualization.
     - Prefer durable named concepts over local symbols or one-off notation.
-    - Do not create standalone nodes for local variables, indexed tensors, placeholder letters, loop indices, or formula fragments whose meaning is only local, such as "$\mathbf{h}$", "$\mathbf{v}_n$", "Input x", "\epsilon_\theta", "s_\theta", "B", "Qij", or "x_{1:T}".
-    - If a local symbol has a stable named meaning in the chunk, extract the named concept and keep the symbol as an alias. For example: "noise prediction network" with alias "\epsilon_\theta"; "score network" with alias "s_\theta"; "batch size" with alias "B".
-    - Formula nodes are useful when the formula has a stable name, such as ELBO, KL divergence, InfoNCE, L_simple, or binary cross-entropy.
+    - Do not create standalone nodes for local variables, indexed tensors, placeholder letters, loop indices, or formula fragments whose meaning is only local.
+    - Formula nodes are useful only when the formula has a stable recognizable name, such as a loss, objective, divergence, or algorithm.
     - Normalize canonical_name/display_name to concise English academic terms when possible.
     - Preserve abbreviations, formulas, OCR variants, Russian terms, and exact source forms in aliases.
     - Avoid generic standalone nodes such as Model, Agent, Dataset, Method, Component, Input, Output, or Variable unless qualified.
     - Every evidence_spans item must be an exact substring copied from the provided input.
-    - Use the shortest exact evidence span possible, usually 2-8 words.
+    - Use the shortest exact evidence span possible, usually 2-10 words.
     - If exact evidence is hard to copy, omit the concept.
 
     Relation rules:
-    - Extract grounded relations among the most important concepts in the same decision.
-    - Relations may be explicit sentence cues, table/row/column cues, bullet-list cues, or immediate heading/path context.
+    - Extract grounded relations among important concepts in the same decision.
+    - Relations may be grounded by sentence cues, heading/path context, bullet text, table rows, or table columns.
     - source_concept_id and target_concept_id must refer to concepts in the same decision.
     - raw_predicate and canonical_predicate must both be UPPERCASE_SNAKE_CASE English labels.
     - Prefer durable reusable predicates. Put sentence-specific nuance in relation_phrase.
@@ -68,7 +66,6 @@ system:
     - visualization_usefulness: 1.0 means readable and meaningful in a compact graph.
     - evidence_chunk_ids must include the current chunk_id.
     - evidence_spans must be exact short substrings copied from input. Heading/path text may be used when it appears in the input JSON.
-    - For lists and tables, a heading, row label, column label, or bullet text may ground the relation if it clearly states the connection.
     - Use RELATED_TO only when the relation is useful but no more specific grounded predicate is available.
     - Omit relation-only mentions that merely say two concepts appear in the same chunk without a meaningful connection.
 

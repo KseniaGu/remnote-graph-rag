@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 from itertools import chain
 from typing import Any, Optional
 
-import networkx as nx
 import plotly.graph_objects as go
 from dotenv import load_dotenv, find_dotenv
 from llama_index.core import StorageContext, load_index_from_storage, VectorStoreIndex
@@ -21,6 +22,11 @@ from llama_index.llms.ollama import Ollama
 from llama_index.vector_stores.pinecone import PineconeVectorStore
 
 try:
+    import networkx as nx
+except ImportError:
+    nx = None
+
+try:
     from llama_index.vector_stores.redis import RedisVectorStore
 except ImportError:
     pass
@@ -32,9 +38,13 @@ from backend.configs.enums import KnowledgeGraphEntity, KnowledgeGraphRelation, 
 from backend.configs.paths import PathSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.knowledge_graph.custom_types import CustomEntityNode
-from backend.utils.helpers import clean_json_markdown, logger, make_json_serializable
+from backend.utils.helpers import clean_json_markdown, logger, make_json_serializable, require_dependency
 
 load_dotenv(find_dotenv())
+
+NETWORKX_REQUIRED_ERROR = (
+    "networkx is required for legacy graph processing/visualization. Install the scripts dependency group."
+)
 
 
 class KnowledgeGraphIndexer:
@@ -522,7 +532,9 @@ class KnowledgeGraphIndexer:
         Returns:
             NetworkX directed graph.
         """
-        graph = nx.DiGraph()
+        networkx = require_dependency(nx, NETWORKX_REQUIRED_ERROR)
+
+        graph = networkx.DiGraph()
 
         nodes_to_add, edges_to_add = [], []
         all_unique_node_ids = set((nodes + list(chain(*[(node_1, node_2) for node_1, _, node_2 in relation_triplets]))))
@@ -591,7 +603,9 @@ class KnowledgeGraphIndexer:
             Plotly Figure object for visualization.
         """
         graph = self.generate_nx_graph_from(nodes, relation_triplets)
-        pos = nx.spring_layout(graph, k=SPRING_LAYOUT_K, iterations=SPRING_LAYOUT_ITERATIONS)
+        networkx = require_dependency(nx, NETWORKX_REQUIRED_ERROR)
+
+        pos = networkx.spring_layout(graph, k=SPRING_LAYOUT_K, iterations=SPRING_LAYOUT_ITERATIONS)
         pos = {n: (float(x), float(y)) for n, (x, y) in pos.items()}
 
         node_id_to_full_text = {node_id: text for node_id, text in graph.nodes(data="text")}
@@ -739,19 +753,21 @@ class KnowledgeGraphIndexer:
             processing_prompt: A prompt for the provided LLM
         """
         logger.info("Processing Implicit Graph...")
+        networkx = require_dependency(nx, NETWORKX_REQUIRED_ERROR)
+
         nodes = list(self.index.property_graph_store.graph.nodes.keys())
         edges = [
             (x.source_id, x.target_id) for k, x in self.index.property_graph_store.graph.relations.items()
             if x.id == "CHILD"
         ]
 
-        graph = nx.DiGraph()
+        graph = networkx.DiGraph()
         graph.add_nodes_from(nodes)
         graph.add_edges_from(edges)
-        graph.remove_nodes_from(list(nx.isolates(graph)))
+        graph.remove_nodes_from(list(networkx.isolates(graph)))
 
         # Get all connected subgraphs
-        subgraphs = [graph.subgraph(c).copy() for c in nx.weakly_connected_components(graph)]
+        subgraphs = [graph.subgraph(c).copy() for c in networkx.weakly_connected_components(graph)]
 
         total_tokens = 0
         pbar = tqdm(subgraphs, desc="Subgraphs processing")
@@ -1097,8 +1113,7 @@ if __name__ == '__main__':
     graph_index_prompt, graph_index_system_prompt = prompt_engine.render(
         PromptType.learner_workflow, ModelRoleType.orchestrator, prompt_version, "graph_index"
     )
-    role_params = role_settings.model_dump(include={"temperature", "top_k", "top_p", "base_url"})
-    llm_params = {"model": role_settings.model_name, **role_params}
+    llm_params = role_settings.graph_index_ollama_params()
 
     retriever_params = {
         "VectorContextRetriever": {

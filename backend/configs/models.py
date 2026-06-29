@@ -1,5 +1,5 @@
 import os
-from pathlib import Path
+from typing import Any
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -29,6 +29,26 @@ class BaseLLMSettings(BaseSettings):
     @classmethod
     def model_config_with_prefix(cls, prefix: str) -> SettingsConfigDict:
         return SettingsConfigDict(**cls.model_config) | {'env_prefix': prefix}
+
+    def ollama_chat_params(self) -> dict[str, Any]:
+        return self.model_dump(
+            include={"temperature", "top_k", "top_p", "num_predict", "base_url", "num_ctx"}
+        )
+
+    def vllm_chat_params(self) -> dict[str, Any]:
+        return self.model_dump(include={"temperature", "top_p", "max_tokens"})
+
+    def openai_chat_params(self) -> dict[str, Any]:
+        return self.model_dump(include={"temperature", "top_p", "max_tokens", "base_url"})
+
+    def gemini_chat_params(self) -> dict[str, Any]:
+        return self.model_dump(include={"temperature"})
+
+    def graph_index_ollama_params(self) -> dict[str, Any]:
+        return {
+            "model": self.model_name,
+            **self.model_dump(include={"temperature", "top_k", "top_p", "base_url"}),
+        }
 
 
 class OpenAISettings(BaseLLMSettings):
@@ -92,6 +112,34 @@ class EmbedderSettings(LocalModelSettings):
     model_config = LocalModelSettings.model_config_with_prefix("EMBEDDER_")
     role: ModelRoleType = ModelRoleType.embedder
     embedding_dim: int | None = 384
+
+
+class RerankerSettings(LocalModelSettings):
+    """Configuration for locally hosted reranker models."""
+    model_config = LocalModelSettings.model_config_with_prefix("RERANKER_")
+    role: ModelRoleType = ModelRoleType.reranker
+    model_path: str = "models/Qwen3-Reranker-0.6B"
+    batch_size: int = 8
+    top_n: int = 12
+    local_files_only: bool = True
+    trust_remote_code: bool = True
+    choice_batch_size: int = 8
+    base_url: str = "http://localhost:11434"
+    request_timeout: float = 60.0
+
+    def sentence_transformer_params(self) -> dict[str, Any]:
+        return {
+            "model_name": self.model_path,
+            **self.model_dump(
+                include={"top_n", "batch_size", "device", "local_files_only", "trust_remote_code"}
+            ),
+        }
+
+    def ollama_llm_rerank_params(self) -> dict[str, Any]:
+        return {
+            "model": self.model_path,
+            **self.model_dump(include={"base_url", "request_timeout", "choice_batch_size", "top_n"}),
+        }
 
 
 class ResearcherModelSettings(BaseSettings):
@@ -179,11 +227,7 @@ class ModelSettings(BaseSettings):
         prompt_version="v4"
     )
 
-    reranker: CohereSettings | BaseLLMSettings = CohereSettings(
-        role=ModelRoleType.reranker,
-        model_name="rerank-multilingual-v3.0",
-        top_n=10
-    )
+    reranker: RerankerSettings | CohereSettings | BaseLLMSettings = Field(default_factory=RerankerSettings)
 
 
 def _ollama_models() -> ModelSettings:

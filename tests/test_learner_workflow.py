@@ -40,9 +40,15 @@ class FakeIndexer:
         return self.retriever
 
 
+LAST_FAKE_ANALYST_PIPELINE = None
+
+
 class FakeAnalystPipeline:
-    def __init__(self, indexer) -> None:
+    def __init__(self, indexer, reranker_settings=None) -> None:
+        global LAST_FAKE_ANALYST_PIPELINE
         self.indexer = indexer
+        self.reranker_settings = reranker_settings
+        LAST_FAKE_ANALYST_PIPELINE = self
 
     def search(self, queries: list[str]) -> str:
         return f"optimized analyst: {queries[0]}"
@@ -186,3 +192,16 @@ def test_init_agents_handles_researcher_composite_model_settings() -> None:
     assert isinstance(workflow.researcher_structured, FakeLLM)
     assert "search_knowledge_base" in workflow.tools
     assert "get_subgraphs_to_visualize" in workflow.tools
+
+
+def test_kb_search_tool_passes_model_reranker_settings_to_optimized_analyst_pipeline() -> None:
+    settings = KnowledgeGraphSearchSettings(analyst_retrieval_mode="optimized")
+    indexer = FakeIndexer(settings, FakeRetriever({}))
+    workflow = make_workflow(indexer)
+    workflow.models_settings = ModelSettings()
+
+    with patch("backend.workflows.learner.AnalystRetrievalPipeline", FakeAnalystPipeline):
+        workflow._build_kb_search_tool()
+
+    assert LAST_FAKE_ANALYST_PIPELINE is not None
+    assert LAST_FAKE_ANALYST_PIPELINE.reranker_settings is workflow.models_settings.reranker
