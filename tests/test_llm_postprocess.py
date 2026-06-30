@@ -48,25 +48,28 @@ from backend.data_processing.llm_postprocess import (
     write_jsonl,
     write_sidecar_outputs,
 )
+from backend.data_processing.llm_postprocess_runner import (
+    effective_num_predict,
+    generation_settings_for_pass,
+    is_empty_llm_response,
+    is_usage_limit_error,
+    load_prompt_for_pass,
+    load_excluded_chunk_ids,
+    postprocess_pass_spec,
+    resolve_run_limit,
+    resolved_prompt_name_for_pass,
+    run_postprocess_pass,
+    select_run_inputs,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
-from run_llm_postprocess import load_excluded_chunk_ids, resolve_run_limit, select_run_inputs
 from run_optimized_postprocess_pipeline import (
-    load_prompt_for_pass,
-    run_postprocess_pass,
     parse_args as parse_optimized_pipeline_args,
-    resolved_prompt_name_for_pass,
     validate_args as validate_optimized_pipeline_args,
-)
-from run_llm_postprocess import (
-    effective_num_predict,
-    generation_settings_for_pass,
-    is_empty_llm_response,
-    is_usage_limit_error,
 )
 
 
@@ -320,13 +323,33 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("Do not extract graph concepts or relations", quality_prompt[1])
         self.assertIn("Existing predicates are preferred", graph_prompt[1])
 
+    def test_postprocess_pass_specs_preserve_cache_and_prompt_labels(self) -> None:
+        args = self._optimized_pass_args()
+
+        single = postprocess_pass_spec(args, "single")
+        quality = postprocess_pass_spec(args, "quality")
+        graph = postprocess_pass_spec(args, "graph")
+
+        self.assertEqual("remnote_postprocess", single.prompt_name)
+        self.assertEqual(DEFAULT_PROMPT_VERSION, single.prompt_version)
+        self.assertIsNone(single.cache_namespace)
+        self.assertFalse(single.prompt_hash_includes_pass)
+        self.assertEqual("remnote_postprocess_quality", quality.prompt_name)
+        self.assertEqual(f"{DEFAULT_PROMPT_VERSION}:quality", quality.prompt_version)
+        self.assertEqual("quality", quality.cache_namespace)
+        self.assertTrue(quality.prompt_hash_includes_pass)
+        self.assertEqual("remnote_postprocess_graph", graph.prompt_name)
+        self.assertEqual(f"{DEFAULT_PROMPT_VERSION}:graph", graph.prompt_version)
+        self.assertEqual("graph", graph.cache_namespace)
+        self.assertTrue(graph.prompt_hash_includes_pass)
+
     def test_optimized_pass_skips_repair_for_empty_response(self) -> None:
         chunk = make_input("Backpropagation produces gradients for each layer during training.")
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch("run_optimized_postprocess_pipeline.build_ollama_llm", return_value=object()),
-                patch("run_optimized_postprocess_pipeline.invoke_llm_batch", return_value=("", {})),
-                patch("run_optimized_postprocess_pipeline.invoke_llm_repair") as repair_mock,
+                patch("backend.data_processing.llm_postprocess_runner.build_ollama_llm", return_value=object()),
+                patch("backend.data_processing.llm_postprocess_runner.invoke_llm_batch", return_value=("", {})),
+                patch("backend.data_processing.llm_postprocess_runner.invoke_llm_repair") as repair_mock,
             ):
                 decisions, failures, hits, misses, aborted = run_postprocess_pass(
                     self._optimized_pass_args(),
@@ -347,9 +370,9 @@ class LLMPostprocessTests(unittest.TestCase):
         chunk = make_input("Backpropagation produces gradients for each layer during training.")
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch("run_optimized_postprocess_pipeline.build_ollama_llm", return_value=object()),
+                patch("backend.data_processing.llm_postprocess_runner.build_ollama_llm", return_value=object()),
                 patch(
-                    "run_optimized_postprocess_pipeline.invoke_llm_batch",
+                    "backend.data_processing.llm_postprocess_runner.invoke_llm_batch",
                     side_effect=RuntimeError("weekly usage limit (status code: 429)"),
                 ),
             ):
