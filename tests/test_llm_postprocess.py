@@ -15,6 +15,7 @@ from backend.data_processing.concept_registry import (
     apply_concept_adjudications,
     build_concept_resolution,
     build_concept_resolution_from_mentions,
+    canonicalize_display_name,
     mention_id_for,
     validate_concept_adjudication_response,
 )
@@ -160,6 +161,7 @@ def make_concept_mention(
     concept_type: str = "CONCEPT",
     aliases: list[str] | None = None,
     description: str | None = None,
+    evidence_spans: list[str] | None = None,
 ) -> ConceptMention:
     return ConceptMention(
         mention_id=mention_id,
@@ -172,7 +174,7 @@ def make_concept_mention(
         aliases=aliases or [],
         salience=0.8,
         description=description,
-        evidence_spans=[name],
+        evidence_spans=evidence_spans if evidence_spans is not None else [name],
     )
 
 
@@ -510,6 +512,13 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual("Data Store", resolution.registry_entries[0].canonical_name)
         self.assertEqual([], resolution.review_clusters)
 
+    def test_canonical_display_name_preserves_invariant_ml_terms(self) -> None:
+        self.assertEqual("Naive Bayes", canonicalize_display_name("Naive Bayes"))
+        self.assertEqual("Gaussian Naive Bayes", canonicalize_display_name("Gaussian Naive Bayes"))
+        self.assertEqual("Softplus", canonicalize_display_name("Softplus"))
+        self.assertEqual("Bag of Words", canonicalize_display_name("Bag of Words"))
+        self.assertEqual("Data Store", canonicalize_display_name("Data Stores"))
+
     def test_concept_resolution_marks_derivational_variant_uncertain(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
@@ -544,6 +553,150 @@ class LLMPostprocessTests(unittest.TestCase):
 
         self.assertEqual(2, len(resolution.registry_entries))
         self.assertEqual([], resolution.review_clusters)
+
+    def test_concept_resolution_does_not_merge_through_evidence_spans(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention(
+                    "Advantage Calculation",
+                    mention_id="m1",
+                    concept_type="FORMULA",
+                    evidence_spans=['calculates the "Advantage"', "Logistic regression"],
+                ),
+                make_concept_mention("Logistic regression", mention_id="m2", concept_type="METHOD"),
+            ]
+        )
+
+        self.assertEqual(2, len(resolution.registry_entries))
+        advantage_entry = next(entry for entry in resolution.registry_entries if entry.canonical_name == "Advantage Calculation")
+        self.assertIn("Logistic regression", advantage_entry.evidence_spans)
+        self.assertNotIn("Logistic regression", advantage_entry.source_names)
+        self.assertNotIn("Logistic regression", advantage_entry.aliases)
+
+    def test_concept_resolution_treats_acronym_only_matches_as_uncertain(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention("Learning Rate", mention_id="m1", concept_type="CONCEPT", aliases=["LR"]),
+                make_concept_mention("Logistic Regression", mention_id="m2", concept_type="CONCEPT", aliases=["LR"]),
+            ]
+        )
+
+        self.assertEqual(2, len(resolution.registry_entries))
+        self.assertEqual(1, len(resolution.review_clusters))
+        self.assertIn("acronym_ambiguity", resolution.review_clusters[0].risk_flags)
+
+    def test_concept_resolution_does_not_merge_formula_like_short_alias_chain(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention("Latent Diffusion Model", mention_id="m1", concept_type="MODEL", aliases=["LDM"]),
+                make_concept_mention(
+                    "Discriminator loss",
+                    mention_id="m2",
+                    concept_type="FORMULA",
+                    aliases=["L_D", "\\mathcal{L}_{D}^{\\mathrm{vanilla}}"],
+                ),
+                make_concept_mention("Learning Rate", mention_id="m3", concept_type="PARAMETER", aliases=["LR"]),
+                make_concept_mention("Logistic regression", mention_id="m4", concept_type="METHOD"),
+            ]
+        )
+
+        self.assertEqual(4, len(resolution.registry_entries))
+        names = {entry.canonical_name for entry in resolution.registry_entries}
+        self.assertIn("Latent Diffusion Model", names)
+        self.assertIn("Logistic regression", names)
+
+    def test_concept_resolution_keeps_prior_probability_apart_from_dpo_family_acronyms(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention(
+                    "DPO",
+                    mention_id="m1",
+                    concept_type="METHOD",
+                    aliases=["Direct Preference Optimization"],
+                ),
+                make_concept_mention(
+                    "Prior probability",
+                    mention_id="m2",
+                    concept_type="CONCEPT",
+                    aliases=["P(C)", "Prior probability P(C)"],
+                ),
+                make_concept_mention("Primary Key", mention_id="m3", concept_type="CONCEPT", aliases=["PK"]),
+                make_concept_mention("Principal Component", mention_id="m4", concept_type="CONCEPT", aliases=["PC"]),
+                make_concept_mention("Top-P", mention_id="m5", concept_type="PARAMETER", aliases=["top-P"]),
+            ]
+        )
+
+        self.assertEqual(5, len(resolution.registry_entries))
+        self.assertEqual(
+            {"DPO", "Primary Key", "Principal Component", "Prior probability", "Top-P"},
+            {entry.canonical_name for entry in resolution.registry_entries},
+        )
+
+    def test_concept_resolution_keeps_symbolic_mixing_weight_apart_from_key_and_dpo(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention(
+                    "Mixing weight",
+                    mention_id="m1",
+                    concept_type="PARAMETER",
+                    aliases=["$\\pi_k$", "π_k"],
+                ),
+                make_concept_mention("Primary Key", mention_id="m2", concept_type="CONCEPT", aliases=["PK"]),
+                make_concept_mention("DPO", mention_id="m3", concept_type="METHOD"),
+            ]
+        )
+
+        self.assertEqual(3, len(resolution.registry_entries))
+
+    def test_concept_resolution_splits_oversized_auto_merge_hub_for_review(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention(
+                    f"Distinct Topic {index}",
+                    mention_id=f"m{index}",
+                    concept_type="CONCEPT",
+                    aliases=["Shared Hub"],
+                )
+                for index in range(9)
+            ]
+        )
+
+        self.assertEqual(9, len(resolution.registry_entries))
+        self.assertEqual(1, len(resolution.review_clusters))
+        self.assertIn("auto_group_safety_guard", resolution.review_clusters[0].risk_flags)
+
+    def test_concept_resolution_auto_merges_exact_repeated_dpo_name(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention("DPO", mention_id="m1", concept_type="METHOD"),
+                make_concept_mention("DPO", mention_id="m2", concept_type="METHOD"),
+            ]
+        )
+
+        self.assertEqual(1, len(resolution.registry_entries))
+        self.assertEqual("DPO", resolution.registry_entries[0].canonical_name)
+        self.assertEqual("auto_merged", resolution.registry_entries[0].merge_status)
+
+    def test_concept_resolution_auto_merges_dpo_with_safe_expansion_alias(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention(
+                    "DPO",
+                    mention_id="m1",
+                    concept_type="METHOD",
+                    aliases=["Direct Preference Optimization"],
+                ),
+                make_concept_mention(
+                    "Direct Preference Optimization",
+                    mention_id="m2",
+                    concept_type="METHOD",
+                    aliases=["DPO"],
+                ),
+            ]
+        )
+
+        self.assertEqual(1, len(resolution.registry_entries))
+        self.assertEqual("DPO", resolution.registry_entries[0].canonical_name)
 
     def test_concept_adjudication_can_merge_uncertain_cluster(self) -> None:
         resolution = build_concept_resolution_from_mentions(

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from llama_index.core.vector_stores import VectorStoreQueryResult
 
 from backend.configs.search import KnowledgeGraphSearchSettings
-from backend.workflows.agents.visualizer_retrieval import VisualizerRetrievalPipeline
+from backend.workflows.agents.visualizer_retrieval import ConceptCandidate, EdgeCandidate, VisualizerRetrievalPipeline
 
 
 class FakeEmbedder:
@@ -502,6 +502,48 @@ class VisualizerRetrievalPipelineTests(unittest.TestCase):
         self.assertEqual([], nodes)
         self.assertEqual([], triplets)
         self.assertEqual(["Unknown Topic"], queries)
+
+    def test_label_dedupe_collapses_exact_labels_without_using_aliases(self) -> None:
+        graph_store = FakeGraphStore([])
+        pipeline = VisualizerRetrievalPipeline(make_indexer(FakeVectorStore(), graph_store))
+        method = FakeGraphNode(
+            "concept_method",
+            "Logistic regression",
+            aliases=["Latent Diffusion Model"],
+            node_label="METHOD",
+        )
+        model = FakeGraphNode(
+            "concept_model",
+            "Latent Diffusion Model",
+            aliases=["Logistic regression"],
+            node_label="MODEL",
+        )
+        same_label_other_type = FakeGraphNode(
+            "concept_same_label_model",
+            "Logistic regression",
+            node_label="MODEL",
+        )
+        concepts = {
+            candidate.node_id: candidate
+            for candidate in [
+                ConceptCandidate("concept_method", method, "Logistic regression", 0.9),
+                ConceptCandidate("concept_model", model, "Latent Diffusion Model", 0.8),
+                ConceptCandidate("concept_same_label_model", same_label_other_type, "Logistic regression", 0.7),
+            ]
+        }
+        edges = {
+            ("concept_method", "COMPARES_TO", "concept_model"): EdgeCandidate(
+                "concept_method",
+                "COMPARES_TO",
+                "concept_model",
+                0.9,
+            )
+        }
+
+        merged_concepts, remapped_edges = pipeline._dedupe_concepts_by_label(concepts, edges)
+
+        self.assertEqual({"concept_method", "concept_model"}, set(merged_concepts))
+        self.assertEqual(("concept_method", "COMPARES_TO", "concept_model"), next(iter(remapped_edges)))
 
     def test_node_and_edge_budgets_are_enforced(self) -> None:
         settings = KnowledgeGraphSearchSettings(

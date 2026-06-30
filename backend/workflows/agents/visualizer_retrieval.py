@@ -748,18 +748,13 @@ class VisualizerRetrievalPipeline:
             candidate.label,
             properties.get("entity_name"),
             properties.get("display_name"),
-            *self._node_aliases(candidate.node),
         ]
         keys: set[str] = set()
         for value in raw_values:
             key = self._normalize_text(str(value or ""))
             if not key:
                 continue
-            if key == self._normalize_text(candidate.label):
-                keys.add(key)
-                continue
-            if len(key.split()) >= 2:
-                keys.add(key)
+            keys.add(key)
         return keys or {candidate.node_id}
 
     def _source_scope_for_concepts(self, concepts: list[ConceptCandidate]) -> set[str]:

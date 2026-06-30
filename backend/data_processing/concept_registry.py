@@ -23,15 +23,24 @@ SCHEMA_VERSION = "1.0"
 DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION = "v1"
 AUTO_MERGE_THRESHOLD = 0.90
 AUTO_SPLIT_THRESHOLD = 0.55
+AUTO_GROUP_MAX_DISTINCT_CANONICAL_NAMES = 8
+AUTO_GROUP_MAX_SOURCE_NAMES = 25
 
 NAME_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9+#]+")
 PUNCT_RE = re.compile(r"[^a-zа-яё0-9+#]+")
+FORMULA_SYMBOL_RE = re.compile(r"[$\\{}^=<>|~]|[∂∇∑∫√∞≈≠≤≥±×÷→←↔∆ΔΑ-ω]")
+SYMBOL_WITH_PARENS_RE = re.compile(r"^[A-Za-zА-Яа-яЁё]\s*\([^)]{1,12}\)$")
+SHORT_CODE_LIKE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+$")
 
 HIGH_RISK_FLAGS = {
     "acronym_ambiguity",
+    "auto_group_safety_guard",
+    "formula_or_symbol_alias",
     "modifier_scope_difference",
     "ocr_like_short_variant",
     "parent_child_candidate",
+    "short_symbolic_alias",
+    "type_broadening",
     "type_conflict",
 }
 GENERIC_TYPES = {"CONCEPT"}
@@ -69,6 +78,17 @@ GENERIC_NAMES = {
     "task",
     "tool",
     "view",
+}
+INVARIANT_SINGULAR_TOKENS = {
+    "analysis",
+    "bayes",
+    "bias",
+    "series",
+    "softplus",
+    "species",
+}
+INVARIANT_DISPLAY_NAMES = {
+    "bag of words",
 }
 
 
@@ -132,7 +152,6 @@ class ConceptMention(BaseModel):
                 self.canonical_name,
                 self.display_name,
                 *self.aliases,
-                *self.evidence_spans,
             ]
         )
 
@@ -328,6 +347,14 @@ def build_concept_resolution_from_mentions(mentions: Iterable[ConceptMention]) -
             auto_dsu.union(pair.source_mention_id, pair.target_mention_id)
 
     auto_groups = auto_dsu.groups()
+    guarded_groups = split_unsafe_auto_groups(auto_groups, mention_list)
+    auto_dsu = _DisjointSet(mention_ids)
+    for ids in guarded_groups.values():
+        first, *rest = ids
+        for mention_id in rest:
+            auto_dsu.union(first, mention_id)
+    auto_groups = auto_dsu.groups()
+    pair_scores = downgrade_guarded_auto_merge_pairs(pair_scores, auto_groups)
     review_clusters = build_uncertain_clusters(pair_scores, auto_dsu, auto_groups, mention_list)
     group_specs = []
     for root, ids in auto_groups.items():
@@ -406,6 +433,86 @@ def score_candidate_pairs(mentions: list[ConceptMention]) -> list[ConceptPairSco
     return [score for score in scores if score.recommended_action != ConceptPairAction.NO_MERGE]
 
 
+def split_unsafe_auto_groups(
+    auto_groups: dict[str, list[str]],
+    mentions: list[ConceptMention],
+) -> dict[str, list[str]]:
+    """Splits deterministic groups that look like transitive over-merges."""
+
+    mentions_by_id = {mention.mention_id: mention for mention in mentions}
+    guarded_groups: dict[str, list[str]] = {}
+    for root, ids in auto_groups.items():
+        group_mentions = [mentions_by_id[mention_id] for mention_id in ids]
+        if not auto_group_needs_safety_split(group_mentions):
+            guarded_groups[root] = ids
+            continue
+        by_safe_key: dict[str, list[str]] = defaultdict(list)
+        for mention in group_mentions:
+            by_safe_key[auto_group_safety_key(mention)].append(mention.mention_id)
+        for index, split_ids in enumerate(by_safe_key.values()):
+            guarded_groups[f"{root}:guarded:{index}"] = sorted(split_ids)
+    return guarded_groups
+
+
+def downgrade_guarded_auto_merge_pairs(
+    pair_scores: list[ConceptPairScore],
+    auto_groups: dict[str, list[str]],
+) -> list[ConceptPairScore]:
+    root_by_mention_id = {
+        mention_id: root
+        for root, mention_ids in auto_groups.items()
+        for mention_id in mention_ids
+    }
+    guarded_scores: list[ConceptPairScore] = []
+    for pair in pair_scores:
+        if (
+            pair.recommended_action == ConceptPairAction.AUTO_MERGE
+            and root_by_mention_id.get(pair.source_mention_id) != root_by_mention_id.get(pair.target_mention_id)
+        ):
+            guarded_scores.append(
+                pair.model_copy(
+                    update={
+                        "risk_flags": unique_preserving_order(
+                            [*pair.risk_flags, "auto_group_safety_guard"]
+                        ),
+                        "recommended_action": ConceptPairAction.LLM_ADJUDICATE,
+                    }
+                )
+            )
+            continue
+        guarded_scores.append(pair)
+    return guarded_scores
+
+
+def auto_group_needs_safety_split(mentions: list[ConceptMention]) -> bool:
+    if len(mentions) < 2:
+        return False
+    concrete_types = {mention.type for mention in mentions if mention.type not in GENERIC_TYPES}
+    if len(concrete_types) > 1:
+        return True
+    canonical_keys = {
+        singularize_normalized_name(normalize_name(mention.canonical_name))
+        for mention in mentions
+        if normalize_name(mention.canonical_name)
+    }
+    if len(canonical_keys) > AUTO_GROUP_MAX_DISTINCT_CANONICAL_NAMES:
+        return True
+    source_name_keys = {
+        normalize_name(name)
+        for mention in mentions
+        for name in mention.source_names()
+        if normalize_name(name)
+    }
+    return len(source_name_keys) > AUTO_GROUP_MAX_SOURCE_NAMES
+
+
+def auto_group_safety_key(mention: ConceptMention) -> str:
+    primary = singularize_normalized_name(normalize_name(mention.canonical_name))
+    if not primary:
+        primary = mention.mention_id
+    return f"{mention.type}:{primary}"
+
+
 def score_concept_pair(left: ConceptMention, right: ConceptMention) -> ConceptPairScore:
     signals: list[str] = []
     risk_flags: list[str] = []
@@ -415,15 +522,20 @@ def score_concept_pair(left: ConceptMention, right: ConceptMention) -> ConceptPa
     right_primary = normalize_name(right.canonical_name)
     left_forms = concept_name_forms(left)
     right_forms = concept_name_forms(right)
+    exact_primary_match = bool(left_primary and left_primary == right_primary)
+    exact_alias_match = bool(left_forms["normalized"] & right_forms["normalized"])
+    singular_match = bool(left_forms["singular"] & right_forms["singular"])
 
-    if left_primary and left_primary == right_primary:
+    if exact_primary_match:
         score = max(score, 0.98)
         signals.append("exact_normalized_name")
-    elif left_forms["normalized"] & right_forms["normalized"]:
+        if not is_safe_primary_name(left.canonical_name) or not is_safe_primary_name(right.canonical_name):
+            risk_flags.append("short_symbolic_alias")
+    elif exact_alias_match:
         score = max(score, 0.95)
         signals.append("exact_alias_match")
 
-    if left_forms["singular"] & right_forms["singular"]:
+    if singular_match:
         score = max(score, 0.93)
         signals.append("singular_plural_variant")
 
@@ -435,6 +547,8 @@ def score_concept_pair(left: ConceptMention, right: ConceptMention) -> ConceptPa
     if acronym_match:
         score = max(score, 0.92)
         signals.append("acronym_match")
+        if not exact_primary_match and not exact_alias_match and not singular_match:
+            risk_flags.append("acronym_ambiguity")
 
     if left_forms["ocr_short"] & right_forms["ocr_short"] and not (
         left_forms["acronym"] & right_forms["acronym"]
@@ -1011,6 +1125,8 @@ def singularize_normalized_name(value: str) -> str:
 def singularize_token(token: str) -> str:
     if len(token) <= 3:
         return token
+    if token in INVARIANT_SINGULAR_TOKENS:
+        return token
     if token.endswith("ies") and len(token) > 4:
         return token[:-3] + "y"
     if token.endswith("ices") and len(token) > 5:
@@ -1045,17 +1161,19 @@ def content_tokens(value: str) -> set[str]:
 
 def concept_name_forms(mention: ConceptMention) -> dict[str, set[str]]:
     source_names = mention.source_names()
-    normalized = {normalize_name(name) for name in source_names}
+    merge_names = [name for name in source_names if is_merge_safe_name(name)]
+    normalized = {normalize_name(name) for name in merge_names}
     normalized = {name for name in normalized if name}
     singular = {singularize_normalized_name(name) for name in normalized}
     derivational = {derivational_normalize(name) for name in normalized}
     acronym = set()
     expansion_acronym = set()
     ocr_short = set()
-    for original_name, normalized_name in zip(source_names, [normalize_name(name) for name in source_names]):
+    for original_name in source_names:
         maybe_acronym = acronym_key(original_name)
         if maybe_acronym:
             acronym.add(maybe_acronym)
+    for original_name, normalized_name in zip(merge_names, [normalize_name(name) for name in merge_names]):
         expansion = acronym_from_expansion(normalized_name)
         if expansion:
             expansion_acronym.add(expansion)
@@ -1075,6 +1193,9 @@ def concept_name_forms(mention: ConceptMention) -> dict[str, set[str]]:
 def blocking_keys(mention: ConceptMention) -> set[str]:
     forms = concept_name_forms(mention)
     keys: set[str] = set()
+    primary = normalize_name(mention.canonical_name)
+    if primary and is_safe_primary_name(mention.canonical_name):
+        keys.add(f"primary:{primary}")
     for family in ("normalized", "singular", "derivational", "acronym", "expansion_acronym", "ocr_short"):
         for value in forms[family]:
             if value:
@@ -1086,12 +1207,53 @@ def blocking_keys(mention: ConceptMention) -> set[str]:
 
 
 def acronym_key(value: str) -> Optional[str]:
+    if is_formula_like_name(value):
+        return None
     compact = re.sub(r"[^A-Za-z0-9]", "", value)
     if not (2 <= len(compact) <= 8):
         return None
     if compact.upper() == compact and any(char.isalpha() for char in compact):
         return compact.upper()
     return None
+
+
+def is_safe_primary_name(value: str) -> bool:
+    if is_formula_like_name(value):
+        return False
+    compact = re.sub(r"[^a-zа-яё0-9+#]+", "", normalize_name(value))
+    if len(compact) >= 4:
+        return True
+    return acronym_key(value) is not None
+
+
+def is_merge_safe_name(value: str) -> bool:
+    if is_formula_like_name(value):
+        return False
+    normalized = normalize_name(value)
+    if not normalized:
+        return False
+    compact = re.sub(r"[^a-zа-яё0-9+#]+", "", normalized)
+    if len(compact) < 4:
+        return False
+    return True
+
+
+def is_formula_like_name(value: str) -> bool:
+    raw = normalize_whitespace(value)
+    if not raw:
+        return True
+    if FORMULA_SYMBOL_RE.search(raw):
+        return True
+    if SYMBOL_WITH_PARENS_RE.fullmatch(raw):
+        return True
+    if SHORT_CODE_LIKE_RE.fullmatch(raw) and len(raw) <= 16:
+        return True
+    tokens = NAME_TOKEN_RE.findall(raw)
+    if len(tokens) > 8:
+        return True
+    if len(tokens) > 3 and re.search(r"[.!?;:]", raw):
+        return True
+    return False
 
 
 def acronym_from_expansion(value: str) -> Optional[str]:
@@ -1131,6 +1293,8 @@ def choose_canonical_name(mentions: list[ConceptMention]) -> str:
 def canonicalize_display_name(value: str) -> str:
     value = normalize_whitespace(value)
     if not value:
+        return value
+    if normalize_name(value) in INVARIANT_DISPLAY_NAMES:
         return value
     tokens = value.split()
     if not tokens:
