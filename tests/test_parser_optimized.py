@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -21,6 +22,17 @@ from backend.data_processing.parser_optimized import (  # noqa: E402
     extract_url_matches,
     normalize_nfc,
     stable_id,
+)
+from backend.data_processing.parser_outputs import (  # noqa: E402
+    ARTIFACT_GATE_DECISIONS_FILENAME,
+    BLOCKS_FILENAME,
+    COMPARISON_FILENAME,
+    EXTERNAL_RESOURCES_FILENAME,
+    PARSED_ARTIFACTS_FILENAME,
+    RETRIEVAL_CHUNKS_FILENAME,
+    SOURCE_DOCUMENTS_FILENAME,
+    SUMMARY_FILENAME,
+    write_optimized_parser_ir,
 )
 
 
@@ -502,6 +514,7 @@ class OptimizedParserTest(unittest.TestCase):
         self.assertIs(parser.storage_settings, storage_settings)
         self.assertFalse(parser.prepare_external_artifacts_enabled)
         self.assertFalse(parser.copy_existing_artifacts_enabled)
+        self.assertIsNone(parser.existing_artifacts_dir)
         self.assertFalse(parser.write_ir)
         self.assertIsNone(parser.kg_storage)
 
@@ -532,10 +545,11 @@ class OptimizedParserTest(unittest.TestCase):
                 storage_settings,
                 prepare_external_artifacts=False,
                 copy_existing_artifacts=True,
+                existing_artifacts_dir=source_dir,
                 write_ir=False,
             )
 
-            copied = parser.copy_existing_artifacts(source_dir=source_dir)
+            copied = parser.copy_existing_artifacts()
 
             self.assertEqual(copied, 2)
             self.assertEqual(parser.last_copied_artifact_count, 2)
@@ -568,6 +582,127 @@ class OptimizedParserTest(unittest.TestCase):
 
             self.assertEqual(copied, 0)
             self.assertFalse(target_dir.exists() and list(target_dir.rglob("*.md")))
+
+    def test_write_optimized_parser_ir_writes_expected_sidecars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw" / "AI Research"
+            raw_dir.mkdir(parents=True)
+            (raw_dir / "Source.md").write_text(
+                "#### Topic\n- This source has enough content to become a retrieval chunk.\n",
+                encoding="utf-8",
+            )
+
+            result = OptimizedRemNoteParser(raw_dir).run()
+            output_dir = write_optimized_parser_ir(root / "optimized_parser_ir", result)
+
+            expected_files = {
+                SUMMARY_FILENAME,
+                SOURCE_DOCUMENTS_FILENAME,
+                BLOCKS_FILENAME,
+                EXTERNAL_RESOURCES_FILENAME,
+                PARSED_ARTIFACTS_FILENAME,
+                ARTIFACT_GATE_DECISIONS_FILENAME,
+                RETRIEVAL_CHUNKS_FILENAME,
+                COMPARISON_FILENAME,
+            }
+            self.assertEqual({path.name for path in output_dir.iterdir()}, expected_files)
+            summary = json.loads((output_dir / SUMMARY_FILENAME).read_text(encoding="utf-8"))
+            chunks = (output_dir / RETRIEVAL_CHUNKS_FILENAME).read_text(encoding="utf-8").splitlines()
+            self.assertEqual(summary["retrieval_chunk_count"], len(chunks))
+
+    def test_three_source_regression_preserves_core_parser_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw" / "AI Research"
+            parsed_images = root / "parsed_images"
+            parsed_pdfs = root / "parsed_pdfs"
+            parsed_texts = root / "parsed_texts"
+            raw_dir.mkdir(parents=True)
+            parsed_images.mkdir(parents=True)
+            parsed_pdfs.mkdir(parents=True)
+            parsed_texts.mkdir(parents=True)
+
+            (parsed_pdfs / "Alice_paper.md").write_text(
+                "Differentiable Wonderland paper notes about neural networks and optimization.",
+                encoding="utf-8",
+            )
+            (parsed_images / "Embedding_Diagram.md").write_text(
+                "Vector embedding diagram explaining word contexts and dense semantic spaces.",
+                encoding="utf-8",
+            )
+            (parsed_texts / "Decision_tree_notes.md").write_text(
+                "Decision tree artifact text about feature splits, entropy, and information gain.",
+                encoding="utf-8",
+            )
+            alice_source = (
+                raw_dir
+                / "[2404.17625] Alice's Adventures in a Differentiable Wonderland -- Volume I, A Tour of the Land.md"
+            )
+            alice_source.write_text(
+                "\n".join(
+                    [
+                        "#### Alice's Adventures in a Differentiable Wonderland",
+                        (
+                            "- Read the [Alice paper](https://example.test/Alice_paper.pdf) "
+                            "for neural network optimization examples."
+                        ),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (raw_dir / "Word Embeddings.md").write_text(
+                "\n".join(
+                    [
+                        "#### Word Embeddings",
+                        "- Dense vector spaces represent words by context.",
+                        "- ![Embedding Diagram](https://remnote-user-data.s3.amazonaws.com/Embedding_Diagram.png)",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (raw_dir / "почитать про деревья решений.md").write_text(
+                "\n".join(
+                    [
+                        "#### Деревья решений",
+                        (
+                            "- Дерево решений выбирает признаки для разбиения "
+                            "и объясняет структуру классификации."
+                        ),
+                        (
+                            "- Нужно почитать про критерии разбиения и "
+                            "[Decision tree notes](https://example.test/Decision_tree_notes.html)."
+                        ),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = OptimizedRemNoteParser(
+                raw_dir,
+                parsed_roots=[parsed_images, parsed_pdfs, parsed_texts],
+            ).run()
+
+        self.assertEqual(len(result.source_documents), 3)
+        self.assertEqual(result.summary["raw_url_occurrences"], 3)
+        self.assertEqual(result.summary["parser_visible_url_resources"], 3)
+        self.assertEqual(result.summary["parsed_artifact_count"], 3)
+        self.assertTrue(result.summary["success_criteria"]["raw_url_count_equals_parser_visible"])
+        self.assertTrue(result.summary["success_criteria"]["all_chunks_have_provenance"])
+        self.assertTrue(result.summary["success_criteria"]["no_mixed_source_chunks"])
+        self.assertEqual(result.summary["placeholder_only_chunk_count"], 0)
+        self.assertEqual(result.summary["resource_only_chunk_count"], 0)
+        self.assertEqual(result.summary["header_only_chunk_count"], 0)
+        self.assertEqual(result.summary["external_artifact_chunk_count"], 3)
+        self.assertTrue(any("Дерево решений" in chunk.text for chunk in result.retrieval_chunks))
+        self.assertTrue(
+            any("Деревья решений" in " ".join(chunk.path) for chunk in result.retrieval_chunks)
+        )
+        artifact_paths = {Path(artifact.artifact_path).name for artifact in result.parsed_artifacts}
+        self.assertEqual(
+            artifact_paths,
+            {"Alice_paper.md", "Embedding_Diagram.md", "Decision_tree_notes.md"},
+        )
 
     @unittest.skipUnless(LLAMA_INDEX_AVAILABLE, "LlamaIndex is not installed in this environment")
     def test_drop_in_wrapper_writes_retrieval_chunks_to_local_docstore(self) -> None:

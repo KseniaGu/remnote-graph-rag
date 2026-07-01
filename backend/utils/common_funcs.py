@@ -4,10 +4,7 @@ import os
 import pickle
 import threading
 from pathlib import Path
-from typing import Any
-
-import structlog
-import yaml
+from typing import Any, Iterable
 
 
 def write_file(file: Any, path: Path):
@@ -31,6 +28,32 @@ def write_file(file: Any, path: Path):
         raise ValueError(f"Unsupported extension: {extension} (.pickle, .txt, .md, .json are only available for now)")
 
 
+def write_json(path: Path, payload: Any) -> None:
+    """Writes an indented UTF-8 JSON file.
+
+    Args:
+        path: Path where the JSON file should be written.
+        payload: JSON-serializable data to write.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def write_jsonl(path: Path, rows: Iterable[Any]) -> None:
+    """Writes JSON Lines data to a UTF-8 file.
+
+    Args:
+        path: Path where the JSONL file should be written.
+        rows: JSON-serializable rows to write.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def read_file(path: Path) -> Any:
     """Reads data from a file with the specified format.
 
@@ -46,6 +69,8 @@ def read_file(path: Path) -> Any:
             with open(path, "rb") as f:
                 file = pickle.load(f)
         elif extension == ".yaml":
+            import yaml
+
             with open(path, "r") as f:
                 file = yaml.safe_load(f)
         elif extension == ".txt":
@@ -65,17 +90,10 @@ def read_file(path: Path) -> Any:
 _configure_lock = threading.Lock()
 _configured = False
 
-_shared_processors = [
-    structlog.stdlib.add_log_level,
-    structlog.stdlib.add_logger_name,
-    structlog.processors.TimeStamper(fmt="iso"),
-    structlog.processors.StackInfoRenderer(),
-    structlog.processors.ExceptionRenderer(),
-]
-
-
 def _configure_logging() -> None:
     """Configures structlog globally with async-compatible JSON output."""
+    import structlog
+
     global _configured
     if _configured:
         return
@@ -83,6 +101,13 @@ def _configure_logging() -> None:
         if _configured:
             return
 
+        shared_processors = [
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.ExceptionRenderer(),
+        ]
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(
             structlog.stdlib.ProcessorFormatter(
@@ -90,7 +115,7 @@ def _configure_logging() -> None:
                     structlog.stdlib.ProcessorFormatter.remove_processors_meta,
                     structlog.processors.JSONRenderer(),
                 ],
-                foreign_pre_chain=_shared_processors,
+                foreign_pre_chain=shared_processors,
             )
         )
 
@@ -100,7 +125,7 @@ def _configure_logging() -> None:
         structlog.configure(
             processors=[
                 structlog.contextvars.merge_contextvars,
-                *_shared_processors,
+                *shared_processors,
                 structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
             ],
             logger_factory=structlog.stdlib.LoggerFactory(),
@@ -111,11 +136,13 @@ def _configure_logging() -> None:
         _configured = True
 
 
-def get_logger(name: str = __name__) -> structlog.stdlib.BoundLogger:
+def get_logger(name: str = __name__) -> Any:
     """Gets a configured structlog bound logger that emits structured JSON log lines.
 
     Args:
         name: The name of the logger. Defaults to the module name.
     """
+    import structlog
+
     _configure_logging()
     return structlog.get_logger(name)

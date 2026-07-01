@@ -70,6 +70,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-parse", action="store_true")
     parser.add_argument("--copy-existing-artifacts", action="store_true")
     parser.add_argument(
+        "--existing-artifacts-dir",
+        type=Path,
+        default=None,
+        help="Directory of reviewed cached artifact Markdown files to copy when --copy-existing-artifacts is used.",
+    )
+    parser.add_argument(
         "--prepare-external-artifacts",
         dest="prepare_external_artifacts",
         action="store_true",
@@ -161,6 +167,8 @@ def validate_args(args: argparse.Namespace) -> None:
     )
     if args.concept_resolution_mode == "llm" and args.concept_resolution_limit == 0 and not args.allow_full_run:
         raise SystemExit("--concept-resolution-limit 0 means all clusters and requires --allow-full-run")
+    if args.copy_existing_artifacts and args.existing_artifacts_dir is None:
+        raise SystemExit("--copy-existing-artifacts requires --existing-artifacts-dir")
     if args.num_predict <= 0:
         raise SystemExit("--num-predict must be > 0")
     for name in ("quality_num_predict", "graph_num_predict", "concept_resolution_num_predict"):
@@ -207,6 +215,7 @@ def run_optimized_parse(args: argparse.Namespace) -> Path:
         storage_settings,
         prepare_external_artifacts=args.prepare_external_artifacts,
         copy_existing_artifacts=args.copy_existing_artifacts,
+        existing_artifacts_dir=args.existing_artifacts_dir,
         force_rebuild=args.force_rebuild_staging,
         write_ir=True,
     )

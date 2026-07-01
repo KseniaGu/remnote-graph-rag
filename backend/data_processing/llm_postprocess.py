@@ -37,6 +37,7 @@ from backend.data_processing.parser_optimized import (
     RetrievalChunk,
     normalize_nfc,
 )
+from backend.utils.common_funcs import write_json, write_jsonl
 
 
 SCHEMA_VERSION = "1.1"
@@ -1869,18 +1870,6 @@ def load_concept_resolution_sidecars(output_dir: Path) -> Optional[ConceptResolu
             for row in read_jsonl_if_exists(output_dir / CONCEPT_ADJUDICATION_FAILURES_FILENAME)
         ],
     )
-
-
-def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-
-def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _model_or_dataclass_to_dict(value: RetrievalChunk | ExternalResource | ArtifactGateDecision) -> dict[str, Any]:

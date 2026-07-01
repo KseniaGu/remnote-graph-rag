@@ -8,15 +8,20 @@ and cached external parse artifacts into a typed intermediate representation.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-import shutil
 import unicodedata
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+from backend.data_processing.parser_outputs import (
+    result_to_jsonable,
+    write_comparison_markdown,
+    write_optimized_parser_ir,
+)
+from backend.utils.common_funcs import write_json, write_jsonl
 
 
 REMNOTE_IMAGE_HOST_MARKER = "remnote-user-data.s3.amazonaws.com"
@@ -54,6 +59,24 @@ FORMULA_WORDS = {
 }
 HTML_WORDS = {"alt", "center", "div", "height", "image", "img", "src", "style", "text-align", "width"}
 QUALITY_TOKEN_RE = re.compile(r"[A-Za-zΑ-Ωα-ωА-Яа-яЁё][A-Za-zΑ-Ωα-ωА-Яа-яЁё'-]{1,}")
+
+__all__ = [
+    "ArtifactGateDecision",
+    "CachedArtifactResolver",
+    "ExternalResource",
+    "OptimizedParseResult",
+    "OptimizedRemNoteParser",
+    "ParsedArtifact",
+    "RemNoteBlock",
+    "RemNoteParserOptimized",
+    "RetrievalChunk",
+    "SourceDocument",
+    "UrlMatch",
+    "result_to_jsonable",
+    "write_comparison_markdown",
+    "write_json",
+    "write_jsonl",
+]
 
 
 @dataclass(frozen=True)
@@ -191,7 +214,7 @@ class ChunkCandidate:
 
 @dataclass
 class OptimizedParseResult:
-    """Complete output of the shadow ingestion experiment."""
+    """Completes output of the shadow ingestion experiment."""
 
     source_documents: list[SourceDocument]
     blocks: list[RemNoteBlock]
@@ -203,7 +226,7 @@ class OptimizedParseResult:
 
 
 def normalize_nfc(value: str) -> str:
-    """Normalize user/export text for stable metadata and comparisons."""
+    """Normalizes user/export text for stable metadata and comparisons."""
 
     return unicodedata.normalize("NFC", value)
 
@@ -247,7 +270,7 @@ def clean_text(text: str) -> str:
 
 
 def extract_url_matches(line: str) -> list[UrlMatch]:
-    """Extract all Markdown and raw URLs from a single line."""
+    """Extracts all Markdown and raw URLs from a single line."""
 
     matches: list[UrlMatch] = []
     occupied_spans: list[tuple[int, int]] = []
@@ -291,7 +314,7 @@ def extract_url_matches(line: str) -> list[UrlMatch]:
 
 
 def infer_depth(stripped_line: str, found_headers: set[int], indent_level: int, header_bonus: Optional[int]) -> tuple[int, Optional[int]]:
-    """Mirror the production parser's depth heuristic without touching it."""
+    """Mirrors the production parser's depth heuristic without touching it."""
 
     header_match = HEADER_RE.search(stripped_line)
     if header_match:
@@ -569,7 +592,7 @@ def unique_preserving_order(values: Iterable[str]) -> list[str]:
 
 
 class CachedArtifactResolver:
-    """Resolve external URLs to already cached parse artifacts without network I/O."""
+    """Resolves external URLs to already cached parse artifacts without network I/O."""
 
     def __init__(self, parsed_roots: Iterable[Path]):
         self._by_name: dict[str, Path] = {}
@@ -613,7 +636,7 @@ class CachedArtifactResolver:
 
 
 class OptimizedRemNoteParser:
-    """Shadow parser that produces provenance blocks and retrieval chunks."""
+    """Shadows parser that produces provenance blocks and retrieval chunks."""
 
     def __init__(self, raw_data_dir: Path, parsed_roots: Iterable[Path] = ()):
         self.raw_data_dir = Path(raw_data_dir)
@@ -1442,6 +1465,7 @@ class RemNoteParserOptimized:
         *,
         prepare_external_artifacts: bool = True,
         copy_existing_artifacts: bool = False,
+        existing_artifacts_dir: Optional[Path] = None,
         force_rebuild: bool = False,
         write_ir: bool = True,
     ) -> None:
@@ -1449,6 +1473,7 @@ class RemNoteParserOptimized:
         self.storage_settings = storage_settings
         self.prepare_external_artifacts_enabled = prepare_external_artifacts
         self.copy_existing_artifacts_enabled = copy_existing_artifacts
+        self.existing_artifacts_dir = existing_artifacts_dir
         self.force_rebuild = force_rebuild
         self.write_ir = write_ir
         self.kg_storage: Any = None
@@ -1458,30 +1483,15 @@ class RemNoteParserOptimized:
         self.last_copied_artifact_count = 0
         self.last_prepared_artifact_count = 0
 
-    @staticmethod
-    def _repo_root() -> Path:
-        return Path(__file__).resolve().parents[2]
-
-    def _default_existing_artifact_source_dir(self) -> Optional[Path]:
-        test_root = self._repo_root() / "data" / "testing" / "six-source-parse"
-        raw_data_dir = Path(self.path_settings.raw_data_dir)
-        try:
-            raw_data_dir.resolve().relative_to((test_root / "raw").resolve())
-        except ValueError:
-            return None
-        return test_root / "parsed_images"
-
     def _parsed_roots(self) -> list[Path]:
-        roots: list[Path] = []
-        for attr in ("parsed_images_dir", "parsed_pdfs_dir", "parsed_texts_dir"):
-            value = getattr(self.path_settings, attr, None)
-            if value is not None:
-                roots.append(Path(value))
-        return roots
+        from backend.data_processing.artifact_preparation import parsed_roots_from_settings
+
+        return parsed_roots_from_settings(self.path_settings)
 
     def _ensure_parsed_dirs(self) -> None:
-        for root in self._parsed_roots():
-            root.mkdir(parents=True, exist_ok=True)
+        from backend.data_processing.artifact_preparation import ensure_parsed_dirs
+
+        ensure_parsed_dirs(self.path_settings)
 
     def _ensure_storage(self) -> Any:
         if self.kg_storage is None:
@@ -1529,29 +1539,10 @@ class RemNoteParserOptimized:
         and existing non-empty target files are left intact.
         """
 
-        default_source = self._default_existing_artifact_source_dir()
-        source_root = Path(source_dir) if source_dir is not None else default_source
-        target_root = Path(self.path_settings.parsed_images_dir)
-        if source_root is None or not source_root.exists():
-            return 0
-        try:
-            if source_root.resolve() == target_root.resolve():
-                return 0
-        except OSError:
-            pass
+        from backend.data_processing.artifact_preparation import copy_existing_artifacts
 
-        target_root.mkdir(parents=True, exist_ok=True)
-        copied = 0
-        for source_path in sorted(source_root.rglob("*.md")):
-            if not source_path.is_file():
-                continue
-            relative_path = source_path.relative_to(source_root)
-            target_path = target_root / relative_path
-            if target_path.exists() and target_path.stat().st_size > 0:
-                continue
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_path, target_path)
-            copied += 1
+        configured_source = source_dir if source_dir is not None else self.existing_artifacts_dir
+        copied = copy_existing_artifacts(configured_source, Path(self.path_settings.parsed_images_dir))
         self.last_copied_artifact_count = copied
         return copied
 
@@ -1570,72 +1561,12 @@ class RemNoteParserOptimized:
         have been created.
         """
 
-        self._ensure_parsed_dirs()
-        preliminary = OptimizedRemNoteParser(
-            Path(self.path_settings.raw_data_dir),
-            parsed_roots=self._parsed_roots(),
-        ).run()
-        unresolved_resources = [
-            resource for resource in preliminary.external_resources if resource.parse_status == "not_resolved"
-        ]
-        if not unresolved_resources:
-            self.last_prepared_artifact_count = 0
-            return 0
+        from backend.data_processing.artifact_preparation import prepare_external_artifacts
 
-        import requests
-
-        from backend.configs.enums import ImageParsingStatus, PDFParsingStatus, TextParsingStatus
-        from backend.data_processing.utils import save_image_by_url, save_pdf_by_url, save_text_by_url
-
-        prepared_count = 0
-        for resource in unresolved_resources:
-            try:
-                response = requests.get(resource.url, timeout=30)
-                response.raise_for_status()
-                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
-                artifact_path: Optional[Path] = None
-
-                if "image" in content_type or resource.content_type_hint == "image":
-                    status, saved_file_path = save_image_by_url(
-                        response,
-                        content_type or "image/jpeg",
-                        resource.label,
-                        resource.url,
-                        Path(self.path_settings.parsed_images_dir),
-                    )
-                    if status in (ImageParsingStatus.file_exists, ImageParsingStatus.success) and not is_bad_artifact_path(
-                        str(saved_file_path)
-                    ):
-                        artifact_path = self._get_ocr_pipeline().parse_image(saved_file_path)
-
-                elif "pdf" in content_type or resource.content_type_hint == "application/pdf":
-                    status, saved_file_path = save_pdf_by_url(
-                        response,
-                        resource.label,
-                        resource.url,
-                        Path(self.path_settings.parsed_pdfs_dir),
-                    )
-                    if status in (PDFParsingStatus.file_exists, PDFParsingStatus.success) and not is_bad_artifact_path(
-                        str(saved_file_path)
-                    ):
-                        artifact_path = self._get_ocr_pipeline().parse_pdf(saved_file_path)
-
-                elif content_type.startswith("text/") or content_type in {"application/xhtml+xml", "application/xml"}:
-                    status, saved_file_path = save_text_by_url(
-                        resource.label,
-                        resource.url,
-                        Path(self.path_settings.parsed_texts_dir),
-                    )
-                    if status in (TextParsingStatus.file_exists, TextParsingStatus.success) and not is_bad_artifact_path(
-                        str(saved_file_path)
-                    ):
-                        artifact_path = saved_file_path
-
-                if artifact_path and Path(artifact_path).exists():
-                    prepared_count += 1
-            except Exception:
-                continue
-
+        prepared_count = prepare_external_artifacts(
+            self.path_settings,
+            get_ocr_pipeline=self._get_ocr_pipeline,
+        )
         self.last_prepared_artifact_count = prepared_count
         return prepared_count
 
@@ -1646,17 +1577,7 @@ class RemNoteParserOptimized:
         ).run()
 
     def _write_ir_outputs(self, result: OptimizedParseResult) -> Path:
-        output_root = self.optimized_ir_dir
-        jsonable = result_to_jsonable(result)
-        write_json(output_root / "summary.json", result.summary)
-        write_jsonl(output_root / "source_documents.jsonl", jsonable["source_documents"])
-        write_jsonl(output_root / "blocks.jsonl", jsonable["blocks"])
-        write_jsonl(output_root / "external_resources.jsonl", jsonable["external_resources"])
-        write_jsonl(output_root / "parsed_artifacts.jsonl", jsonable["parsed_artifacts"])
-        write_jsonl(output_root / "artifact_gate_decisions.jsonl", jsonable["artifact_gate_decisions"])
-        write_jsonl(output_root / "retrieval_chunks.jsonl", jsonable["retrieval_chunks"])
-        write_comparison_markdown(output_root / "comparison.md", result.summary)
-        return output_root
+        return write_optimized_parser_ir(self.optimized_ir_dir, result)
 
     def write_ir_outputs(self, result: OptimizedParseResult) -> Path:
         """Write optimized parser IR files and return the output directory."""
@@ -1874,7 +1795,7 @@ class RemNoteParserOptimized:
                 )
 
     def to_text_nodes(self, result: OptimizedParseResult) -> list[Any]:
-        """Convert accepted RetrievalChunk records to LlamaIndex TextNodes."""
+        """Converts accepted RetrievalChunk records to LlamaIndex TextNodes."""
 
         text_node_cls, node_relationship, related_node_info = self._llama_index_schema()
         resources_by_id = {resource.id: resource for resource in result.external_resources}
@@ -1901,7 +1822,7 @@ class RemNoteParserOptimized:
         return nodes
 
     def get_text_nodes(self) -> list[Any]:
-        """Build optimized retrieval TextNodes from raw RemNote Markdown and cached artifacts."""
+        """Builds optimized retrieval TextNodes from raw RemNote Markdown and cached artifacts."""
 
         self._ensure_parsed_dirs()
         if self.copy_existing_artifacts_enabled:
@@ -1916,7 +1837,7 @@ class RemNoteParserOptimized:
         return self.to_text_nodes(result)
 
     def add_text_nodes(self, text_nodes: list[Any], allow_update: bool = True) -> None:
-        """Add optimized retrieval TextNodes to the configured LlamaIndex docstore."""
+        """Adds optimized retrieval TextNodes to the configured LlamaIndex docstore."""
 
         kg_storage = self._ensure_storage()
         if not text_nodes:
@@ -1925,7 +1846,7 @@ class RemNoteParserOptimized:
         self._persist_if_local()
 
     def run(self) -> Optional[OptimizedParseResult]:
-        """Run the optimized shadow parsing pipeline with production-parser idempotency."""
+        """Runs the optimized shadow parsing pipeline with production-parser idempotency."""
 
         if self._docstore_docs():
             if not self.force_rebuild:
@@ -1936,113 +1857,3 @@ class RemNoteParserOptimized:
         self.add_text_nodes(text_nodes)
         assert self._docstore_docs(), "No docs found in the docstore"
         return self.last_result
-
-
-def result_to_jsonable(result: OptimizedParseResult) -> dict[str, Any]:
-    return {
-        "source_documents": [asdict(item) for item in result.source_documents],
-        "blocks": [asdict(item) for item in result.blocks],
-        "external_resources": [asdict(item) for item in result.external_resources],
-        "parsed_artifacts": [asdict(item) for item in result.parsed_artifacts],
-        "artifact_gate_decisions": [asdict(item) for item in result.artifact_gate_decisions],
-        "retrieval_chunks": [asdict(item) for item in result.retrieval_chunks],
-        "summary": result.summary,
-    }
-
-
-def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def write_jsonl(path: Path, rows: Iterable[Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-
-def write_comparison_markdown(path: Path, summary: dict[str, Any]) -> None:
-    criteria = summary["success_criteria"]
-    baseline = summary["baseline_comparison"]
-    lines = [
-        "# Optimized Shadow Ingestion Comparison",
-        "",
-        "## Counts",
-        "",
-        "| Metric | Optimized | Baseline |",
-        "|---|---:|---:|",
-        f"| Raw URL occurrences | {summary['raw_url_occurrences']} | {baseline.get('baseline_raw_url_total_in_selected_files')} |",
-        f"| Parser-visible URL resources | {summary['parser_visible_url_resources']} | {baseline.get('baseline_parser_visible_url_candidate_nodes')} |",
-        f"| Multi-URL gap | {summary['raw_url_occurrences'] - summary['parser_visible_url_resources']} | {baseline.get('baseline_multi_url_line_gap_count')} |",
-        f"| Tiny retrieval chunks / nodes | {summary['standalone_tiny_chunk_count']} | {baseline.get('baseline_tiny_node_count_len_1_to_3')} |",
-        f"| Duplicate retrieval text keys | {summary['duplicate_retrieval_chunk_text_keys']} | {baseline.get('baseline_duplicate_source_text_keys')} |",
-        f"| Header-only retrieval chunks | {summary['header_only_chunk_count']} | n/a |",
-        f"| Orphan list-parent chunks | {summary['orphan_list_parent_chunk_count']} | n/a |",
-        f"| Split list-item subtrees | {summary['split_list_item_subtree_count']} | n/a |",
-        f"| Resource-only retrieval chunks | {summary['resource_only_chunk_count']} | n/a |",
-        f"| Mixed-source retrieval chunks | {summary['mixed_source_retrieval_chunk_count']} | n/a |",
-        f"| Image binaries selected despite md sibling | {summary['image_binary_selected_despite_md_sibling_count']} | n/a |",
-        f"| Code-fence marker lines | {summary['code_fence_marker_line_count']} | n/a |",
-        f"| Dataset artifacts metadata-only | {summary['dataset_artifact_metadata_only_count']} | n/a |",
-        f"| URL mismatch artifacts quarantined | {summary['url_mismatch_quarantine_count']} | n/a |",
-        f"| Duplicate artifacts metadata-only | {summary['duplicate_artifact_metadata_only_count']} | n/a |",
-        f"| Low-quality OCR artifacts quarantined | {summary['low_quality_ocr_quarantine_count']} | n/a |",
-        f"| External artifact chunks | {summary['external_artifact_chunk_count']} | n/a |",
-        f"| External artifact chunks with RemNote context | {summary['external_artifact_chunks_with_context_count']} | n/a |",
-        f"| External artifact chunks without RemNote context | {summary['external_artifact_chunks_without_context_count']} | n/a |",
-        f"| External artifact embedding support-label chunks | {summary['external_artifact_embedding_support_label_count']} | n/a |",
-        "",
-        "## Success Criteria",
-        "",
-        "| Criterion | Passed |",
-        "|---|---:|",
-    ]
-    for key, passed in criteria.items():
-        lines.append(f"| `{key}` | {passed} |")
-    lines.extend(
-        [
-            "",
-            "## Notes",
-            "",
-            "- This is a shadow pipeline output only; it does not write production storage.",
-            "- `not_resolved` external resources are explicit resource records, not silent parse failures.",
-            "- Retrieval chunks are separate from raw RemNote blocks and retain source block provenance.",
-            "",
-        ]
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines), encoding="utf-8")
-
-
-if __name__ == "__main__":
-    from backend.configs.paths import PathSettings
-    from backend.configs.storage import LocalStorageSettings, StorageSettings
-    from backend.configs.constants import DATA_DIR, ROOT_DIR, REMNOTE_FOLDER_NAME
-    from pathlib import Path
-
-    test_data_dir = Path("data/testing/docstore_update")
-    path_settings = PathSettings(
-        local_storage_dir= test_data_dir / "storage",
-        raw_data_dir=test_data_dir / "raw" / REMNOTE_FOLDER_NAME,
-        parsed_pdfs_dir = test_data_dir / "raw" / "raw/parsed_pdfs",
-        parsed_images_dir = test_data_dir / "raw" / "raw/parsed_images",
-        parsed_texts_dir = test_data_dir / "raw" / "raw/parsed_texts"
-        )
-
-    storage_settings = StorageSettings(
-        document_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir),
-        vector_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir),
-        index_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir),
-        property_graph_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir)
-        )
-    
-    parser = RemNoteParserOptimized(
-        path_settings,
-        storage_settings,
-        prepare_external_artifacts=True,
-        copy_existing_artifacts=False,
-        force_rebuild=True,
-        write_ir=True,
-    )
-    parser.run()
