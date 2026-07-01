@@ -21,6 +21,7 @@ from typing import Any, Iterable, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.data_processing.concept_registry import (
+    CANONICAL_CONCEPT_TYPE_HINT,
     ConceptAdjudicationFailure,
     ConceptAdjudicationResponse,
     ConceptPairScore,
@@ -59,6 +60,7 @@ FAILURES_FILENAME = "llm_postprocess_failures.jsonl"
 RELATION_REGISTRY_FILENAME = "llm_relation_registry.jsonl"
 CONCEPT_REGISTRY_FILENAME = "llm_concept_registry.jsonl"
 CONCEPT_MERGE_REVIEW_FILENAME = "llm_concept_merge_review.jsonl"
+CONCEPT_PAIR_SCORES_FILENAME = "llm_concept_pair_scores.jsonl"
 CONCEPT_ADJUDICATIONS_FILENAME = "llm_concept_adjudications.jsonl"
 CONCEPT_ADJUDICATION_FAILURES_FILENAME = "llm_concept_adjudication_failures.jsonl"
 GRAPH_PREVIEW_FILENAME = "llm_graph_projection_preview.jsonl"
@@ -853,7 +855,7 @@ def response_schema_hint(*, pass_name: str = "single") -> dict[str, Any]:
                         "local_id": "c1",
                         "canonical_name": "concise English academic term",
                         "display_name": "concise visible label",
-                        "type": "CONCEPT | MODEL | METHOD | FORMULA | TOOL | TASK | PAPER | PROBLEM | COMPONENT",
+                        "type": CANONICAL_CONCEPT_TYPE_HINT,
                         "aliases": ["exact source aliases"],
                         "salience": "0.0-1.0",
                         "description": "null or <=15 words",
@@ -1541,6 +1543,14 @@ def build_report_payload(
     action_counts = Counter(decision.action.value for decision in decision_list)
     issue_counts = Counter(issue for decision in decision_list for issue in decision.issue_types)
     mode_counts = Counter(item.processing_mode.value for item in input_list)
+    concept_type_counts = Counter(entry.type for entry in concept_resolution.registry_entries) if concept_resolution else Counter()
+    concept_source_type_counts = (
+        Counter(source_type for entry in concept_resolution.registry_entries for source_type in entry.source_types)
+        if concept_resolution
+        else Counter()
+    )
+    review_clusters = concept_resolution.review_clusters if concept_resolution else []
+    adjudication_failures = concept_resolution.adjudication_failures if concept_resolution else []
     preflag_counts = Counter()
     for item in input_list:
         for key, value in item.preflags.model_dump(mode="json").items():
@@ -1567,6 +1577,13 @@ def build_report_payload(
         "concept_pair_score_count": len(concept_resolution.pair_scores) if concept_resolution else 0,
         "concept_adjudication_count": len(concept_resolution.adjudications) if concept_resolution else 0,
         "concept_adjudication_failure_count": len(concept_resolution.adjudication_failures) if concept_resolution else 0,
+        "concept_type_counts": dict(concept_type_counts),
+        "concept_source_type_counts": dict(concept_source_type_counts),
+        "max_concept_review_cluster_mentions": max((len(cluster.mention_ids) for cluster in review_clusters), default=0),
+        "max_concept_review_cluster_pair_scores": max((len(cluster.pair_scores) for cluster in review_clusters), default=0),
+        "skipped_over_budget_concept_cluster_count": sum(
+            1 for failure in adjudication_failures if failure.error_type == "prompt_budget_exceeded"
+        ),
         "cache_hits": cache_hits,
         "cache_misses": cache_misses,
         "concept_cache_hits": concept_cache_hits,
@@ -1590,6 +1607,8 @@ def build_report_markdown(payload: dict[str, Any]) -> str:
         f"- Relation registry entries: {payload['relation_registry_count']}",
         f"- Concept registry entries: {payload['concept_registry_count']}",
         f"- Concept review clusters: {payload['concept_review_cluster_count']}",
+        f"- Max concept review cluster size: {payload.get('max_concept_review_cluster_mentions', 0)} mentions / {payload.get('max_concept_review_cluster_pair_scores', 0)} pairs",
+        f"- Skipped over-budget concept clusters: {payload.get('skipped_over_budget_concept_cluster_count', 0)}",
         f"- Concept adjudications/failures: {payload['concept_adjudication_count']} / {payload['concept_adjudication_failure_count']}",
         f"- Cache hits/misses: {payload['cache_hits']} / {payload['cache_misses']}",
         f"- Concept cache hits/misses: {payload['concept_cache_hits']} / {payload['concept_cache_misses']}",
@@ -1602,6 +1621,10 @@ def build_report_markdown(payload: dict[str, Any]) -> str:
     lines.extend(["", "## Preflags", ""])
     for key, value in sorted(payload["preflag_counts"].items()):
         lines.append(f"- `{key}`: {value}")
+    if payload.get("concept_type_counts"):
+        lines.extend(["", "## Concept Types", ""])
+        for key, value in sorted(payload["concept_type_counts"].items()):
+            lines.append(f"- `{key}`: {value}")
     if payload["failures_by_type"]:
         lines.extend(["", "## Failures", ""])
         for key, value in sorted(payload["failures_by_type"].items()):
@@ -1654,6 +1677,10 @@ def write_sidecar_outputs(
         write_jsonl(
             output_dir / CONCEPT_MERGE_REVIEW_FILENAME,
             [item.model_dump(mode="json") for item in concept_resolution.review_clusters],
+        )
+        write_jsonl(
+            output_dir / CONCEPT_PAIR_SCORES_FILENAME,
+            [item.model_dump(mode="json") for item in concept_resolution.pair_scores],
         )
         write_jsonl(
             output_dir / CONCEPT_ADJUDICATIONS_FILENAME,
@@ -1831,7 +1858,7 @@ def load_concept_resolution_sidecars(output_dir: Path) -> Optional[ConceptResolu
         ],
         pair_scores=[
             ConceptPairScore.model_validate(row)
-            for row in read_jsonl_if_exists(output_dir / "llm_concept_pair_scores.jsonl")
+            for row in read_jsonl_if_exists(output_dir / CONCEPT_PAIR_SCORES_FILENAME)
         ],
         adjudications=[
             ConceptAdjudicationResponse.model_validate(row)

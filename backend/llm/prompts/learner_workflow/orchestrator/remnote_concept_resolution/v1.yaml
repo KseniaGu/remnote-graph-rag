@@ -26,8 +26,9 @@ system:
     Canonical naming:
     - Use concise English academic names.
     - Prefer singular names unless the concept is conventionally plural.
-    - Preserve source variants, Russian terms, abbreviations, formulas, and OCR variants as aliases only.
-    - Keep type stable when possible. Resolve CONCEPT vs a more specific type only when the evidence clearly supports the specific type.
+    - Preserve source variants, Russian terms, abbreviations, formulas, and OCR variants as aliases only when they are actual names.
+    - Use only these canonical types: CONCEPT, METHOD, MODEL, COMPONENT, FORMULA, PARAMETER, METRIC, DATASET, TASK, PROBLEM, TOOL, PAPER.
+    - Keep type stable when possible. Resolve CONCEPT vs a more specific canonical type only when the evidence clearly supports the specific type.
 
     Output rules:
     - Return exactly one JSON object. No markdown, no commentary.
@@ -62,7 +63,7 @@ user: |
         "mention_ids": ["each mention_id exactly once"],
         "canonical_name": "concise English graph concept name",
         "display_name": "concise visible label",
-        "type": "CONCEPT",
+        "type": "CONCEPT | METHOD | MODEL | COMPONENT | FORMULA | PARAMETER | METRIC | DATASET | TASK | PROBLEM | TOOL | PAPER",
         "aliases": [],
         "confidence": 0.0
       }

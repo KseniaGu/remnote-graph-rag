@@ -26,6 +26,7 @@ from backend.data_processing.concept_registry import (
     ConceptAdjudicationFailure,
     ConceptAdjudicationResponse,
     ConceptResolution,
+    MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS,
     apply_concept_adjudications,
     build_concept_resolution,
     concept_adjudication_cache_key,
@@ -721,11 +722,20 @@ def invoke_concept_adjudication(
     cluster: Any,
     resolution: ConceptResolution,
 ) -> tuple[str, dict[str, Any]]:
-    user_template, system_prompt = prompt
+    _, system_prompt = prompt
+    user_prompt = render_concept_adjudication_user_prompt(prompt, cluster, resolution)
+    return invoke_messages(llm, system_prompt, user_prompt)
+
+
+def render_concept_adjudication_user_prompt(
+    prompt: tuple[str, str],
+    cluster: Any,
+    resolution: ConceptResolution,
+) -> str:
+    user_template, _ = prompt
     input_json = json.dumps(concept_adjudication_prompt_payload(cluster, resolution.mentions), ensure_ascii=False, indent=2)
     schema_json = json.dumps(concept_adjudication_schema_hint(), ensure_ascii=False, indent=2)
-    user_prompt = user_template.replace("{input_json}", input_json).replace("{response_schema}", schema_json)
-    return invoke_messages(llm, system_prompt, user_prompt)
+    return user_template.replace("{input_json}", input_json).replace("{response_schema}", schema_json)
 
 
 def invoke_concept_adjudication_repair(
@@ -789,6 +799,25 @@ def run_concept_adjudications(
     generation_settings = generation_settings_for_pass(args, "concept_resolution")
     stopped_for_usage_limit = False
     for cluster_number, cluster in enumerate(clusters, start=1):
+        rendered_prompt_chars = len(render_concept_adjudication_user_prompt(prompt, cluster, resolution))
+        if rendered_prompt_chars > MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS:
+            failure = make_concept_adjudication_failure(
+                "prompt_budget_exceeded",
+                (
+                    f"Rendered concept adjudication prompt is {rendered_prompt_chars} characters; "
+                    f"limit is {MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS}."
+                ),
+                cluster=cluster,
+                model_name=model_name,
+                prompt_version=prompt_version,
+            )
+            failures.append(failure)
+            print(
+                f"[concept {cluster_number}/{len(clusters)}] "
+                f"{cluster.cluster_id}: skipped over-budget prompt ({rendered_prompt_chars} chars)"
+            )
+            continue
+
         cache_key = concept_adjudication_cache_key(
             cluster,
             model_name=model_name,

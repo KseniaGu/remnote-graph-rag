@@ -22,20 +22,79 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 SCHEMA_VERSION = "1.0"
 DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION = "v1"
 AUTO_MERGE_THRESHOLD = 0.90
-AUTO_SPLIT_THRESHOLD = 0.55
 AUTO_GROUP_MAX_DISTINCT_CANONICAL_NAMES = 8
 AUTO_GROUP_MAX_SOURCE_NAMES = 25
+MAX_REVIEW_CLUSTER_MENTIONS = 24
+MAX_REVIEW_CLUSTER_PAIR_SCORES = 80
+MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS = 28_000
+CONCEPT_ADJUDICATION_EVIDENCE_SPAN_LIMIT = 2
+CONCEPT_ADJUDICATION_EVIDENCE_SPAN_CHARS = 160
+CONCEPT_ADJUDICATION_ALIAS_LIMIT = 6
+STRONG_REVIEW_EDGE_THRESHOLD = 0.82
+WEAK_REVIEW_PAIR_THRESHOLD = 0.72
+
+CANONICAL_CONCEPT_TYPES = (
+    "CONCEPT",
+    "METHOD",
+    "MODEL",
+    "COMPONENT",
+    "FORMULA",
+    "PARAMETER",
+    "METRIC",
+    "DATASET",
+    "TASK",
+    "PROBLEM",
+    "TOOL",
+    "PAPER",
+)
+CANONICAL_CONCEPT_TYPE_HINT = " | ".join(CANONICAL_CONCEPT_TYPES)
+
+RAW_TYPE_MAP = {
+    "ALGORITHM": "METHOD",
+    "FRAMEWORK": "METHOD",
+    "PROCESS": "METHOD",
+    "PROCEDURE": "METHOD",
+    "TECHNIQUE": "METHOD",
+    "WORKFLOW": "METHOD",
+    "HYPERPARAMETER": "PARAMETER",
+    "METRIC": "METRIC",
+    "MEASURE": "METRIC",
+    "LOSS": "FORMULA",
+    "BENCHMARK": "DATASET",
+    "DATASET": "DATASET",
+    "HARDWARE": "TOOL",
+    "COMPANY": "CONCEPT",
+    "COURSE": "CONCEPT",
+    "PROGRAM": "CONCEPT",
+    "SCHEDULE": "CONCEPT",
+    "TOPIC": "CONCEPT",
+}
 
 NAME_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9+#]+")
 PUNCT_RE = re.compile(r"[^a-zа-яё0-9+#]+")
 FORMULA_SYMBOL_RE = re.compile(r"[$\\{}^=<>|~]|[∂∇∑∫√∞≈≠≤≥±×÷→←↔∆ΔΑ-ω]")
 SYMBOL_WITH_PARENS_RE = re.compile(r"^[A-Za-zА-Яа-яЁё]\s*\([^)]{1,12}\)$")
+SYMBOL_WITH_PARENS_FRAGMENT_RE = re.compile(r"\b[A-Za-zА-Яа-яЁё]\s*\([^)]{1,12}\)")
 SHORT_CODE_LIKE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+$")
 
 HIGH_RISK_FLAGS = {
     "acronym_ambiguity",
     "auto_group_safety_guard",
+    "derivational_variant",
     "formula_or_symbol_alias",
+    "generic_name",
+    "modifier_scope_difference",
+    "ocr_like_short_variant",
+    "parent_child_candidate",
+    "short_symbolic_alias",
+    "type_broadening",
+    "type_conflict",
+}
+WEAK_REVIEW_COMPONENT_FLAGS = {
+    "acronym_ambiguity",
+    "auto_group_safety_guard",
+    "formula_or_symbol_alias",
+    "generic_name",
     "modifier_scope_difference",
     "ocr_like_short_variant",
     "parent_child_candidate",
@@ -79,6 +138,56 @@ GENERIC_NAMES = {
     "tool",
     "view",
 }
+DATASET_HINT_TOKENS = {
+    "benchmark",
+    "benchmarks",
+    "corpus",
+    "corpora",
+    "dataset",
+    "datasets",
+    "eval",
+    "evaluation",
+    "test",
+    "validation",
+}
+METRIC_HINT_TOKENS = {
+    "accuracy",
+    "auc",
+    "coherence",
+    "error",
+    "f1",
+    "loss",
+    "metric",
+    "precision",
+    "recall",
+    "relevance",
+    "score",
+}
+PARAMETER_HINT_TOKENS = {
+    "alpha",
+    "beta",
+    "coefficient",
+    "epsilon",
+    "gamma",
+    "hyperparameter",
+    "lambda",
+    "learning",
+    "parameter",
+    "rate",
+    "temperature",
+    "threshold",
+    "top",
+    "weight",
+}
+TOOL_HINT_TOKENS = {
+    "api",
+    "framework",
+    "library",
+    "package",
+    "platform",
+    "service",
+    "tool",
+}
 INVARIANT_SINGULAR_TOKENS = {
     "analysis",
     "bayes",
@@ -121,6 +230,7 @@ class ConceptMention(BaseModel):
     canonical_name: str
     display_name: str
     type: str
+    raw_type: str = ""
     aliases: list[str] = Field(default_factory=list)
     salience: float = Field(ge=0.0, le=1.0)
     description: Optional[str] = None
@@ -141,19 +251,50 @@ class ConceptMention(BaseModel):
 
     @model_validator(mode="after")
     def normalize_type_and_description(self) -> "ConceptMention":
-        self.type = normalize_whitespace(self.type).upper()
+        self.raw_type = normalize_whitespace(self.raw_type or self.type).upper() or "CONCEPT"
+        self.type = canonicalize_concept_type(
+            self.raw_type,
+            self.canonical_name,
+            [self.display_name, *self.aliases],
+        )
         if self.description is not None:
             self.description = normalize_whitespace(self.description) or None
         return self
 
-    def source_names(self) -> list[str]:
+    def primary_names(self) -> list[str]:
         return unique_preserving_order(
             [
                 self.canonical_name,
                 self.display_name,
-                *self.aliases,
             ]
         )
+
+    def audit_source_names(self) -> list[str]:
+        return unique_preserving_order([*self.primary_names(), *self.aliases])
+
+    def merge_names(self) -> list[str]:
+        return unique_preserving_order(
+            [
+                name
+                for name in self.primary_names()
+                if is_safe_primary_name(name)
+            ]
+            + [
+                alias
+                for alias in self.aliases
+                if is_merge_safe_name(alias)
+            ]
+        )
+
+    def registry_aliases(self) -> list[str]:
+        return unique_preserving_order(
+            name
+            for name in [self.display_name, *self.aliases]
+            if is_registry_alias_name(name)
+        )
+
+    def source_names(self) -> list[str]:
+        return self.audit_source_names()
 
 
 class ConceptPairScore(BaseModel):
@@ -487,20 +628,22 @@ def downgrade_guarded_auto_merge_pairs(
 def auto_group_needs_safety_split(mentions: list[ConceptMention]) -> bool:
     if len(mentions) < 2:
         return False
-    concrete_types = {mention.type for mention in mentions if mention.type not in GENERIC_TYPES}
-    if len(concrete_types) > 1:
-        return True
     canonical_keys = {
         singularize_normalized_name(normalize_name(mention.canonical_name))
         for mention in mentions
         if normalize_name(mention.canonical_name)
     }
+    if len(canonical_keys) == 1 and all(is_safe_exact_primary_name(mention.canonical_name) for mention in mentions):
+        return False
+    concrete_types = {mention.type for mention in mentions if mention.type not in GENERIC_TYPES}
+    if len(concrete_types) > 1:
+        return True
     if len(canonical_keys) > AUTO_GROUP_MAX_DISTINCT_CANONICAL_NAMES:
         return True
     source_name_keys = {
         normalize_name(name)
         for mention in mentions
-        for name in mention.source_names()
+        for name in mention.merge_names()
         if normalize_name(name)
     }
     return len(source_name_keys) > AUTO_GROUP_MAX_SOURCE_NAMES
@@ -510,6 +653,8 @@ def auto_group_safety_key(mention: ConceptMention) -> str:
     primary = singularize_normalized_name(normalize_name(mention.canonical_name))
     if not primary:
         primary = mention.mention_id
+    if is_safe_exact_primary_name(mention.canonical_name):
+        return f"primary:{primary}"
     return f"{mention.type}:{primary}"
 
 
@@ -595,13 +740,26 @@ def score_concept_pair(left: ConceptMention, right: ConceptMention) -> ConceptPa
     if score and (left_primary in GENERIC_NAMES or right_primary in GENERIC_NAMES) and left_primary != right_primary:
         risk_flags.append("generic_name")
         score = min(score, 0.80)
+    if score and any(is_formula_like_name(alias) for alias in [*left.aliases, *right.aliases]):
+        risk_flags.append("formula_or_symbol_alias")
 
     signals = unique_preserving_order(signals)
     risk_flags = unique_preserving_order(risk_flags)
     high_risk = bool(set(risk_flags) & HIGH_RISK_FLAGS)
-    if score >= AUTO_MERGE_THRESHOLD and not high_risk:
+    safe_exact_primary_auto_merge = (
+        exact_primary_match
+        and is_safe_exact_primary_name(left.canonical_name)
+        and is_safe_exact_primary_name(right.canonical_name)
+    )
+    if safe_exact_primary_auto_merge:
         action = ConceptPairAction.AUTO_MERGE
-    elif score <= AUTO_SPLIT_THRESHOLD:
+    elif score >= AUTO_MERGE_THRESHOLD and not high_risk:
+        action = ConceptPairAction.AUTO_MERGE
+    elif (
+        score < WEAK_REVIEW_PAIR_THRESHOLD
+        or is_parent_child_only_candidate(signals, risk_flags)
+        or not should_send_pair_to_llm(signals, risk_flags)
+    ):
         action = ConceptPairAction.NO_MERGE
     else:
         action = ConceptPairAction.LLM_ADJUDICATE
@@ -616,15 +774,44 @@ def score_concept_pair(left: ConceptMention, right: ConceptMention) -> ConceptPa
     )
 
 
+def is_parent_child_only_candidate(signals: list[str], risk_flags: list[str]) -> bool:
+    if "parent_child_candidate" not in risk_flags:
+        return False
+    return "exact_normalized_name" not in signals
+
+
+def should_send_pair_to_llm(signals: list[str], risk_flags: list[str]) -> bool:
+    signal_set = set(signals)
+    risk_set = set(risk_flags)
+    identity_signals = {
+        "exact_normalized_name",
+        "exact_alias_match",
+        "singular_plural_variant",
+        "acronym_match",
+        "high_string_similarity",
+        "derivational_variant",
+    }
+    if not (signal_set & identity_signals):
+        return False
+    if "ocr_like_short_variant" in risk_set and "exact_normalized_name" not in signal_set:
+        return False
+    if "formula_or_symbol_alias" in risk_set and "exact_normalized_name" not in signal_set:
+        return False
+    if risk_set & {"type_conflict", "type_broadening"} and "exact_normalized_name" not in signal_set:
+        return False
+    return True
+
+
 def build_uncertain_clusters(
     pair_scores: list[ConceptPairScore],
     auto_dsu: _DisjointSet,
     auto_groups: dict[str, list[str]],
     mentions: list[ConceptMention],
 ) -> list[UncertainConceptCluster]:
-    uncertain_roots = _DisjointSet(auto_groups.keys())
-    has_uncertain_edge = False
+    strong_roots = _DisjointSet(auto_groups.keys())
     uncertain_pairs: list[ConceptPairScore] = []
+    weak_pairs: list[ConceptPairScore] = []
+    roots_by_pair: dict[tuple[str, str], tuple[str, str]] = {}
     for pair in pair_scores:
         if pair.recommended_action != ConceptPairAction.LLM_ADJUDICATE:
             continue
@@ -632,44 +819,180 @@ def build_uncertain_clusters(
         right_root = auto_dsu.find(pair.target_mention_id)
         if left_root == right_root:
             continue
-        uncertain_roots.union(left_root, right_root)
         uncertain_pairs.append(pair)
-        has_uncertain_edge = True
+        roots_by_pair[(pair.source_mention_id, pair.target_mention_id)] = (left_root, right_root)
+        if is_strong_review_edge(pair):
+            strong_roots.union(left_root, right_root)
+        elif should_review_weak_pair(pair):
+            weak_pairs.append(pair)
 
-    if not has_uncertain_edge:
+    if not uncertain_pairs:
         return []
 
     mentions_by_id = {mention.mention_id: mention for mention in mentions}
-    root_components = uncertain_roots.groups()
+    root_components = strong_roots.groups()
     clusters: list[UncertainConceptCluster] = []
     for root_ids in root_components.values():
+        if len(root_ids) < 2:
+            continue
+        root_id_set = set(root_ids)
         component_pairs = [
             pair
             for pair in uncertain_pairs
-            if auto_dsu.find(pair.source_mention_id) in root_ids or auto_dsu.find(pair.target_mention_id) in root_ids
+            if set(roots_by_pair[(pair.source_mention_id, pair.target_mention_id)]) <= root_id_set
         ]
-        if not component_pairs:
+        if not any(is_strong_review_edge(pair) for pair in component_pairs):
             continue
         mention_ids = sorted({mention_id for root_id in root_ids for mention_id in auto_groups[root_id]})
-        cluster_mentions = [mentions_by_id[mention_id] for mention_id in mention_ids]
-        cluster_payload = {
-            "mention_ids": mention_ids,
-            "pair_ids": [(pair.source_mention_id, pair.target_mention_id) for pair in component_pairs],
-        }
-        clusters.append(
-            UncertainConceptCluster(
-                cluster_id=f"concept_cluster_{stable_hash(cluster_payload, length=20)}",
-                mention_ids=mention_ids,
-                concept_names=unique_preserving_order(mention.canonical_name for mention in cluster_mentions),
-                types=unique_preserving_order(mention.type for mention in cluster_mentions),
-                source_chunk_ids=unique_preserving_order(mention.chunk_id for mention in cluster_mentions),
-                score=max(pair.score for pair in component_pairs),
-                risk_flags=unique_preserving_order(flag for pair in component_pairs for flag in pair.risk_flags),
-                signals=unique_preserving_order(signal for pair in component_pairs for signal in pair.signals),
-                pair_scores=sorted(component_pairs, key=lambda item: (-item.score, item.source_mention_id)),
+        clusters.extend(
+            bounded_review_clusters(
+                mention_ids,
+                component_pairs,
+                mentions_by_id,
             )
         )
-    return sorted(clusters, key=lambda item: (-item.score, item.cluster_id))
+
+    strong_cluster_mention_sets = [set(cluster.mention_ids) for cluster in clusters]
+    for pair in weak_pairs:
+        mention_ids = sorted([pair.source_mention_id, pair.target_mention_id])
+        if any(set(mention_ids) <= cluster_ids for cluster_ids in strong_cluster_mention_sets):
+            continue
+        clusters.extend(bounded_review_clusters(mention_ids, [pair], mentions_by_id))
+
+    deduped: dict[tuple[tuple[str, ...], tuple[tuple[str, str], ...]], UncertainConceptCluster] = {}
+    for cluster in clusters:
+        if len(cluster.mention_ids) < 2:
+            continue
+        key = (
+            tuple(cluster.mention_ids),
+            tuple(sorted((pair.source_mention_id, pair.target_mention_id) for pair in cluster.pair_scores)),
+        )
+        previous = deduped.get(key)
+        if previous is None or cluster.score > previous.score:
+            deduped[key] = cluster
+    return sorted(deduped.values(), key=lambda item: (-item.score, item.cluster_id))
+
+
+def is_strong_review_edge(pair: ConceptPairScore) -> bool:
+    return pair.score >= STRONG_REVIEW_EDGE_THRESHOLD and not (
+        set(pair.risk_flags) & WEAK_REVIEW_COMPONENT_FLAGS
+    )
+
+
+def should_review_weak_pair(pair: ConceptPairScore) -> bool:
+    return pair.score >= WEAK_REVIEW_PAIR_THRESHOLD
+
+
+def bounded_review_clusters(
+    mention_ids: list[str],
+    pair_scores: list[ConceptPairScore],
+    mentions_by_id: dict[str, ConceptMention],
+) -> list[UncertainConceptCluster]:
+    mention_ids = sorted(set(mention_id for mention_id in mention_ids if mention_id in mentions_by_id))
+    pair_scores = sorted(pair_scores, key=lambda item: (-item.score, item.source_mention_id, item.target_mention_id))
+    pair_scores = [
+        pair
+        for pair in pair_scores
+        if pair.source_mention_id in mention_ids and pair.target_mention_id in mention_ids
+    ]
+    if len(mention_ids) < 2 or not pair_scores:
+        return []
+
+    candidate = make_uncertain_cluster(mention_ids, pair_scores, mentions_by_id)
+    if review_cluster_within_bounds(candidate, mentions_by_id):
+        return [candidate]
+
+    type_clusters: list[UncertainConceptCluster] = []
+    for grouped_ids in split_cluster_mentions(mention_ids, mentions_by_id, by_type=True):
+        grouped_pairs = pair_scores_for_mentions(pair_scores, grouped_ids)
+        if 1 < len(grouped_ids) < len(mention_ids) and grouped_pairs:
+            type_clusters.extend(bounded_review_clusters(grouped_ids, grouped_pairs, mentions_by_id))
+    if type_clusters:
+        return type_clusters
+
+    clusters: list[UncertainConceptCluster] = []
+    for grouped_ids in split_cluster_mentions(mention_ids, mentions_by_id, by_type=False):
+        grouped_pairs = pair_scores_for_mentions(pair_scores, grouped_ids)
+        if 1 < len(grouped_ids) < len(mention_ids) and grouped_pairs:
+            clusters.extend(bounded_review_clusters(grouped_ids, grouped_pairs, mentions_by_id))
+    if clusters:
+        return clusters
+
+    pair_clusters: list[UncertainConceptCluster] = []
+    for pair in pair_scores:
+        pair_cluster = make_uncertain_cluster(
+            sorted([pair.source_mention_id, pair.target_mention_id]),
+            [pair],
+            mentions_by_id,
+        )
+        if review_cluster_within_bounds(pair_cluster, mentions_by_id):
+            pair_clusters.append(pair_cluster)
+    return pair_clusters
+
+
+def make_uncertain_cluster(
+    mention_ids: list[str],
+    pair_scores: list[ConceptPairScore],
+    mentions_by_id: dict[str, ConceptMention],
+) -> UncertainConceptCluster:
+    pair_scores = sorted(
+        pair_scores[:MAX_REVIEW_CLUSTER_PAIR_SCORES],
+        key=lambda item: (-item.score, item.source_mention_id, item.target_mention_id),
+    )
+    cluster_mentions = [mentions_by_id[mention_id] for mention_id in mention_ids]
+    cluster_payload = {
+        "mention_ids": mention_ids,
+        "pair_ids": [(pair.source_mention_id, pair.target_mention_id) for pair in pair_scores],
+    }
+    return UncertainConceptCluster(
+        cluster_id=f"concept_cluster_{stable_hash(cluster_payload, length=20)}",
+        mention_ids=mention_ids,
+        concept_names=unique_preserving_order(mention.canonical_name for mention in cluster_mentions),
+        types=unique_preserving_order(mention.type for mention in cluster_mentions),
+        source_chunk_ids=unique_preserving_order(mention.chunk_id for mention in cluster_mentions),
+        score=max(pair.score for pair in pair_scores),
+        risk_flags=unique_preserving_order(flag for pair in pair_scores for flag in pair.risk_flags),
+        signals=unique_preserving_order(signal for pair in pair_scores for signal in pair.signals),
+        pair_scores=pair_scores,
+    )
+
+
+def review_cluster_within_bounds(
+    cluster: UncertainConceptCluster,
+    mentions_by_id: dict[str, ConceptMention],
+) -> bool:
+    if len(cluster.mention_ids) > MAX_REVIEW_CLUSTER_MENTIONS:
+        return False
+    if len(cluster.pair_scores) > MAX_REVIEW_CLUSTER_PAIR_SCORES:
+        return False
+    mentions = [mentions_by_id[mention_id] for mention_id in cluster.mention_ids if mention_id in mentions_by_id]
+    return concept_adjudication_prompt_char_count(cluster, mentions) <= MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS
+
+
+def split_cluster_mentions(
+    mention_ids: list[str],
+    mentions_by_id: dict[str, ConceptMention],
+    *,
+    by_type: bool,
+) -> list[list[str]]:
+    groups: dict[str, list[str]] = defaultdict(list)
+    for mention_id in mention_ids:
+        mention = mentions_by_id[mention_id]
+        key = mention.type if by_type else primary_family_key(mention)
+        groups[key].append(mention_id)
+    return [sorted(ids) for ids in groups.values() if len(ids) > 1]
+
+
+def pair_scores_for_mentions(
+    pair_scores: list[ConceptPairScore],
+    mention_ids: list[str],
+) -> list[ConceptPairScore]:
+    mention_id_set = set(mention_ids)
+    return [
+        pair
+        for pair in pair_scores
+        if pair.source_mention_id in mention_id_set and pair.target_mention_id in mention_id_set
+    ]
 
 
 def resolution_source_for_status(status: str) -> str:
@@ -697,7 +1020,11 @@ def build_registry_from_group_specs(
         if override:
             canonical_name = canonicalize_display_name(override["canonical_name"])
             display_name = normalize_whitespace(override.get("display_name") or canonical_name)
-            concept_type = normalize_whitespace(override["type"]).upper()
+            concept_type = canonicalize_concept_type(
+                override["type"],
+                canonical_name,
+                [display_name, *list(override.get("aliases") or [])],
+            )
             extra_aliases = list(override.get("aliases") or [])
         else:
             canonical_name = choose_canonical_name(group_mentions)
@@ -762,10 +1089,10 @@ def build_registry_from_group_specs(
 
         aliases = []
         for mention in group_mentions:
-            source_names = mention.source_names()
-            aliases.extend(source_names)
+            source_names = mention.audit_source_names()
+            aliases.extend(mention.registry_aliases())
             record["source_names"] = unique_preserving_order([*record["source_names"], *source_names])
-            record["source_types"] = unique_preserving_order([*record["source_types"], mention.type])
+            record["source_types"] = unique_preserving_order([*record["source_types"], mention.raw_type])
             if mention.description:
                 record["descriptions"] = unique_preserving_order([*record["descriptions"], mention.description])
             record["source_chunk_ids"] = unique_preserving_order([*record["source_chunk_ids"], mention.chunk_id])
@@ -779,7 +1106,7 @@ def build_registry_from_group_specs(
         record["aliases"] = unique_preserving_order(
             alias
             for alias in aliases
-            if normalize_name(alias) and normalize_name(alias) != normalize_name(canonical_name)
+            if is_registry_alias_name(alias) and normalize_name(alias) != normalize_name(canonical_name)
         )
 
     entries = [ConceptRegistryEntry.model_validate(record) for record in records.values()]
@@ -868,7 +1195,7 @@ def apply_concept_adjudications(
                     "type": mention.type,
                     "aliases": unique_preserving_order(
                         [
-                            *mention.source_names(),
+                            *mention.registry_aliases(),
                             *(group.aliases or []),
                             group.canonical_name,
                             group.display_name or group.canonical_name,
@@ -879,7 +1206,11 @@ def apply_concept_adjudications(
                 override = {
                     "canonical_name": group.canonical_name,
                     "display_name": group.display_name or group.canonical_name,
-                    "type": group.type,
+                    "type": canonicalize_concept_type(
+                        group.type,
+                        group.canonical_name,
+                        [group.display_name or group.canonical_name, *group.aliases],
+                    ),
                     "aliases": group.aliases,
                 }
             group_specs.append(
@@ -925,11 +1256,38 @@ def concept_adjudication_prompt_payload(
         "signals": cluster.signals,
         "pair_scores": [pair.model_dump(mode="json") for pair in cluster.pair_scores],
         "mentions": [
-            mentions_by_id[mention_id].model_dump(mode="json")
+            compact_concept_mention_payload(mentions_by_id[mention_id])
             for mention_id in cluster.mention_ids
             if mention_id in mentions_by_id
         ],
     }
+
+
+def compact_concept_mention_payload(mention: ConceptMention) -> dict[str, Any]:
+    evidence_spans = [
+        span[:CONCEPT_ADJUDICATION_EVIDENCE_SPAN_CHARS]
+        for span in mention.evidence_spans[:CONCEPT_ADJUDICATION_EVIDENCE_SPAN_LIMIT]
+    ]
+    return {
+        "mention_id": mention.mention_id,
+        "canonical_name": mention.canonical_name,
+        "display_name": mention.display_name,
+        "type": mention.type,
+        "raw_type": mention.raw_type,
+        "aliases": mention.registry_aliases()[:CONCEPT_ADJUDICATION_ALIAS_LIMIT],
+        "description": mention.description,
+        "evidence_spans": evidence_spans,
+        "chunk_id": mention.chunk_id,
+    }
+
+
+def concept_adjudication_prompt_char_count(
+    cluster: UncertainConceptCluster,
+    mentions: Iterable[ConceptMention],
+) -> int:
+    payload_json = json.dumps(concept_adjudication_prompt_payload(cluster, mentions), ensure_ascii=False, indent=2)
+    schema_json = json.dumps(concept_adjudication_schema_hint(), ensure_ascii=False, indent=2)
+    return len(payload_json) + len(schema_json)
 
 
 def concept_adjudication_schema_hint() -> dict[str, Any]:
@@ -941,7 +1299,7 @@ def concept_adjudication_schema_hint() -> dict[str, Any]:
                 "mention_ids": ["each input mention_id exactly once"],
                 "canonical_name": "concise English graph concept name",
                 "display_name": "concise visible label",
-                "type": "CONCEPT | MODEL | METHOD | FORMULA | TOOL | TASK | PAPER | PROBLEM | COMPONENT",
+                "type": CANONICAL_CONCEPT_TYPE_HINT,
                 "aliases": ["source names/aliases only"],
                 "confidence": "0.0-1.0",
             }
@@ -1098,6 +1456,60 @@ def stable_hash(payload: Any, *, length: int = 16) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:length]
 
 
+def canonicalize_concept_type(raw_type: str, name: str, aliases: Iterable[str] = ()) -> str:
+    raw = normalize_whitespace(raw_type).upper()
+    names = [name, *aliases]
+    if raw in CANONICAL_CONCEPT_TYPES:
+        if raw == "DATA" and looks_like_dataset_name(names):
+            return "DATASET"
+        return raw
+    if raw in RAW_TYPE_MAP:
+        return RAW_TYPE_MAP[raw]
+    if raw in {"RESOURCE", "ARTIFACT"}:
+        return "TOOL" if looks_like_tool_name(names) else "CONCEPT"
+    if raw == "DATA":
+        return "DATASET" if looks_like_dataset_name(names) else "CONCEPT"
+    if raw in {"INPUT", "OUTPUT", "PROPERTY", "STATISTIC", "MATRIX", "FUNCTION", "COMPUTATION"}:
+        return canonicalize_name_based_type(names)
+    return "CONCEPT"
+
+
+def canonicalize_name_based_type(names: Iterable[str]) -> str:
+    name_list = list(names)
+    normalized_names = [normalize_name(name) for name in name_list if normalize_name(name)]
+    if any(is_formula_like_name(name) for name in name_list):
+        return "FORMULA"
+    if any(has_any_token(name, METRIC_HINT_TOKENS) for name in normalized_names):
+        return "METRIC"
+    if any(has_any_token(name, PARAMETER_HINT_TOKENS) for name in normalized_names):
+        return "PARAMETER"
+    if looks_like_dataset_name(normalized_names):
+        return "DATASET"
+    return "CONCEPT"
+
+
+def looks_like_dataset_name(names: Iterable[str]) -> bool:
+    name_list = list(names)
+    normalized_names = [normalize_name(name) for name in name_list if normalize_name(name)]
+    return any(
+        has_any_token(name, DATASET_HINT_TOKENS)
+        or name.endswith(" dataset")
+        or name.endswith(" corpus")
+        or name.endswith(" benchmark")
+        for name in normalized_names
+    )
+
+
+def looks_like_tool_name(names: Iterable[str]) -> bool:
+    name_list = list(names)
+    normalized_names = [normalize_name(name) for name in name_list if normalize_name(name)]
+    return any(has_any_token(name, TOOL_HINT_TOKENS) for name in normalized_names)
+
+
+def has_any_token(normalized_name: str, tokens: set[str]) -> bool:
+    return bool(set(NAME_TOKEN_RE.findall(normalized_name)) & tokens)
+
+
 def mention_id_for(decision_id: str, chunk_id: str, local_id: str) -> str:
     return f"mention_{stable_hash([decision_id, chunk_id, local_id], length=20)}"
 
@@ -1160,8 +1572,8 @@ def content_tokens(value: str) -> set[str]:
 
 
 def concept_name_forms(mention: ConceptMention) -> dict[str, set[str]]:
-    source_names = mention.source_names()
-    merge_names = [name for name in source_names if is_merge_safe_name(name)]
+    primary_names = mention.primary_names()
+    merge_names = mention.merge_names()
     normalized = {normalize_name(name) for name in merge_names}
     normalized = {name for name in normalized if name}
     singular = {singularize_normalized_name(name) for name in normalized}
@@ -1169,7 +1581,7 @@ def concept_name_forms(mention: ConceptMention) -> dict[str, set[str]]:
     acronym = set()
     expansion_acronym = set()
     ocr_short = set()
-    for original_name in source_names:
+    for original_name in primary_names:
         maybe_acronym = acronym_key(original_name)
         if maybe_acronym:
             acronym.add(maybe_acronym)
@@ -1200,17 +1612,27 @@ def blocking_keys(mention: ConceptMention) -> set[str]:
         for value in forms[family]:
             if value:
                 keys.add(f"{family}:{value}")
+                if family in {"acronym", "expansion_acronym"}:
+                    keys.add(f"acronym_any:{value}")
     for token in content_tokens(normalize_name(mention.canonical_name)):
         if len(token) >= 4 and token not in TOKEN_STOPWORDS:
             keys.add(f"token:{token}")
     return keys
 
 
+def primary_family_key(mention: ConceptMention) -> str:
+    primary = singularize_normalized_name(normalize_name(mention.canonical_name))
+    tokens = sorted(content_tokens(primary))
+    if tokens:
+        return f"{mention.type}:{' '.join(tokens[:2])}"
+    return f"{mention.type}:{primary or mention.mention_id}"
+
+
 def acronym_key(value: str) -> Optional[str]:
     if is_formula_like_name(value):
         return None
     compact = re.sub(r"[^A-Za-z0-9]", "", value)
-    if not (2 <= len(compact) <= 8):
+    if not (3 <= len(compact) <= 8):
         return None
     if compact.upper() == compact and any(char.isalpha() for char in compact):
         return compact.upper()
@@ -1226,6 +1648,19 @@ def is_safe_primary_name(value: str) -> bool:
     return acronym_key(value) is not None
 
 
+def is_safe_exact_primary_name(value: str) -> bool:
+    raw = normalize_whitespace(value)
+    normalized = normalize_name(raw)
+    compact = re.sub(r"[^a-zа-яё0-9+#]+", "", normalized)
+    if len(compact) < 4:
+        return acronym_key(raw) is not None
+    if FORMULA_SYMBOL_RE.search(raw) or SYMBOL_WITH_PARENS_FRAGMENT_RE.search(raw):
+        return False
+    if is_sentence_like_name(raw):
+        return False
+    return True
+
+
 def is_merge_safe_name(value: str) -> bool:
     if is_formula_like_name(value):
         return False
@@ -1238,6 +1673,14 @@ def is_merge_safe_name(value: str) -> bool:
     return True
 
 
+def is_registry_alias_name(value: str) -> bool:
+    if not is_merge_safe_name(value):
+        return False
+    if normalize_name(value) in GENERIC_NAMES:
+        return False
+    return True
+
+
 def is_formula_like_name(value: str) -> bool:
     raw = normalize_whitespace(value)
     if not raw:
@@ -1246,14 +1689,25 @@ def is_formula_like_name(value: str) -> bool:
         return True
     if SYMBOL_WITH_PARENS_RE.fullmatch(raw):
         return True
+    if SYMBOL_WITH_PARENS_FRAGMENT_RE.search(raw):
+        return True
     if SHORT_CODE_LIKE_RE.fullmatch(raw) and len(raw) <= 16:
         return True
     tokens = NAME_TOKEN_RE.findall(raw)
     if len(tokens) > 8:
         return True
-    if len(tokens) > 3 and re.search(r"[.!?;:]", raw):
+    if is_sentence_like_name(raw):
         return True
     return False
+
+
+def is_sentence_like_name(value: str) -> bool:
+    tokens = NAME_TOKEN_RE.findall(value)
+    if len(tokens) <= 3:
+        return False
+    if re.search(r"[!?;:]", value):
+        return True
+    return bool(re.search(r"\.\s+|[.!?]$", value))
 
 
 def acronym_from_expansion(value: str) -> Optional[str]:
@@ -1261,7 +1715,7 @@ def acronym_from_expansion(value: str) -> Optional[str]:
     if len(tokens) < 2 or len(tokens) > 8:
         return None
     acronym = "".join(token[0] for token in tokens).upper()
-    return acronym if len(acronym) >= 2 else None
+    return acronym if len(acronym) >= 3 else None
 
 
 def ocr_short_key(value: str) -> Optional[str]:

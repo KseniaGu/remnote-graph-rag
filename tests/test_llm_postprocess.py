@@ -8,6 +8,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.data_processing.concept_registry import (
+    CANONICAL_CONCEPT_TYPES,
+    MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS,
+    MAX_REVIEW_CLUSTER_MENTIONS,
+    MAX_REVIEW_CLUSTER_PAIR_SCORES,
     ConceptAdjudicationResponse,
     ConceptMention,
     ConceptRegistryEntry,
@@ -16,12 +20,16 @@ from backend.data_processing.concept_registry import (
     build_concept_resolution,
     build_concept_resolution_from_mentions,
     canonicalize_display_name,
+    canonicalize_concept_type,
+    concept_adjudication_prompt_char_count,
+    concept_adjudication_prompt_payload,
     mention_id_for,
     validate_concept_adjudication_response,
 )
 from backend.data_processing.llm_postprocess import (
     CONCEPT_ADJUDICATIONS_FILENAME,
     CONCEPT_MERGE_REVIEW_FILENAME,
+    CONCEPT_PAIR_SCORES_FILENAME,
     CONCEPT_REGISTRY_FILENAME,
     DECISIONS_FILENAME,
     DEFAULT_CONCEPT_RESOLUTION_NUM_PREDICT,
@@ -42,6 +50,7 @@ from backend.data_processing.llm_postprocess import (
     cache_key_for_batch,
     detect_preflags,
     fake_llm_response_for_batch,
+    load_concept_resolution_sidecars,
     parse_llm_response,
     response_schema_hint,
     sanitize_markup_for_embedding,
@@ -531,7 +540,7 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual(1, len(resolution.review_clusters))
         self.assertIn("derivational_variant", resolution.review_clusters[0].risk_flags)
 
-    def test_concept_resolution_marks_modifier_containment_uncertain(self) -> None:
+    def test_concept_resolution_does_not_review_parent_child_modifier_containment(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
                 make_concept_mention("Convolution", mention_id="m1", concept_type="METHOD"),
@@ -540,8 +549,7 @@ class LLMPostprocessTests(unittest.TestCase):
         )
 
         self.assertEqual(2, len(resolution.registry_entries))
-        self.assertEqual(1, len(resolution.review_clusters))
-        self.assertIn("modifier_scope_difference", resolution.review_clusters[0].risk_flags)
+        self.assertEqual([], resolution.review_clusters)
 
     def test_concept_resolution_does_not_merge_related_specific_model(self) -> None:
         resolution = build_concept_resolution_from_mentions(
@@ -553,6 +561,53 @@ class LLMPostprocessTests(unittest.TestCase):
 
         self.assertEqual(2, len(resolution.registry_entries))
         self.assertEqual([], resolution.review_clusters)
+
+    def test_concept_type_canonicalization_uses_production_type_set(self) -> None:
+        cases = [
+            ("ALGORITHM", "Floyd's algorithm", "METHOD"),
+            ("FRAMEWORK", "RAISE framework", "METHOD"),
+            ("WORKFLOW", "Evaluator-optimizer", "METHOD"),
+            ("BENCHMARK", "GPQA Diamond", "DATASET"),
+            ("DATA", "COCO dataset", "DATASET"),
+            ("HYPERPARAMETER", "Learning rate", "PARAMETER"),
+            ("LOSS", "Binary Cross-Entropy Loss", "FORMULA"),
+            ("MEASURE", "Cosine Similarity", "METRIC"),
+            ("UNKNOWN_TYPE", "Latent Space", "CONCEPT"),
+        ]
+
+        for raw_type, name, expected in cases:
+            with self.subTest(raw_type=raw_type, name=name):
+                self.assertEqual(expected, canonicalize_concept_type(raw_type, name, []))
+
+        resolution = build_concept_resolution_from_mentions(
+            [make_concept_mention("Floyd's algorithm", mention_id="m1", concept_type="ALGORITHM")]
+        )
+
+        self.assertEqual("METHOD", resolution.registry_entries[0].type)
+        self.assertEqual(["ALGORITHM"], resolution.registry_entries[0].source_types)
+        self.assertTrue({entry.type for entry in resolution.registry_entries} <= set(CANONICAL_CONCEPT_TYPES))
+
+    def test_concept_resolution_filters_sentence_and_formula_aliases_from_registry(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention(
+                    "Prior probability",
+                    mention_id="m1",
+                    concept_type="CONCEPT",
+                    aliases=[
+                        "Prior probability P(C)",
+                        "Naive Bayes calculates the prior probability for each class.",
+                        "$P(C)$",
+                    ],
+                )
+            ]
+        )
+
+        entry = resolution.registry_entries[0]
+        self.assertIn("Naive Bayes calculates the prior probability for each class.", entry.source_names)
+        self.assertNotIn("Naive Bayes calculates the prior probability for each class.", entry.aliases)
+        self.assertNotIn("$P(C)$", entry.aliases)
+        self.assertNotIn("Prior probability P(C)", entry.aliases)
 
     def test_concept_resolution_does_not_merge_through_evidence_spans(self) -> None:
         resolution = build_concept_resolution_from_mentions(
@@ -573,7 +628,7 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertNotIn("Logistic regression", advantage_entry.source_names)
         self.assertNotIn("Logistic regression", advantage_entry.aliases)
 
-    def test_concept_resolution_treats_acronym_only_matches_as_uncertain(self) -> None:
+    def test_concept_resolution_does_not_block_on_two_letter_acronym_only_matches(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
                 make_concept_mention("Learning Rate", mention_id="m1", concept_type="CONCEPT", aliases=["LR"]),
@@ -582,8 +637,7 @@ class LLMPostprocessTests(unittest.TestCase):
         )
 
         self.assertEqual(2, len(resolution.registry_entries))
-        self.assertEqual(1, len(resolution.review_clusters))
-        self.assertIn("acronym_ambiguity", resolution.review_clusters[0].risk_flags)
+        self.assertEqual([], resolution.review_clusters)
 
     def test_concept_resolution_does_not_merge_formula_like_short_alias_chain(self) -> None:
         resolution = build_concept_resolution_from_mentions(
@@ -662,8 +716,65 @@ class LLMPostprocessTests(unittest.TestCase):
         )
 
         self.assertEqual(9, len(resolution.registry_entries))
-        self.assertEqual(1, len(resolution.review_clusters))
-        self.assertIn("auto_group_safety_guard", resolution.review_clusters[0].risk_flags)
+        self.assertGreater(len(resolution.review_clusters), 1)
+        self.assertTrue(all(len(cluster.mention_ids) <= 2 for cluster in resolution.review_clusters))
+        self.assertTrue(any("auto_group_safety_guard" in cluster.risk_flags for cluster in resolution.review_clusters))
+
+    def test_concept_resolution_bounds_production_like_weak_chain_clusters(self) -> None:
+        mentions = []
+        for index in range(60):
+            mentions.append(
+                make_concept_mention(
+                    f"Shared Topic {index}",
+                    mention_id=f"m{index}",
+                    concept_type="METHOD" if index % 2 else "CONCEPT",
+                )
+            )
+
+        resolution = build_concept_resolution_from_mentions(mentions)
+
+        self.assertTrue(resolution.review_clusters)
+        for cluster in resolution.review_clusters:
+            self.assertLessEqual(len(cluster.mention_ids), MAX_REVIEW_CLUSTER_MENTIONS)
+            self.assertLessEqual(len(cluster.pair_scores), MAX_REVIEW_CLUSTER_PAIR_SCORES)
+            self.assertLessEqual(
+                concept_adjudication_prompt_char_count(cluster, resolution.mentions),
+                MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS,
+            )
+
+    def test_concept_adjudication_prompt_payload_is_compact_and_auditable(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention(
+                    "Function Call",
+                    mention_id="m1",
+                    concept_type="METHOD",
+                    aliases=["Function Calling Interface"],
+                    evidence_spans=["Function Call evidence " * 20],
+                ),
+                make_concept_mention("Function Calling", mention_id="m2", concept_type="METHOD"),
+            ]
+        )
+
+        payload = concept_adjudication_prompt_payload(resolution.review_clusters[0], resolution.mentions)
+        mention_payload = payload["mentions"][0]
+
+        self.assertEqual(
+            {
+                "mention_id",
+                "canonical_name",
+                "display_name",
+                "type",
+                "raw_type",
+                "aliases",
+                "description",
+                "evidence_spans",
+                "chunk_id",
+            },
+            set(mention_payload),
+        )
+        self.assertIn("Function Calling Interface", mention_payload["aliases"])
+        self.assertLessEqual(len(mention_payload["evidence_spans"][0]), 160)
 
     def test_concept_resolution_auto_merges_exact_repeated_dpo_name(self) -> None:
         resolution = build_concept_resolution_from_mentions(
@@ -676,6 +787,18 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual(1, len(resolution.registry_entries))
         self.assertEqual("DPO", resolution.registry_entries[0].canonical_name)
         self.assertEqual("auto_merged", resolution.registry_entries[0].merge_status)
+
+    def test_concept_resolution_sends_dpo_expansion_acronym_to_review(self) -> None:
+        resolution = build_concept_resolution_from_mentions(
+            [
+                make_concept_mention("DPO", mention_id="m1", concept_type="METHOD"),
+                make_concept_mention("Direct Preference Optimization", mention_id="m2", concept_type="METHOD"),
+            ]
+        )
+
+        self.assertEqual(2, len(resolution.registry_entries))
+        self.assertEqual(1, len(resolution.review_clusters))
+        self.assertIn("acronym_ambiguity", resolution.review_clusters[0].risk_flags)
 
     def test_concept_resolution_auto_merges_dpo_with_safe_expansion_alias(self) -> None:
         resolution = build_concept_resolution_from_mentions(
@@ -765,12 +888,12 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_singleton_llm_split_preserves_deterministic_canonical_name_and_audit(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Convolution", mention_id="m1", concept_type="METHOD"),
+                make_concept_mention("Function Call", mention_id="m1", concept_type="METHOD"),
                 make_concept_mention(
-                    "Convolution Filter",
+                    "Function Calling",
                     mention_id="m2",
                     concept_type="METHOD",
-                    aliases=["Convolution Filter for Text Classification"],
+                    aliases=["Function Calling Interface"],
                 ),
             ]
         )
@@ -782,18 +905,18 @@ class LLMPostprocessTests(unittest.TestCase):
                 "groups": [
                     {
                         "mention_ids": ["m1"],
-                        "canonical_name": "Convolution",
-                        "display_name": "Convolution",
+                        "canonical_name": "Function Call",
+                        "display_name": "Function Call",
                         "type": "METHOD",
                         "aliases": [],
                         "confidence": 0.9,
                     },
                     {
                         "mention_ids": ["m2"],
-                        "canonical_name": "Convolution Filter for Text Classification",
-                        "display_name": "Convolution Filter",
+                        "canonical_name": "Function Calling Interface",
+                        "display_name": "Function Calling",
                         "type": "METHOD",
-                        "aliases": ["Convolution Filter"],
+                        "aliases": ["Function Calling"],
                         "confidence": 0.9,
                     },
                 ],
@@ -805,9 +928,9 @@ class LLMPostprocessTests(unittest.TestCase):
         applied = apply_concept_adjudications(resolution, [adjudication])
         filter_entry = next(entry for entry in applied.registry_entries if "m2" in entry.mention_ids)
 
-        self.assertEqual("Convolution Filter", filter_entry.canonical_name)
-        self.assertIn("Convolution Filter for Text Classification", filter_entry.aliases)
-        self.assertIn("Convolution Filter for Text Classification", filter_entry.source_names)
+        self.assertEqual("Function Calling", filter_entry.canonical_name)
+        self.assertIn("Function Calling Interface", filter_entry.aliases)
+        self.assertIn("Function Calling Interface", filter_entry.source_names)
         self.assertEqual(["METHOD"], filter_entry.source_types)
         self.assertEqual("llm_adjudicated", filter_entry.resolution_source)
         self.assertEqual([cluster.cluster_id], filter_entry.adjudication_cluster_ids)
@@ -1161,8 +1284,15 @@ class LLMPostprocessTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / RELATION_REGISTRY_FILENAME).exists())
             self.assertTrue((Path(tmp) / CONCEPT_REGISTRY_FILENAME).exists())
             self.assertTrue((Path(tmp) / CONCEPT_MERGE_REVIEW_FILENAME).exists())
+            self.assertTrue((Path(tmp) / CONCEPT_PAIR_SCORES_FILENAME).exists())
             self.assertTrue((Path(tmp) / CONCEPT_ADJUDICATIONS_FILENAME).exists())
             self.assertTrue((Path(tmp) / GRAPH_PREVIEW_FILENAME).exists())
+            loaded_resolution = load_concept_resolution_sidecars(Path(tmp))
+            self.assertIsNotNone(loaded_resolution)
+            self.assertEqual(
+                len(concept_resolution.pair_scores),
+                len(loaded_resolution.pair_scores) if loaded_resolution else 0,
+            )
 
     def test_select_run_inputs_supports_offset(self) -> None:
         values = list(range(10))
