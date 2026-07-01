@@ -4,18 +4,19 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from llama_index.core.vector_stores import MetadataFilter, MetadataFilters, VectorStoreQuery
-
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.configs.constants import WORKFLOW_LOGGING
 from backend.utils.helpers import get_logger
+from backend.workflows.agents.retrieval_access import (
+    POSTPROCESSED_CHUNK_KIND,
+    POSTPROCESSED_CONCEPT_KIND,
+    RetrievalStoreAccess,
+)
 
 
 logger = get_logger(WORKFLOW_LOGGING)
 
 
-POSTPROCESSED_CHUNK_KIND = "postprocessed_retrieval_chunk"
-POSTPROCESSED_CONCEPT_KIND = "postprocessed_concept_node"
 COMPARISON_PATTERN = re.compile(r"\s+(?:vs\.?|versus|compared?\s+to)\s+", re.IGNORECASE)
 VISUALIZATION_PREFIX_PATTERN = re.compile(
     r"^\s*(?:please\s+)?(?:visuali[sz]e|show|plot|map|draw)\s+"
@@ -56,13 +57,15 @@ class VisualizerRetrievalPipeline:
     def __init__(self, knowledge_graph_indexer: Any, settings: KnowledgeGraphSearchSettings | None = None) -> None:
         self.indexer = knowledge_graph_indexer
         self.settings = settings or knowledge_graph_indexer.kg_search_settings
-        self.embedder = knowledge_graph_indexer.embedder
-        self.storage_context = knowledge_graph_indexer.storage_context
-        self.vector_store = self._resolve_vector_store()
-        self.graph_store = self._resolve_graph_store()
-        self._concept_nodes: list[Any] | None = None
-        self._concept_by_id: dict[str, Any] = {}
-        self._chunk_by_id: dict[str, Any] = {}
+        self.access = RetrievalStoreAccess(knowledge_graph_indexer)
+        self.embedder = self.access.embedder
+        self.storage_context = self.access.storage_context
+        self.vector_store = self.access.vector_store
+        self.graph_store = self.access.graph_store
+
+    @property
+    def health_report(self):
+        return self.access.health_report
 
     def visualize(self, queries: list[str]) -> tuple[list[str], list[tuple[str, str, str]], list[str]]:
         original_queries = list(queries)
@@ -169,6 +172,11 @@ class VisualizerRetrievalPipeline:
 
     def _retrieve_supporting_source_chunk_ids(self, query: str) -> list[str]:
         if self.vector_store is None:
+            self.health_report.record(
+                "missing_vector_store",
+                "Visualizer retrieval has no vector store; skipping source support lookup.",
+                component="visualizer",
+            )
             return []
 
         result = self._query_vector_store(
@@ -215,6 +223,11 @@ class VisualizerRetrievalPipeline:
 
     def _vector_concept_candidates(self, query: str) -> list[ConceptCandidate]:
         if self.vector_store is None:
+            self.health_report.record(
+                "missing_vector_store",
+                "Visualizer retrieval has no vector store; skipping vector concept lookup.",
+                component="visualizer",
+            )
             return []
 
         result = self._query_vector_store(
@@ -253,7 +266,14 @@ class VisualizerRetrievalPipeline:
         source_chunk_ids: list[str],
         concept_candidates: dict[str, ConceptCandidate],
     ) -> list[EdgeCandidate]:
-        if self.graph_store is None or not anchors:
+        if self.graph_store is None:
+            self.health_report.record(
+                "missing_graph_store",
+                "Visualizer retrieval has no graph store; skipping semantic edge expansion.",
+                component="visualizer",
+            )
+            return []
+        if not anchors:
             return []
 
         seed_candidates = self._semantic_seed_candidates(anchors, mentioned, source_chunk_ids)
@@ -517,33 +537,23 @@ class VisualizerRetrievalPipeline:
 
     def _query_vector_store(self, query: str, *, top_k: int, node_kind: str) -> Any:
         query_embedding = self.embedder.get_query_embedding(query)
-        filters = MetadataFilters(filters=[MetadataFilter(key="docstore_node_kind", value=node_kind)])
-        vector_query = VectorStoreQuery(query_embedding=query_embedding, similarity_top_k=top_k, filters=filters)
-        try:
-            return self.vector_store.query(vector_query)
-        except Exception:
-            logger.warning("Visualizer vector query with metadata filters failed; retrying unfiltered.", exc_info=True)
-            fallback_query = VectorStoreQuery(query_embedding=query_embedding, similarity_top_k=top_k)
-            return self.vector_store.query(fallback_query)
+        return self.access.query_vector(
+            query_embedding,
+            top_k=top_k,
+            node_kind=node_kind,
+            component="visualizer",
+            fallback_message="Visualizer vector query with metadata filters failed; retrying unfiltered.",
+        )
 
     def _get_relation_map(self, nodes: list[Any]) -> list[tuple[Any, Any, Any]]:
-        if self.graph_store is None:
-            return []
-        try:
-            return list(
-                self.graph_store.get_rel_map(
-                    nodes,
-                    depth=self.settings.visualizer_graph_depth,
-                    limit=max(self.settings.visualizer_max_edges * 3, 30),
-                    ignore_rels=list(self.settings.visualizer_denied_relation_labels),
-                )
-            )
-        except Exception:
-            ids = [self._node_id(node) for node in nodes if self._node_id(node)]
-            return [
-                triplet for triplet in self._get_triplets(ids=ids)
-                if self._relation_label(triplet[1]) not in self.settings.visualizer_denied_relation_labels
-            ]
+        return self.access.relation_map(
+            nodes,
+            depth=self.settings.visualizer_graph_depth,
+            limit=max(self.settings.visualizer_max_edges * 3, 30),
+            ignore_rels=self.settings.visualizer_denied_relation_labels,
+            component="visualizer",
+            fallback_message="Visualizer graph relation-map lookup failed; retrying with triplet lookup.",
+        )
 
     def _get_triplets(
         self,
@@ -551,59 +561,16 @@ class VisualizerRetrievalPipeline:
         ids: list[str] | None = None,
         relation_names: list[str] | None = None,
     ) -> list[tuple[Any, Any, Any]]:
-        if self.graph_store is None:
-            return []
-        try:
-            return list(self.graph_store.get_triplets(ids=ids, relation_names=relation_names))
-        except Exception:
-            logger.warning("Visualizer graph triplet lookup failed.", exc_info=True)
-            return []
+        return self.access.triplets(ids=ids, relation_names=relation_names, component="visualizer")
 
     def _all_concepts(self) -> list[Any]:
-        if self._concept_nodes is not None:
-            return self._concept_nodes
-
-        if self.graph_store is None:
-            self._concept_nodes = []
-            return self._concept_nodes
-
-        try:
-            nodes = list(self.graph_store.get())
-        except Exception:
-            logger.warning("Visualizer concept enumeration failed.", exc_info=True)
-            nodes = []
-
-        self._concept_nodes = [node for node in nodes if self._is_concept_node(node)]
-        self._concept_by_id = {
-            node_id: node
-            for node in self._concept_nodes
-            if (node_id := self._node_id(node))
-        }
-        return self._concept_nodes
+        return self.access.all_concepts(component="visualizer")
 
     def _get_graph_node(self, node_id: str) -> Any | None:
-        if node_id in self._concept_by_id:
-            return self._concept_by_id[node_id]
-        if self.graph_store is None:
-            return None
-        try:
-            nodes = list(self.graph_store.get(ids=[node_id]))
-        except Exception:
-            return None
-        if not nodes:
-            return None
-        node = nodes[0]
-        if self._is_concept_node(node):
-            self._concept_by_id[node_id] = node
-        return node
+        return self.access.graph_node(node_id, component="visualizer")
 
     def _get_docstore_node(self, node_id: str) -> Any | None:
-        if node_id in self._chunk_by_id:
-            return self._chunk_by_id[node_id]
-        node = getattr(self.storage_context.docstore, "docs", {}).get(node_id)
-        if node is not None:
-            self._chunk_by_id[node_id] = node
-        return node
+        return self.access.docstore_node(node_id)
 
     def _concept_candidate_from_node(self, node: Any, query: str) -> ConceptCandidate:
         node_id = self._node_id(node) or ""
@@ -917,98 +884,41 @@ class VisualizerRetrievalPipeline:
                 return 0.10
         return 0.0
 
-    def _resolve_vector_store(self) -> Any | None:
-        index = getattr(self.indexer, "index", None)
-        vector_store = getattr(index, "vector_store", None)
-        if vector_store is not None:
-            return vector_store
-        return getattr(self.storage_context, "vector_store", None)
-
-    def _resolve_graph_store(self) -> Any | None:
-        index = getattr(self.indexer, "index", None)
-        graph_store = getattr(index, "property_graph_store", None)
-        if graph_store is not None:
-            return graph_store
-        return getattr(self.storage_context, "property_graph_store", None)
-
     @staticmethod
     def _is_concept_node(node: Any) -> bool:
-        node_id = VisualizerRetrievalPipeline._node_id(node)
-        label = str(getattr(node, "label", "") or "").lower()
-        properties = getattr(node, "properties", {}) or {}
-        if node_id and node_id.startswith("chunk_"):
-            return False
-        if label == "text_chunk":
-            return False
-        return bool(properties.get("entity_name") or properties.get("display_name") or (node_id and node_id.startswith("concept_")))
+        return RetrievalStoreAccess.is_concept_node(node)
 
     @staticmethod
     def _node_id(node: Any) -> str | None:
-        for attr in ("id", "node_id", "id_", "name"):
-            value = getattr(node, attr, None)
-            if value is not None:
-                return str(value)
-        return None
+        return RetrievalStoreAccess.node_id(node)
 
     @staticmethod
     def _node_label(node: Any) -> str:
-        properties = getattr(node, "properties", {}) or {}
-        for key in ("entity_name", "display_name", "name", "text"):
-            value = properties.get(key)
-            if value:
-                return str(value)
-        name = getattr(node, "name", None)
-        if name and not str(name).startswith("concept_"):
-            return str(name)
-        node_id = VisualizerRetrievalPipeline._node_id(node)
-        return str(node_id) if node_id is not None else ""
+        return RetrievalStoreAccess.node_label(node)
 
     @staticmethod
     def _node_text(node: Any) -> str:
-        text = getattr(node, "text", None)
-        if text is not None:
-            return str(text)
-        get_content = getattr(node, "get_content", None)
-        if callable(get_content):
-            try:
-                return str(get_content())
-            except Exception:
-                return ""
-        return ""
+        return RetrievalStoreAccess.node_text(node)
 
     @staticmethod
     def _node_aliases(node: Any) -> list[str]:
-        properties = getattr(node, "properties", {}) or {}
-        return VisualizerRetrievalPipeline._string_list(properties.get("aliases"))
+        return RetrievalStoreAccess.node_aliases(node)
 
     @staticmethod
     def _node_source_chunk_ids(node: Any) -> list[str]:
-        properties = getattr(node, "properties", {}) or {}
-        return VisualizerRetrievalPipeline._string_list(properties.get("source_chunk_ids"))
+        return RetrievalStoreAccess.node_source_chunk_ids(node)
 
     @staticmethod
     def _relation_label(relation: Any) -> str:
-        for attr in ("label", "id"):
-            value = getattr(relation, attr, None)
-            if value:
-                return str(value)
-        return ""
+        return RetrievalStoreAccess.relation_label(relation)
 
     @staticmethod
     def _relation_evidence_chunk_ids(relation: Any) -> list[str]:
-        properties = getattr(relation, "properties", {}) or {}
-        return VisualizerRetrievalPipeline._string_list(
-            properties.get("evidence_chunk_ids") or properties.get("source_chunk_ids")
-        )
+        return RetrievalStoreAccess.relation_evidence_chunk_ids(relation)
 
     @staticmethod
     def _salience(node: Any) -> float:
-        properties = getattr(node, "properties", {}) or {}
-        value = properties.get("postprocess_max_salience") or properties.get("max_salience") or 0.0
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return 0.0
+        return RetrievalStoreAccess.salience(node)
 
     @staticmethod
     def _query_terms(query: str) -> set[str]:

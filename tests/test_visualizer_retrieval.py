@@ -13,12 +13,15 @@ class FakeEmbedder:
 
 
 class FakeVectorStore:
-    def __init__(self, ids_by_kind: dict[str | None, list[str]] | None = None) -> None:
+    def __init__(self, ids_by_kind: dict[str | None, list[str]] | None = None, *, fail_filtered: bool = False) -> None:
         self.ids_by_kind = ids_by_kind or {}
+        self.fail_filtered = fail_filtered
         self.queries = []
 
     def query(self, query):
         self.queries.append(query)
+        if self.fail_filtered and getattr(query, "filters", None):
+            raise RuntimeError("filtered query failed")
         node_kind = None
         if getattr(query, "filters", None):
             filters = getattr(query.filters, "filters", []) or []
@@ -404,6 +407,28 @@ class VisualizerRetrievalPipelineTests(unittest.TestCase):
         self.assertIn("concept_fasttext", nodes)
         self.assertIn(("concept_fasttext", "USES", "concept_subword"), triplets)
         self.assertNotIn("concept_input_x", nodes)
+
+    def test_vector_filter_fallback_records_health_event(self) -> None:
+        fasttext = FakeGraphNode("concept_fasttext", "FastText", source_chunk_ids=["chunk_fasttext"])
+        subword_sum = FakeGraphNode("concept_subword", "subword sum", source_chunk_ids=["chunk_fasttext"])
+        graph_store = FakeGraphStore(
+            [fasttext, subword_sum],
+            [
+                (
+                    fasttext,
+                    FakeRelation("USES", {"evidence_chunk_ids": ["chunk_fasttext"]}),
+                    subword_sum,
+                )
+            ],
+        )
+        vector_store = FakeVectorStore({None: ["concept_fasttext"]}, fail_filtered=True)
+        pipeline = VisualizerRetrievalPipeline(make_indexer(vector_store, graph_store))
+
+        nodes, triplets, _ = pipeline.visualize(["Fast Text"])
+
+        self.assertIn("concept_fasttext", nodes)
+        self.assertIn(("concept_fasttext", "USES", "concept_subword"), triplets)
+        self.assertTrue(pipeline.health_report.has_code("vector_filter_fallback"))
 
     def test_semantic_expansion_uses_grounded_mentioned_concepts(self) -> None:
         settings = KnowledgeGraphSearchSettings(

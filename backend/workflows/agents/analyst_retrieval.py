@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from llama_index.core.schema import NodeWithScore, TextNode
-from llama_index.core.vector_stores import MetadataFilter, MetadataFilters, VectorStoreQuery
 
 from backend.configs.constants import MAX_SOURCE_CHARS, MIN_RELEVANCE_SCORE, WORKFLOW_LOGGING
 from backend.configs.models import RerankerSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.utils.helpers import get_logger
+from backend.workflows.agents.retrieval_access import POSTPROCESSED_CHUNK_KIND, RetrievalStoreAccess
 from backend.workflows.agents.retrieval_evidence import NormalizedMetadata, normalize_metadata
 
 
@@ -18,7 +18,6 @@ logger = get_logger(WORKFLOW_LOGGING)
 
 
 DENIED_ANALYST_RELATIONS = {"MENTIONS", "PARENT", "CHILD"}
-POSTPROCESSED_CHUNK_KIND = "postprocessed_retrieval_chunk"
 
 
 @dataclass
@@ -105,12 +104,17 @@ class AnalystRetrievalPipeline:
         self.indexer = knowledge_graph_indexer
         self.settings = settings or knowledge_graph_indexer.kg_search_settings
         self.reranker_settings = reranker_settings or RerankerSettings()
-        self.embedder = knowledge_graph_indexer.embedder
-        self.storage_context = knowledge_graph_indexer.storage_context
-        self.vector_store = self._resolve_vector_store()
-        self.graph_store = self._resolve_graph_store()
+        self.access = RetrievalStoreAccess(knowledge_graph_indexer)
+        self.embedder = self.access.embedder
+        self.storage_context = self.access.storage_context
+        self.vector_store = self.access.vector_store
+        self.graph_store = self.access.graph_store
         self.reranker = reranker if reranker is not None else self._create_configured_reranker()
         self._reranker_failure_logged = False
+
+    @property
+    def health_report(self):
+        return self.access.health_report
 
     def search(self, queries: list[str]) -> str:
         formatted_blocks: list[str] = []
@@ -153,6 +157,11 @@ class AnalystRetrievalPipeline:
 
     def _retrieve_source_candidates(self, query: str) -> list[SourceCandidate]:
         if self.vector_store is None:
+            self.health_report.record(
+                "missing_vector_store",
+                "Analyst retrieval has no vector store; returning no source candidates.",
+                component="analyst",
+            )
             logger.warning("Analyst retrieval has no vector store; returning no source candidates.")
             return []
 
@@ -196,27 +205,13 @@ class AnalystRetrievalPipeline:
         return candidates
 
     def _query_vector_store(self, query_embedding: list[float], *, with_filters: bool) -> Any:
-        filters = None
-        if with_filters:
-            filters = MetadataFilters(
-                filters=[
-                    MetadataFilter(key="docstore_node_kind", value=POSTPROCESSED_CHUNK_KIND),
-                ]
-            )
-
-        query = VectorStoreQuery(
-            query_embedding=query_embedding,
-            similarity_top_k=self.settings.analyst_source_candidate_k,
-            filters=filters,
+        return self.access.query_vector(
+            query_embedding,
+            top_k=self.settings.analyst_source_candidate_k,
+            node_kind=POSTPROCESSED_CHUNK_KIND if with_filters else None,
+            component="analyst",
+            fallback_message="Analyst vector query with metadata filters failed; retrying unfiltered.",
         )
-
-        try:
-            return self.vector_store.query(query)
-        except Exception:
-            if with_filters:
-                logger.warning("Analyst vector query with metadata filters failed; retrying unfiltered.", exc_info=True)
-                return self._query_vector_store(query_embedding, with_filters=False)
-            raise
 
     def _rerank_sources(self, query: str, candidates: list[SourceCandidate]) -> list[SourceCandidate]:
         if not candidates or self.reranker is None:
@@ -261,7 +256,14 @@ class AnalystRetrievalPipeline:
         return ordered
 
     def _attach_mentioned_concepts(self, candidates: list[SourceCandidate]) -> None:
-        if self.graph_store is None or not candidates:
+        if self.graph_store is None:
+            self.health_report.record(
+                "missing_graph_store",
+                "Analyst retrieval has no graph store; skipping concept attachment.",
+                component="analyst",
+            )
+            return
+        if not candidates:
             return
 
         candidate_by_id = {candidate.node_id: candidate for candidate in candidates}
@@ -293,7 +295,14 @@ class AnalystRetrievalPipeline:
         query: str,
         seed_sources: list[SourceCandidate],
     ) -> list[RelationCandidate]:
-        if self.graph_store is None or not seed_sources:
+        if self.graph_store is None:
+            self.health_report.record(
+                "missing_graph_store",
+                "Analyst retrieval has no graph store; skipping semantic relation expansion.",
+                component="analyst",
+            )
+            return []
+        if not seed_sources:
             return []
 
         source_score_by_chunk = {source.node_id: source.score for source in seed_sources}
@@ -696,10 +705,22 @@ class AnalystRetrievalPipeline:
                 logger.warning(
                     f"Sentence-transformers Analyst reranker initialization failed; deterministic ranking will be used. Error: {exc}"
                 )
+                self.health_report.record(
+                    "analyst_reranker_init_failed",
+                    "Sentence-transformers Analyst reranker initialization failed; deterministic ranking will be used.",
+                    component="analyst",
+                    details={"mode": self.settings.analyst_reranker_mode, "error": str(exc)},
+                )
                 return None
 
             if not self._reranker_health_check(reranker):
                 logger.warning("Sentence-transformers Analyst reranker health check failed; deterministic ranking will be used.")
+                self.health_report.record(
+                    "analyst_reranker_health_check_failed",
+                    "Sentence-transformers Analyst reranker health check failed; deterministic ranking will be used.",
+                    component="analyst",
+                    details={"mode": self.settings.analyst_reranker_mode},
+                )
                 return None
             return reranker
 
@@ -709,6 +730,12 @@ class AnalystRetrievalPipeline:
                 from llama_index.llms.ollama import Ollama
             except Exception:
                 logger.warning("LLMRerank/Ollama imports failed; Analyst reranker disabled.", exc_info=True)
+                self.health_report.record(
+                    "analyst_reranker_import_failed",
+                    "LLMRerank/Ollama imports failed; Analyst reranker disabled.",
+                    component="analyst",
+                    details={"mode": self.settings.analyst_reranker_mode},
+                )
                 return None
 
             reranker_params = self.reranker_settings.ollama_llm_rerank_params()
@@ -726,10 +753,22 @@ class AnalystRetrievalPipeline:
 
             if not self._reranker_health_check(reranker):
                 logger.warning("Analyst LLM reranker health check failed; deterministic ranking will be used.")
+                self.health_report.record(
+                    "analyst_reranker_health_check_failed",
+                    "Analyst LLM reranker health check failed; deterministic ranking will be used.",
+                    component="analyst",
+                    details={"mode": self.settings.analyst_reranker_mode},
+                )
                 return None
             return reranker
 
         logger.warning("Unknown Analyst reranker mode %r; deterministic ranking will be used.", self.settings.analyst_reranker_mode)
+        self.health_report.record(
+            "analyst_reranker_unknown_mode",
+            "Unknown Analyst reranker mode; deterministic ranking will be used.",
+            component="analyst",
+            details={"mode": self.settings.analyst_reranker_mode},
+        )
         return None
 
     def _reranker_health_check(self, reranker: Any) -> bool:
@@ -741,25 +780,17 @@ class AnalystRetrievalPipeline:
             ranked = reranker.postprocess_nodes(nodes, query_str="graph retrieval")
         except Exception as exc:
             logger.warning(f"Analyst reranker health check raised an exception; deterministic ranking will be used. Error: {exc}")
+            self.health_report.record(
+                "analyst_reranker_health_check_exception",
+                "Analyst reranker health check raised an exception; deterministic ranking will be used.",
+                component="analyst",
+                details={"error": str(exc)},
+            )
             return False
         return bool(ranked) and "graph retrieval" in ranked[0].node.get_content().lower()
 
-    def _resolve_vector_store(self) -> Any | None:
-        index = getattr(self.indexer, "index", None)
-        vector_store = getattr(index, "vector_store", None)
-        if vector_store is not None:
-            return vector_store
-        return getattr(self.storage_context, "vector_store", None)
-
-    def _resolve_graph_store(self) -> Any | None:
-        index = getattr(self.indexer, "index", None)
-        graph_store = getattr(index, "property_graph_store", None)
-        if graph_store is not None:
-            return graph_store
-        return getattr(self.storage_context, "property_graph_store", None)
-
     def _get_docstore_node(self, node_id: str) -> Any | None:
-        return getattr(self.storage_context.docstore, "docs", {}).get(node_id)
+        return self.access.docstore_node(node_id)
 
     def _is_usable_source(self, metadata: NormalizedMetadata, text: str) -> bool:
         if not text.strip():
@@ -836,24 +867,14 @@ class AnalystRetrievalPipeline:
         return len(self._get_relation_map(concepts[:3], limit=5))
 
     def _get_relation_map(self, concepts: list[Any], limit: int | None = None) -> list[tuple[Any, Any, Any]]:
-        if not concepts or self.graph_store is None:
-            return []
-        try:
-            return list(
-                self.graph_store.get_rel_map(
-                    concepts,
-                    depth=self.settings.analyst_graph_depth,
-                    limit=limit or self.settings.analyst_graph_relation_limit,
-                    ignore_rels=list(DENIED_ANALYST_RELATIONS),
-                )
-            )
-        except Exception:
-            ids = [getattr(concept, "id", None) for concept in concepts if getattr(concept, "id", None)]
-            return [
-                triplet
-                for triplet in self._get_triplets(ids=ids)
-                if self._relation_label(triplet[1]) not in DENIED_ANALYST_RELATIONS
-            ][: limit or self.settings.analyst_graph_relation_limit]
+        return self.access.relation_map(
+            concepts,
+            depth=self.settings.analyst_graph_depth,
+            limit=limit or self.settings.analyst_graph_relation_limit,
+            ignore_rels=DENIED_ANALYST_RELATIONS,
+            component="analyst",
+            fallback_message="Analyst graph relation-map lookup failed; retrying with triplet lookup.",
+        )
 
     def _get_triplets(
         self,
@@ -861,13 +882,7 @@ class AnalystRetrievalPipeline:
         ids: list[str] | None = None,
         relation_names: list[str] | None = None,
     ) -> list[tuple[Any, Any, Any]]:
-        if self.graph_store is None:
-            return []
-        try:
-            return list(self.graph_store.get_triplets(ids=ids, relation_names=relation_names))
-        except Exception:
-            logger.warning("Analyst graph triplet lookup failed.", exc_info=True)
-            return []
+        return self.access.triplets(ids=ids, relation_names=relation_names, component="analyst")
 
     def _dedupe_sources(self, candidates: list[SourceCandidate]) -> list[SourceCandidate]:
         seen_chunks: set[str] = set()
@@ -1034,47 +1049,26 @@ class AnalystRetrievalPipeline:
         return self._display_metadata_path(candidate.metadata) or self._metadata_path(candidate.metadata) or candidate.node_id
 
     def _node_text(self, node: Any) -> str:
-        text = getattr(node, "text", None)
-        if text is not None:
-            return str(text)
-        get_content = getattr(node, "get_content", None)
-        if callable(get_content):
-            try:
-                return str(get_content())
-            except Exception:
-                return ""
-        return ""
+        return self.access.node_text(node)
 
     def _node_id(self, node: Any) -> str | None:
-        for attr in ("node_id", "id_", "id"):
-            value = getattr(node, attr, None)
-            if value is not None:
-                return str(value)
-        return None
+        return self.access.node_id(node)
 
     def _node_label(self, node: Any) -> str:
-        properties = getattr(node, "properties", {}) or {}
-        for key in ("entity_name", "display_name", "text", "name"):
-            value = properties.get(key)
-            if value:
-                return str(value)
-        name = getattr(node, "name", None)
-        if name and not str(name).startswith("concept_"):
-            return str(name)
-        node_id = getattr(node, "id", None)
-        return str(node_id) if node_id is not None else ""
+        return self.access.node_label(node)
 
     def _relation_label(self, relation: Any) -> str:
-        for attr in ("label", "id"):
-            value = getattr(relation, attr, None)
-            if value:
-                return str(value)
-        return ""
+        return self.access.relation_label(relation)
 
     def _log_reranker_failure(self) -> None:
         if self._reranker_failure_logged:
             return
         self._reranker_failure_logged = True
+        self.health_report.record(
+            "analyst_reranker_runtime_failed",
+            "Analyst reranker failed; deterministic ranking will be used.",
+            component="analyst",
+        )
         logger.warning("Analyst reranker failed; deterministic ranking will be used.")
 
     @staticmethod

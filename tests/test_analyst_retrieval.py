@@ -909,6 +909,7 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         output = pipeline.search(["fallback"])
 
         self.assertIn("Reranker fallback source", output)
+        self.assertTrue(pipeline.health_report.has_code("analyst_reranker_runtime_failed"))
 
     def test_failed_ollama_reranker_health_check_disables_reranker(self) -> None:
         settings = KnowledgeGraphSearchSettings(analyst_reranker_mode="ollama_llm_rerank")
