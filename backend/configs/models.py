@@ -212,7 +212,7 @@ class ModelSettings(BaseSettings):
         top_p=0.9,
         num_predict=8192,
         reasoning=True,
-        prompt_version="v3"
+        prompt_version="v4"
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (same instance as analyst)
     mentor: LocalModelSettings | BaseLLMSettings = OllamaSettings(
@@ -284,7 +284,7 @@ def _vllm_models() -> ModelSettings:
             base_url=generation_url,
             temperature=0.15,
             max_tokens=8192,
-            prompt_version="v3",
+            prompt_version="v4",
         ),
         mentor=OpenAISettings(
             role=ModelRoleType.mentor,

@@ -21,11 +21,58 @@ MAX_SIDEBAR_HISTORY_ITEMS = 10
 SIDEBAR_TITLE_MAX_CHARS = 48
 
 
+_MATH_SPAN_RE = re.compile(r"\$\$.*?\$\$|\$.*?\$", flags=re.DOTALL)
+
+
+def _demote_display_math_to_inline(text: str) -> str:
+    return re.sub(r"\$\$(.+?)\$\$", lambda match: f"${match.group(1).strip()}$", text, flags=re.DOTALL)
+
+
+def _collapse_table_display_math(text: str) -> str:
+    """Keeps Markdown table rows single-line when an agent puts display math in a cell."""
+    lines = text.splitlines()
+    collapsed: list[str] = []
+    idx = 0
+
+    while idx < len(lines):
+        line = lines[idx]
+        if line.lstrip().startswith("|") and line.count("$$") % 2 == 1:
+            row_parts = [line.strip()]
+            idx += 1
+            while idx < len(lines):
+                row_parts.append(lines[idx].strip())
+                if lines[idx].count("$$") % 2 == 1:
+                    idx += 1
+                    break
+                idx += 1
+
+            row = " ".join(part for part in row_parts if part)
+            collapsed.append(_demote_display_math_to_inline(row))
+            continue
+
+        if line.lstrip().startswith("|") and "$$" in line:
+            line = _demote_display_math_to_inline(line)
+        collapsed.append(line)
+        idx += 1
+
+    return "\n".join(collapsed)
+
+
+def _replace_math_pipes(text: str) -> str:
+    """Avoids Markdown table splits from raw conditional bars inside math spans."""
+
+    def replace_in_span(match: re.Match[str]) -> str:
+        return re.sub(r"(?<!\\)\|", r"\\mid ", match.group(0))
+
+    return _MATH_SPAN_RE.sub(replace_in_span, text)
+
+
 def _normalize_math_delimiters(text: str) -> str:
-    """Converts LaTeX \\[...\\] and \\(...\\) delimiters to $$...$$ and $...$ so remark-math can render them."""
+    """Normalizes LLM Markdown/LaTeX into forms supported by the chat renderer."""
     text = re.sub(r'\\\[(.+?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
     text = re.sub(r'\\\((.+?)\\\)', r'$\1$', text, flags=re.DOTALL)
-    return text
+    text = _collapse_table_display_math(text)
+    return _replace_math_pipes(text)
 
 
 def _sidebar_title(text: str, max_chars: int = SIDEBAR_TITLE_MAX_CHARS) -> str:
@@ -91,6 +138,13 @@ def _message_to_memory_payload(message: "Message") -> dict[str, str]:
         "timestamp": message.timestamp,
         "dom_id": message.dom_id,
     }
+
+
+def _message_from_memory_payload(message: dict[str, Any]) -> "Message":
+    payload = dict(message)
+    if payload.get("role") != "user":
+        payload["content"] = _normalize_math_delimiters(str(payload.get("content", "")))
+    return Message(**payload)
 
 
 def _cached_response_chunks(content: str, chunk_size: int = 24) -> list[str]:
@@ -438,7 +492,7 @@ class AppState(rx.State):
 
         try:
             messages = [
-                Message(**message)
+                _message_from_memory_payload(message)
                 for message in doc.get("messages", [])
                 if isinstance(message, dict)
             ]
