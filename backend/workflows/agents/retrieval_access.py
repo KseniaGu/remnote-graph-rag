@@ -14,6 +14,7 @@ logger = get_logger(WORKFLOW_LOGGING)
 
 
 POSTPROCESSED_CHUNK_KIND = "postprocessed_retrieval_chunk"
+POSTPROCESSED_PASSAGE_KIND = "postprocessed_embedding_passage"
 POSTPROCESSED_CONCEPT_KIND = "postprocessed_concept_node"
 
 

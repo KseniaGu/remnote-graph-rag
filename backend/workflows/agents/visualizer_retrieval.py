@@ -10,6 +10,7 @@ from backend.utils.helpers import get_logger
 from backend.workflows.agents.retrieval_access import (
     POSTPROCESSED_CHUNK_KIND,
     POSTPROCESSED_CONCEPT_KIND,
+    POSTPROCESSED_PASSAGE_KIND,
     RetrievalStoreAccess,
 )
 
@@ -182,23 +183,56 @@ class VisualizerRetrievalPipeline:
         result = self._query_vector_store(
             query,
             top_k=self.settings.visualizer_source_candidate_k,
-            node_kind=POSTPROCESSED_CHUNK_KIND,
+            node_kind=POSTPROCESSED_PASSAGE_KIND,
         )
+        scored_ids = self._scored_source_hits(query, result)
+        if not scored_ids:
+            result = self._query_vector_store(
+                query,
+                top_k=self.settings.visualizer_source_candidate_k,
+                node_kind=POSTPROCESSED_CHUNK_KIND,
+            )
+            scored_ids = self._scored_source_hits(query, result)
+
+        scored_ids.sort(key=lambda item: item[1], reverse=True)
+        return self._ordered_unique(node_id for node_id, _ in scored_ids)
+
+    def _scored_source_hits(self, query: str, result: Any) -> list[tuple[str, float]]:
         ids = list(getattr(result, "ids", None) or [])
         similarities = list(getattr(result, "similarities", None) or [0.0] * len(ids))
         scored_ids: list[tuple[str, float]] = []
 
         for node_id, similarity in zip(ids, similarities, strict=False):
-            node = self._get_docstore_node(node_id)
-            if not self._usable_source_node(node):
+            resolved = self._resolve_source_hit(str(node_id))
+            if resolved is None:
                 continue
+            parent_id, node, matched_text = resolved
             metadata = getattr(node, "metadata", {}) or {}
-            text = self._node_text(node)
+            text = matched_text or self._node_text(node)
             score = self._clip_score(float(similarity or 0.0) + self._source_query_boost(query, text, metadata))
-            scored_ids.append((str(node_id), score))
+            scored_ids.append((parent_id, score))
 
-        scored_ids.sort(key=lambda item: item[1], reverse=True)
-        return self._ordered_unique(node_id for node_id, _ in scored_ids)
+        return scored_ids
+
+    def _resolve_source_hit(self, node_id: str) -> tuple[str, Any, str] | None:
+        hit_node = self._get_docstore_node(node_id)
+        if hit_node is None:
+            return None
+
+        hit_metadata = getattr(hit_node, "metadata", {}) or {}
+        if hit_metadata.get("docstore_node_kind") == POSTPROCESSED_PASSAGE_KIND:
+            parent_id = str(hit_metadata.get("parent_chunk_id") or hit_metadata.get("chunk_id") or "")
+            if not parent_id:
+                return None
+            parent_node = self._get_docstore_node(parent_id)
+            if not self._usable_source_node(parent_node):
+                return None
+            return parent_id, parent_node, self._node_text(hit_node)
+
+        if not self._usable_source_node(hit_node):
+            return None
+        parent_id = str(hit_metadata.get("chunk_id") or node_id)
+        return parent_id, hit_node, self._node_text(hit_node)
 
     def _filter_source_chunks_for_anchors(
         self,

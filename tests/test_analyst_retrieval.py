@@ -24,6 +24,18 @@ class FakeVectorStore:
         return VectorStoreQueryResult(ids=self.ids, similarities=self.similarities)
 
 
+class SequencedVectorStore:
+    def __init__(self, results: list[tuple[list[str], list[float]]]) -> None:
+        self.results = results
+        self.queries = []
+
+    def query(self, query):
+        self.queries.append(query)
+        index = min(len(self.queries) - 1, len(self.results) - 1)
+        ids, similarities = self.results[index]
+        return VectorStoreQueryResult(ids=ids, similarities=similarities)
+
+
 class FakeTextNode:
     def __init__(self, node_id: str, text: str, metadata: dict) -> None:
         self.node_id = node_id
@@ -173,6 +185,104 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         self.assertNotIn("Quarantined source", output)
         self.assertIsNotNone(vector_store.queries[0].filters)
 
+    def test_passage_vector_hits_resolve_to_parent_chunks(self) -> None:
+        docs = {
+            "chunk_parent": FakeTextNode(
+                "chunk_parent",
+                "Full parent chunk explains Adam, AdamW, RMSProp, and AdaGrad optimizers.",
+                make_metadata(
+                    chunk_id="chunk_parent",
+                    source="Optimization",
+                    path=["Optimization", "Optimizers"],
+                    heading_path=["Optimization", "Optimizers"],
+                ),
+            ),
+            "chunk_parent::passage_000": FakeTextNode(
+                "chunk_parent::passage_000",
+                "Path: Optimization > Optimizers\n\nSummary: Optimizer overview.\n\nAdamW decouples weight decay.",
+                make_metadata(
+                    docstore_node_kind="postprocessed_embedding_passage",
+                    chunk_id="chunk_parent",
+                    parent_chunk_id="chunk_parent",
+                    passage_id="chunk_parent::passage_000",
+                    passage_index=0,
+                ),
+            ),
+        }
+        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_parent::passage_000"], [0.91]), docs))
+
+        output = pipeline.search(["AdamW optimizer"])
+
+        self.assertIn("Chunk: chunk_parent", output)
+        self.assertNotIn("chunk_parent::passage_000", output)
+        self.assertIn("Full parent chunk", output)
+
+    def test_duplicate_passage_hits_are_collapsed_to_one_parent_source(self) -> None:
+        docs = {
+            "chunk_parent": FakeTextNode(
+                "chunk_parent",
+                "Parent chunk about optimizer families.",
+                make_metadata(chunk_id="chunk_parent"),
+            ),
+            "chunk_parent::passage_000": FakeTextNode(
+                "chunk_parent::passage_000",
+                "SGD and Momentum.",
+                make_metadata(
+                    docstore_node_kind="postprocessed_embedding_passage",
+                    chunk_id="chunk_parent",
+                    parent_chunk_id="chunk_parent",
+                ),
+            ),
+            "chunk_parent::passage_001": FakeTextNode(
+                "chunk_parent::passage_001",
+                "Adam and AdamW.",
+                make_metadata(
+                    docstore_node_kind="postprocessed_embedding_passage",
+                    chunk_id="chunk_parent",
+                    parent_chunk_id="chunk_parent",
+                ),
+            ),
+        }
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(
+                FakeVectorStore(["chunk_parent::passage_000", "chunk_parent::passage_001"], [0.92, 0.91]),
+                docs,
+            )
+        )
+
+        output = pipeline.search(["optimizer families"])
+
+        self.assertEqual(1, output.count("[SOURCE] [S"))
+        self.assertIn("Chunk: chunk_parent", output)
+
+    def test_duplicate_sources_are_collapsed_across_query_variants(self) -> None:
+        docs = {
+            "chunk_a": FakeTextNode(
+                "chunk_a",
+                "Shared optimizer source.",
+                make_metadata(chunk_id="chunk_a", path=["Optimization", "Shared"]),
+            ),
+            "chunk_b": FakeTextNode(
+                "chunk_b",
+                "Additional optimizer source.",
+                make_metadata(chunk_id="chunk_b", path=["Optimization", "Additional"]),
+            ),
+        }
+        vector_store = SequencedVectorStore(
+            [
+                (["chunk_a"], [0.92]),
+                (["chunk_a", "chunk_b"], [0.93, 0.91]),
+            ]
+        )
+        pipeline = AnalystRetrievalPipeline(make_indexer(vector_store, docs))
+
+        output = pipeline.search(["optimizers", "optimizer types"])
+
+        self.assertEqual(1, output.count("Chunk: chunk_a"))
+        self.assertEqual(1, output.count("Chunk: chunk_b"))
+        self.assertIn("[SOURCE] [S1]", output)
+        self.assertIn("[SOURCE] [S2]", output)
+
     def test_mentions_link_concepts_but_do_not_leak_as_relations(self) -> None:
         clip = FakeGraphNode("concept_clip", "CLIP")
         objective = FakeGraphNode("concept_objective", "Contrastive Objective")
@@ -217,6 +327,64 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         self.assertIn("[RELATION] [R1] CLIP -> TRAINS -> Contrastive Objective", output)
         self.assertIn("Evidence: S1", output)
         self.assertNotIn("-> MENTIONS ->", output)
+
+    def test_source_grounded_relations_are_collected_before_relation_map_limit(self) -> None:
+        naive_bayes = FakeGraphNode("concept_nb", "Naive Bayes")
+        logistic = FakeGraphNode("concept_lr", "Logistic Regression")
+        source = FakeGraphNode("chunk_compare", "Comparison source")
+        noise_nodes = [FakeGraphNode(f"concept_noise_{idx}", f"Noise {idx}") for idx in range(35)]
+        noise_relations = [
+            (
+                naive_bayes,
+                FakeRelation("RELATED_TO", {"evidence_chunk_ids": ["chunk_compare"]}),
+                noise,
+            )
+            for noise in noise_nodes
+        ]
+        compare_relation = FakeRelation(
+            "COMPARES_TO",
+            {
+                "postprocess_relation_id": "rel_compare",
+                "evidence_chunk_ids": ["chunk_compare"],
+                "relation_phrases": ["compares Naive Bayes with Logistic Regression"],
+                "max_confidence": 0.9,
+                "max_retrieval_usefulness": 1.0,
+            },
+        )
+        graph_store = FakeGraphStore(
+            mention_triplets=[
+                (source, FakeRelation("MENTIONS"), naive_bayes),
+                (source, FakeRelation("MENTIONS"), logistic),
+            ],
+            relation_triplets=[
+                *noise_relations,
+                (naive_bayes, compare_relation, logistic),
+            ],
+        )
+        docs = {
+            "chunk_compare": FakeTextNode(
+                "chunk_compare",
+                "Naive Bayes and Logistic Regression are compared for text classification.",
+                make_metadata(chunk_id="chunk_compare"),
+            )
+        }
+        settings = KnowledgeGraphSearchSettings(
+            analyst_reranker_mode="disabled",
+            analyst_graph_relation_limit=1,
+        )
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(FakeVectorStore(["chunk_compare"], [0.72]), docs, graph_store, settings=settings),
+            settings=settings,
+        )
+
+        result = pipeline._search_one("Naive Bayes vs Logistic Regression")
+
+        relation_ids = [relation.relation_id for relation in result["relations"]]
+        self.assertIn("rel_compare", relation_ids)
+        self.assertIn(
+            ("Naive Bayes", "COMPARES_TO", "Logistic Regression"),
+            [(relation.subject, relation.predicate, relation.object) for relation in result["relations"]],
+        )
 
     def test_source_text_strips_redundant_path_prefix_but_keeps_source_path(self) -> None:
         docs = {
@@ -587,6 +755,90 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
 
         self.assertLessEqual(len(output), 350)
         self.assertIn("RETRIEVER RESULTS", output)
+
+    def test_truncated_source_includes_summary(self) -> None:
+        docs = {
+            "chunk_long": FakeTextNode(
+                "chunk_long",
+                "Relevant optimizer introduction. " + ("Long source sentence. " * 500),
+                make_metadata(
+                    chunk_id="chunk_long",
+                    postprocess_chunk_summary="Concise optimizer summary covering SGD and Adam.",
+                ),
+            )
+        }
+        settings = KnowledgeGraphSearchSettings(analyst_context_max_chars=8000, analyst_reranker_mode="disabled")
+        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_long"], [0.9]), docs, settings=settings), settings)
+
+        output = pipeline.search(["optimizer"])
+
+        source_line = next(line for line in output.splitlines() if line.startswith("[SOURCE] [S1]"))
+        self.assertIn("Summary: Concise optimizer summary covering SGD and Adam.", source_line)
+        self.assertIn("...[truncated]", source_line)
+
+    def test_hidden_relation_seed_source_can_supply_summary_evidence(self) -> None:
+        top_concept = FakeGraphNode("concept_top", "Optimization")
+        hidden_concept = FakeGraphNode("concept_hidden", "AdamW")
+        weight_decay = FakeGraphNode("concept_weight_decay", "Weight Decay")
+        top_source = FakeGraphNode("chunk_top", "Top source")
+        hidden_source = FakeGraphNode("chunk_hidden", "Hidden source")
+        graph_store = FakeGraphStore(
+            mention_triplets=[
+                (top_source, FakeRelation("MENTIONS"), top_concept),
+                (hidden_source, FakeRelation("MENTIONS"), hidden_concept),
+            ],
+            relation_triplets=[
+                (
+                    hidden_concept,
+                    FakeRelation(
+                        "DECOUPLES",
+                        {
+                            "evidence_chunk_ids": ["chunk_hidden"],
+                            "max_confidence": 0.9,
+                            "max_retrieval_usefulness": 1.0,
+                        },
+                    ),
+                    weight_decay,
+                )
+            ],
+        )
+        docs = {
+            "chunk_top": FakeTextNode(
+                "chunk_top",
+                "General optimization overview.",
+                make_metadata(chunk_id="chunk_top", path=["Optimization"], heading_path=["Optimization"]),
+            ),
+            "chunk_hidden": FakeTextNode(
+                "chunk_hidden",
+                "AdamW decouples weight decay from adaptive learning-rate updates.",
+                make_metadata(
+                    chunk_id="chunk_hidden",
+                    path=["Optimization", "AdamW"],
+                    heading_path=["Optimization", "AdamW"],
+                    postprocess_chunk_summary="AdamW decouples weight decay from Adam-style adaptive updates.",
+                ),
+            ),
+        }
+        settings = KnowledgeGraphSearchSettings(
+            analyst_reranker_mode="disabled",
+            analyst_source_final_k=1,
+            analyst_source_min_keep=1,
+            analyst_relation_seed_extra_k=1,
+            analyst_relation_seed_min_score=0.50,
+        )
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(FakeVectorStore(["chunk_top", "chunk_hidden"], [0.95, 0.93]), docs, graph_store, settings=settings),
+            settings,
+        )
+
+        output = pipeline.search(["optimization"])
+
+        self.assertIn("[SOURCE] [S1]", output)
+        self.assertIn("Chunk: chunk_top", output)
+        self.assertNotIn("Chunk: chunk_hidden", output)
+        self.assertIn("AdamW -> DECOUPLES -> Weight Decay", output)
+        self.assertIn("Evidence chunk: chunk_hidden", output)
+        self.assertIn("Summary: AdamW decouples weight decay", output)
 
     def test_ungrounded_relations_are_dropped_by_default(self) -> None:
         clip = FakeGraphNode("concept_clip", "CLIP")

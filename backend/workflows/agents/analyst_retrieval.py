@@ -10,7 +10,11 @@ from backend.configs.constants import MAX_SOURCE_CHARS, MIN_RELEVANCE_SCORE, WOR
 from backend.configs.models import RerankerSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.utils.helpers import get_logger
-from backend.workflows.agents.retrieval_access import POSTPROCESSED_CHUNK_KIND, RetrievalStoreAccess
+from backend.workflows.agents.retrieval_access import (
+    POSTPROCESSED_CHUNK_KIND,
+    POSTPROCESSED_PASSAGE_KIND,
+    RetrievalStoreAccess,
+)
 from backend.workflows.agents.retrieval_evidence import NormalizedMetadata, normalize_metadata
 
 
@@ -32,6 +36,8 @@ class SourceCandidate:
     rank_score: float | None = None
     reranked: bool = False
     mentioned_concepts: list[Any] = field(default_factory=list)
+    vector_node_id: str | None = None
+    matched_text: str | None = None
 
 
 @dataclass
@@ -119,12 +125,29 @@ class AnalystRetrievalPipeline:
     def search(self, queries: list[str]) -> str:
         formatted_blocks: list[str] = []
         remaining_chars = max(0, self.settings.analyst_context_max_chars - len("RETRIEVER RESULTS:\n\n"))
+        results = [self._search_one(query) for query in queries]
+        results = [result for result in results if result["sources"] or result["relations"]]
+        source_id_by_chunk: dict[str, str] = {}
+        emitted_source_ids: set[str] = set()
 
-        for query in queries:
-            result = self._search_one(query)
-            block = self._format_query_result(result["query"], result["sources"], result["relations"], remaining_chars)
+        for idx, result in enumerate(results):
+            for source in result["sources"]:
+                if source.node_id not in source_id_by_chunk:
+                    source_id_by_chunk[source.node_id] = f"S{len(source_id_by_chunk) + 1}"
+            remaining_results = max(1, len(results) - idx)
+            block_budget = max(0, remaining_chars // remaining_results)
+            block = self._format_query_result(
+                result["query"],
+                result["sources"],
+                result["relations"],
+                block_budget,
+                relation_sources=result.get("relation_sources"),
+                source_id_by_chunk=source_id_by_chunk,
+                emitted_source_ids=emitted_source_ids,
+            )
             if block:
                 formatted_blocks.append(block)
+                emitted_source_ids.update(source.node_id for source in result["sources"])
                 remaining_chars -= len(block) + 2
             if remaining_chars <= 0:
                 break
@@ -144,15 +167,21 @@ class AnalystRetrievalPipeline:
         source_candidates = self._sort_sources(source_candidates)
 
         final_sources = self._select_final_sources(source_candidates)
-        relation_candidates = self._expand_semantic_relations(query, final_sources)
+        relation_sources = self._select_relation_seed_sources(final_sources, source_candidates)
+        relation_candidates = self._expand_semantic_relations(
+            query,
+            relation_sources,
+            displayed_source_ids={source.node_id for source in final_sources},
+        )
         relation_candidates = self._dedupe_relations(relation_candidates)
-        relation_candidates = self._rerank_relations(query, final_sources, relation_candidates)
+        relation_candidates = self._rerank_relations(query, relation_sources, relation_candidates)
         final_relations = self._select_final_relations(relation_candidates)
 
         return {
             "query": query,
             "sources": final_sources,
             "relations": final_relations,
+            "relation_sources": relation_sources,
         }
 
     def _retrieve_source_candidates(self, query: str) -> list[SourceCandidate]:
@@ -166,32 +195,30 @@ class AnalystRetrievalPipeline:
             return []
 
         query_embedding = self.embedder.get_query_embedding(query)
-        query_result = self._query_vector_store(query_embedding, with_filters=True)
+        query_result = self._query_vector_store(query_embedding, node_kind=POSTPROCESSED_PASSAGE_KIND)
         if not query_result.ids:
-            query_result = self._query_vector_store(query_embedding, with_filters=False)
+            query_result = self._query_vector_store(query_embedding, node_kind=POSTPROCESSED_CHUNK_KIND)
+        if not query_result.ids:
+            query_result = self._query_vector_store(query_embedding, node_kind=None)
 
         ids = list(query_result.ids or [])
         similarities = list(query_result.similarities or [0.0] * len(ids))
         candidates: list[SourceCandidate] = []
 
         for rank, (node_id, similarity) in enumerate(zip(ids, similarities, strict=False), start=1):
-            node = self._get_docstore_node(node_id)
-            if node is None:
+            resolved = self._resolve_source_hit(node_id)
+            if resolved is None:
                 continue
-
-            metadata = normalize_metadata(node)
-            text = self._node_text(node)
-            if not self._is_usable_source(metadata, text):
-                continue
+            parent_id, node, metadata, text, matched_text = resolved
 
             base_score = self._clip_score(similarity)
-            score = self._score_source(query, text, metadata, base_score)
+            score = self._score_source(query, matched_text or text, metadata, base_score)
             if score < MIN_RELEVANCE_SCORE:
                 continue
 
             candidates.append(
                 SourceCandidate(
-                    node_id=node_id,
+                    node_id=parent_id,
                     node=node,
                     metadata=metadata,
                     text=text,
@@ -199,16 +226,18 @@ class AnalystRetrievalPipeline:
                     score=score,
                     rank=rank,
                     rank_score=score,
+                    vector_node_id=node_id,
+                    matched_text=matched_text,
                 )
             )
 
         return candidates
 
-    def _query_vector_store(self, query_embedding: list[float], *, with_filters: bool) -> Any:
+    def _query_vector_store(self, query_embedding: list[float], *, node_kind: str | None) -> Any:
         return self.access.query_vector(
             query_embedding,
             top_k=self.settings.analyst_source_candidate_k,
-            node_kind=POSTPROCESSED_CHUNK_KIND if with_filters else None,
+            node_kind=node_kind,
             component="analyst",
             fallback_message="Analyst vector query with metadata filters failed; retrying unfiltered.",
         )
@@ -294,6 +323,8 @@ class AnalystRetrievalPipeline:
         self,
         query: str,
         seed_sources: list[SourceCandidate],
+        *,
+        displayed_source_ids: set[str] | None = None,
     ) -> list[RelationCandidate]:
         if self.graph_store is None:
             self.health_report.record(
@@ -315,69 +346,122 @@ class AnalystRetrievalPipeline:
         if not concepts:
             return []
 
-        triplets = self._get_relation_map(concepts)
+        displayed_source_ids = displayed_source_ids or set()
+        source_grounded_triplets = self._source_grounded_relation_triplets(concepts, allowed_source_chunks)
+        relation_map_triplets = self._get_relation_map(concepts)
+        triplets = self._dedupe_relation_triplets([*source_grounded_triplets, *relation_map_triplets])
+
         relation_candidates: list[RelationCandidate] = []
         for rank, (subject_node, relation, object_node) in enumerate(triplets, start=1):
+            candidate = self._relation_candidate_from_triplet(
+                query,
+                subject_node,
+                relation,
+                object_node,
+                rank=rank,
+                source_score_by_chunk=source_score_by_chunk,
+                allowed_source_chunks=allowed_source_chunks,
+                displayed_source_ids=displayed_source_ids,
+            )
+            if candidate is None:
+                continue
+            relation_candidates.append(candidate)
+
+        return relation_candidates
+
+    def _source_grounded_relation_triplets(
+        self,
+        concepts: list[Any],
+        allowed_source_chunks: set[str],
+    ) -> list[tuple[Any, Any, Any]]:
+        concept_ids = [node_id for concept in concepts if (node_id := self._node_id(concept))]
+        if not concept_ids:
+            return []
+
+        triplets: list[tuple[Any, Any, Any]] = []
+        for triplet in self._get_triplets(ids=concept_ids):
+            _, relation, _ = triplet
             predicate = self._relation_label(relation)
             if predicate in DENIED_ANALYST_RELATIONS:
                 continue
+            evidence_chunk_ids = self._relation_evidence_chunk_ids(relation)
+            if not set(evidence_chunk_ids).intersection(allowed_source_chunks):
+                continue
+            triplets.append(triplet)
+        return triplets
 
-            evidence_chunk_ids = self._string_list(
-                relation.properties.get("evidence_chunk_ids") or relation.properties.get("source_chunk_ids")
-            )
-            grounded_evidence_chunk_ids = [
-                chunk_id for chunk_id in evidence_chunk_ids if chunk_id in allowed_source_chunks
+    def _relation_candidate_from_triplet(
+        self,
+        query: str,
+        subject_node: Any,
+        relation: Any,
+        object_node: Any,
+        *,
+        rank: int,
+        source_score_by_chunk: dict[str, float],
+        allowed_source_chunks: set[str],
+        displayed_source_ids: set[str],
+    ) -> RelationCandidate | None:
+        predicate = self._relation_label(relation)
+        if predicate in DENIED_ANALYST_RELATIONS:
+            return None
+
+        relation_properties = getattr(relation, "properties", {}) or {}
+        evidence_chunk_ids = self._relation_evidence_chunk_ids(relation)
+        grounded_evidence_chunk_ids = [
+            chunk_id for chunk_id in evidence_chunk_ids if chunk_id in allowed_source_chunks
+        ]
+        if self.settings.analyst_relation_require_source_evidence and not grounded_evidence_chunk_ids:
+            return None
+
+        evidence_spans = self._string_list(relation_properties.get("evidence_spans"))
+        confidence = self._float_or_none(relation_properties.get("max_confidence") or relation_properties.get("confidence"))
+        predicate_family = self._string_or_none(relation_properties.get("predicate_family"))
+        relation_phrases = self._string_list(relation_properties.get("relation_phrases"))
+        generality_score = self._float_or_none(relation_properties.get("max_generality_score"))
+        retrieval_usefulness = self._float_or_none(relation_properties.get("max_retrieval_usefulness"))
+
+        subject_label = self._node_label(subject_node)
+        object_label = self._node_label(object_node)
+        relation_text = " ".join(
+            [
+                subject_label,
+                predicate,
+                object_label,
+                predicate_family or "",
+                " ".join(relation_phrases),
+                " ".join(evidence_spans),
             ]
-            if self.settings.analyst_relation_require_source_evidence and not grounded_evidence_chunk_ids:
-                continue
+        )
+        evidence_score = max((source_score_by_chunk.get(chunk_id, 0.0) for chunk_id in grounded_evidence_chunk_ids), default=0.0)
+        query_boost = 0.08 if self._has_term_overlap(self._query_terms(query), relation_text) else 0.0
+        confidence_boost = (confidence or 0.0) * 0.04
+        usefulness_boost = (retrieval_usefulness or 0.0) * 0.08
+        displayed_source_boost = 0.04 if set(grounded_evidence_chunk_ids).intersection(displayed_source_ids) else 0.0
+        generic_penalty = 0.04 if predicate in {"RELATED_TO"} or predicate_family == "other" else 0.0
+        score = self._clip_score(
+            evidence_score + query_boost + confidence_boost + usefulness_boost + displayed_source_boost - generic_penalty
+        )
 
-            evidence_spans = self._string_list(relation.properties.get("evidence_spans"))
-            confidence = self._float_or_none(relation.properties.get("max_confidence") or relation.properties.get("confidence"))
-            predicate_family = self._string_or_none(relation.properties.get("predicate_family"))
-            relation_phrases = self._string_list(relation.properties.get("relation_phrases"))
-            generality_score = self._float_or_none(relation.properties.get("max_generality_score"))
-            retrieval_usefulness = self._float_or_none(relation.properties.get("max_retrieval_usefulness"))
+        if score < MIN_RELEVANCE_SCORE:
+            return None
 
-            relation_text = " ".join(
-                [
-                    self._node_label(subject_node),
-                    predicate,
-                    self._node_label(object_node),
-                    predicate_family or "",
-                    " ".join(relation_phrases),
-                    " ".join(evidence_spans),
-                ]
-            )
-            evidence_score = max((source_score_by_chunk.get(chunk_id, 0.0) for chunk_id in grounded_evidence_chunk_ids), default=0.0)
-            query_boost = 0.08 if self._has_term_overlap(self._query_terms(query), relation_text) else 0.0
-            confidence_boost = (confidence or 0.0) * 0.04
-            usefulness_boost = (retrieval_usefulness or 0.0) * 0.08
-            generic_penalty = 0.04 if predicate in {"RELATED_TO"} or predicate_family == "other" else 0.0
-            score = self._clip_score(evidence_score + query_boost + confidence_boost + usefulness_boost - generic_penalty)
-
-            if score < MIN_RELEVANCE_SCORE:
-                continue
-
-            relation_candidates.append(
-                RelationCandidate(
-                    relation_id=f"{rank}:{relation_text}",
-                    subject=self._node_label(subject_node),
-                    predicate=predicate,
-                    object=self._node_label(object_node),
-                    score=score,
-                    rank=rank,
-                    rank_score=score,
-                    confidence=confidence,
-                    predicate_family=predicate_family,
-                    relation_phrases=relation_phrases,
-                    generality_score=generality_score,
-                    retrieval_usefulness=retrieval_usefulness,
-                    evidence_chunk_ids=grounded_evidence_chunk_ids or evidence_chunk_ids,
-                    evidence_spans=evidence_spans,
-                )
-            )
-
-        return relation_candidates
+        return RelationCandidate(
+            relation_id=self._stable_relation_id(relation, fallback_rank=rank, relation_text=relation_text),
+            subject=subject_label,
+            predicate=predicate,
+            object=object_label,
+            score=score,
+            rank=rank,
+            rank_score=score,
+            confidence=confidence,
+            predicate_family=predicate_family,
+            relation_phrases=relation_phrases,
+            generality_score=generality_score,
+            retrieval_usefulness=retrieval_usefulness,
+            evidence_chunk_ids=grounded_evidence_chunk_ids or evidence_chunk_ids,
+            evidence_spans=evidence_spans,
+        )
 
     def _rerank_relations(
         self,
@@ -400,7 +484,7 @@ class AnalystRetrievalPipeline:
         source_text_by_chunk = {
             source.node_id: self._source_excerpt(
                 query,
-                source.text,
+                source.matched_text or source.text,
                 max_chars=max(120, self.settings.analyst_relation_rerank_max_chars // 2),
             )
             for source in sources
@@ -501,6 +585,29 @@ class AnalystRetrievalPipeline:
             min_keep=min_keep,
             max_per_path=max_per_path,
         )
+
+    def _select_relation_seed_sources(
+        self,
+        final_sources: list[SourceCandidate],
+        ordered_candidates: list[SourceCandidate],
+    ) -> list[SourceCandidate]:
+        seed_sources = list(final_sources)
+        seed_ids = {source.node_id for source in seed_sources}
+        extra_limit = max(0, self.settings.analyst_relation_seed_extra_k)
+        if extra_limit <= 0:
+            return seed_sources
+
+        for candidate in self._sort_sources(ordered_candidates):
+            if len(seed_sources) >= len(final_sources) + extra_limit:
+                break
+            if candidate.node_id in seed_ids:
+                continue
+            if candidate.score < self.settings.analyst_relation_seed_min_score:
+                continue
+            seed_sources.append(candidate)
+            seed_ids.add(candidate.node_id)
+
+        return seed_sources
 
     def _fill_minimum_diverse_sources(
         self,
@@ -651,16 +758,29 @@ class AnalystRetrievalPipeline:
         sources: list[SourceCandidate],
         relations: list[RelationCandidate],
         char_budget: int,
+        *,
+        relation_sources: list[SourceCandidate] | None = None,
+        source_id_by_chunk: dict[str, str] | None = None,
+        emitted_source_ids: set[str] | None = None,
     ) -> str:
         if char_budget <= 0 or (not sources and not relations):
             return ""
 
-        source_id_by_chunk = {source.node_id: f"S{idx}" for idx, source in enumerate(sources, start=1)}
+        if source_id_by_chunk is None:
+            source_id_by_chunk = {source.node_id: f"S{idx}" for idx, source in enumerate(sources, start=1)}
+        emitted_source_ids = emitted_source_ids or set()
+        relation_source_by_chunk = {
+            source.node_id: source
+            for source in (relation_sources or sources)
+        }
         lines = [f"QUERY: {query}"]
 
         for source in sources:
+            if source.node_id in emitted_source_ids:
+                continue
             source_id = source_id_by_chunk[source.node_id]
-            source_text = self._truncate(self._display_source_text(source), MAX_SOURCE_CHARS)
+            display_text = self._display_source_text(source)
+            source_text = self._format_source_payload(source, display_text)
             source_label = f"; Source: {source.metadata.source}" if source.metadata.source else ""
             lines.append(
                 f"[SOURCE] [{source_id}] (Score: {source.score:.2f}; Chunk: {source.node_id}{source_label}) "
@@ -679,6 +799,15 @@ class AnalystRetrievalPipeline:
             evidence_label = ", ".join(evidence_ids)
             if evidence_label:
                 evidence_display = f"Evidence: {evidence_label}"
+            elif relation.evidence_chunk_ids:
+                evidence_display = self._format_hidden_evidence_display(
+                    relation.evidence_chunk_ids,
+                    relation_source_by_chunk,
+                )
+                if evidence_display is None and relation.evidence_spans:
+                    evidence_display = f"Evidence span: {self._clean('; '.join(relation.evidence_spans[:2]))}"
+                elif evidence_display is None:
+                    evidence_display = "Evidence: unavailable"
             elif relation.evidence_spans:
                 evidence_display = f"Evidence span: {self._clean('; '.join(relation.evidence_spans[:2]))}"
             else:
@@ -693,6 +822,32 @@ class AnalystRetrievalPipeline:
             )
 
         return self._fit_lines(lines, char_budget)
+
+    def _format_source_payload(self, source: SourceCandidate, display_text: str) -> str:
+        truncated = len(display_text) > MAX_SOURCE_CHARS
+        source_text = self._truncate(display_text, MAX_SOURCE_CHARS)
+        summary = self._source_summary(source)
+        if truncated and summary:
+            return f"Summary: {self._truncate_to_length(summary, 240)} Text: {source_text}"
+        return source_text
+
+    def _format_hidden_evidence_display(
+        self,
+        evidence_chunk_ids: list[str],
+        source_by_chunk: dict[str, SourceCandidate],
+    ) -> str | None:
+        for chunk_id in evidence_chunk_ids:
+            source = source_by_chunk.get(chunk_id)
+            if source is None:
+                continue
+            summary = self._source_summary(source)
+            if summary:
+                return (
+                    f"Evidence chunk: {chunk_id}; "
+                    f"Summary: {self._clean(self._truncate_to_length(summary, 180))}"
+                )
+            return f"Evidence chunk: {chunk_id}"
+        return None
 
     def _create_configured_reranker(self) -> Any | None:
         if self.settings.analyst_reranker_mode == "disabled":
@@ -792,6 +947,33 @@ class AnalystRetrievalPipeline:
     def _get_docstore_node(self, node_id: str) -> Any | None:
         return self.access.docstore_node(node_id)
 
+    def _resolve_source_hit(self, node_id: str) -> tuple[str, Any, NormalizedMetadata, str, str | None] | None:
+        hit_node = self._get_docstore_node(node_id)
+        if hit_node is None:
+            return None
+
+        hit_metadata = normalize_metadata(hit_node)
+        hit_kind = hit_metadata.raw.get("docstore_node_kind")
+        if hit_kind == POSTPROCESSED_PASSAGE_KIND:
+            parent_id = str(hit_metadata.raw.get("parent_chunk_id") or hit_metadata.raw.get("chunk_id") or "")
+            if not parent_id:
+                return None
+            parent_node = self._get_docstore_node(parent_id)
+            if parent_node is None:
+                return None
+            parent_metadata = normalize_metadata(parent_node)
+            parent_text = self._node_text(parent_node)
+            if not self._is_usable_source(parent_metadata, parent_text):
+                return None
+            return parent_id, parent_node, parent_metadata, parent_text, self._node_text(hit_node)
+
+        parent_metadata = normalize_metadata(hit_node)
+        parent_text = self._node_text(hit_node)
+        if not self._is_usable_source(parent_metadata, parent_text):
+            return None
+        parent_id = str(parent_metadata.raw.get("chunk_id") or node_id)
+        return parent_id, hit_node, parent_metadata, parent_text, parent_text
+
     def _is_usable_source(self, metadata: NormalizedMetadata, text: str) -> bool:
         if not text.strip():
             return False
@@ -884,6 +1066,41 @@ class AnalystRetrievalPipeline:
     ) -> list[tuple[Any, Any, Any]]:
         return self.access.triplets(ids=ids, relation_names=relation_names, component="analyst")
 
+    def _dedupe_relation_triplets(self, triplets: list[tuple[Any, Any, Any]]) -> list[tuple[Any, Any, Any]]:
+        seen: set[tuple[Any, ...]] = set()
+        deduped: list[tuple[Any, Any, Any]] = []
+        for subject, relation, object_ in triplets:
+            key = self._relation_triplet_key(subject, relation, object_)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append((subject, relation, object_))
+        return deduped
+
+    def _relation_triplet_key(self, subject: Any, relation: Any, object_: Any) -> tuple[Any, ...]:
+        stable_id = self._stable_relation_id(relation, fallback_rank=0, relation_text="")
+        if stable_id and not stable_id.startswith("0:"):
+            return ("id", stable_id)
+        return (
+            "spec",
+            self._node_id(subject),
+            self._relation_label(relation),
+            self._node_id(object_),
+            tuple(self._relation_evidence_chunk_ids(relation)),
+        )
+
+    def _stable_relation_id(self, relation: Any, *, fallback_rank: int, relation_text: str) -> str:
+        properties = getattr(relation, "properties", {}) or {}
+        for key in ("postprocess_relation_id", "relation_id", "id"):
+            value = self._string_or_none(properties.get(key))
+            if value:
+                return value
+        return f"{fallback_rank}:{relation_text}"
+
+    def _relation_evidence_chunk_ids(self, relation: Any) -> list[str]:
+        properties = getattr(relation, "properties", {}) or {}
+        return self._string_list(properties.get("evidence_chunk_ids") or properties.get("source_chunk_ids"))
+
     def _dedupe_sources(self, candidates: list[SourceCandidate]) -> list[SourceCandidate]:
         seen_chunks: set[str] = set()
         deduped: list[SourceCandidate] = []
@@ -923,10 +1140,11 @@ class AnalystRetrievalPipeline:
         return "\n".join(fitted)
 
     def _rerank_text(self, candidate: SourceCandidate, query: str = "") -> str:
+        evidence_text = candidate.matched_text or candidate.text
         parts = [
             self._display_metadata_path(candidate.metadata),
             str(candidate.metadata.raw.get("postprocess_chunk_summary") or ""),
-            self._source_excerpt(query, candidate.text, max_chars=self.settings.analyst_source_rerank_max_chars),
+            self._source_excerpt(query, evidence_text, max_chars=self.settings.analyst_source_rerank_max_chars),
         ]
         return self._truncate_to_length(
             "\n".join(part for part in parts if part),
@@ -1005,6 +1223,9 @@ class AnalystRetrievalPipeline:
         text = source.text.strip()
         stripped = self._strip_redundant_source_prefix(text, source.metadata)
         return stripped or text
+
+    def _source_summary(self, source: SourceCandidate) -> str:
+        return " ".join(str(source.metadata.raw.get("postprocess_chunk_summary") or "").split())
 
     def _strip_redundant_source_prefix(self, text: str, metadata: NormalizedMetadata) -> str:
         for prefix in self._metadata_prefix_candidates(metadata):

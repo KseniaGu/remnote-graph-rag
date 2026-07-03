@@ -21,6 +21,7 @@ from backend.data_processing.parser_optimized import (
 )
 from scripts.build_postprocessed_graph_storage import (
     import_projection_to_property_graph,
+    make_embedding_passage_nodes,
     make_vector_store_metadata,
     materialize_final_text_nodes,
 )
@@ -297,6 +298,38 @@ class PostprocessedGraphStorageTests(unittest.TestCase):
         self.assertEqual(0.82, semantic_relation.properties["max_generality_score"])
         self.assertEqual(0.88, semantic_relation.properties["max_retrieval_usefulness"])
         self.assertEqual(0.76, semantic_relation.properties["max_visualization_usefulness"])
+
+    def test_embedding_passage_nodes_preserve_parent_chunk_identity(self) -> None:
+        from llama_index.core.schema import TextNode
+
+        node = TextNode(
+            id_="chunk_parent",
+            text=(
+                "Sentence one explains SGD. Sentence two explains Momentum. "
+                "Sentence three explains Adam. Sentence four explains AdamW."
+            ),
+            metadata={
+                "docstore_node_kind": "postprocessed_retrieval_chunk",
+                "chunk_id": "chunk_parent",
+                "path": ["Optimization", "Optimizers"],
+                "retrieval_enabled": True,
+                "graph_enabled": True,
+                "quarantined": False,
+                "postprocess_chunk_summary": "Optimizer methods overview.",
+            },
+        )
+
+        passage_nodes = make_embedding_passage_nodes([node], TextNode, embedder=None)
+
+        self.assertGreaterEqual(len(passage_nodes), 1)
+        first = passage_nodes[0]
+        self.assertTrue(first.id_.startswith("chunk_parent::passage_"))
+        self.assertEqual("postprocessed_embedding_passage", first.metadata["docstore_node_kind"])
+        self.assertEqual("chunk_parent", first.metadata["parent_chunk_id"])
+        self.assertEqual("chunk_parent", first.metadata["chunk_id"])
+        self.assertFalse(first.metadata["graph_enabled"])
+        self.assertIn("Optimization > Optimizers", first.text)
+        self.assertNotIn("Summary: Optimizer methods overview.", first.text)
 
 
 if __name__ == "__main__":

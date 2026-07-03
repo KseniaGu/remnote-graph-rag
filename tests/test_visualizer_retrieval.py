@@ -171,6 +171,41 @@ class VisualizerRetrievalPipelineTests(unittest.TestCase):
         self.assertNotIn(("chunk_1", "MENTIONS", "concept_text"), triplets)
         self.assertIn(("concept_text", "RELATED_TO", "concept_classifier"), triplets)
 
+    def test_passage_source_hits_resolve_to_parent_chunks(self) -> None:
+        text_classification = FakeGraphNode("concept_text", "Text Classification", source_chunk_ids=["chunk_1"])
+        classifier = FakeGraphNode("concept_classifier", "Classifier", source_chunk_ids=["chunk_1"])
+        chunk = FakeGraphNode("chunk_1", "Chunk", node_label="text_chunk")
+        graph_store = FakeGraphStore(
+            [text_classification, classifier, chunk],
+            [
+                (chunk, FakeRelation("MENTIONS", {"evidence_chunk_ids": ["chunk_1"]}), classifier),
+            ],
+        )
+        docs = {
+            "chunk_1": FakeTextNode(
+                "chunk_1",
+                "Text classification methods use classifiers.",
+                make_source_metadata(),
+            ),
+            "chunk_1::passage_000": FakeTextNode(
+                "chunk_1::passage_000",
+                "Text classification methods use classifiers.",
+                make_source_metadata(
+                    docstore_node_kind="postprocessed_embedding_passage",
+                    chunk_id="chunk_1",
+                    parent_chunk_id="chunk_1",
+                    graph_enabled=False,
+                ),
+            ),
+        }
+        vector_store = FakeVectorStore({"postprocessed_embedding_passage": ["chunk_1::passage_000"]})
+        pipeline = VisualizerRetrievalPipeline(make_indexer(vector_store, graph_store, docs))
+
+        nodes, triplets, _ = pipeline.visualize(["Text Classification methods"])
+
+        self.assertIn("concept_text", nodes)
+        self.assertIn(("concept_text", "RELATED_TO", "concept_classifier"), triplets)
+
     def test_comparison_query_keeps_both_anchors_and_prefers_compares_to(self) -> None:
         naive_bayes = FakeGraphNode("concept_nb", "Naive Bayes")
         logistic = FakeGraphNode("concept_lr", "Logistic Regression")

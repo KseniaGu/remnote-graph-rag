@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 from backend.configs.paths import PathSettings
 from backend.configs.storage import LocalStorageSettings, StorageSettings
 from backend.configs.models import ModelSettings
+from backend.data_processing.embedding_passages import build_embedding_passages, tokenizer_token_counter
 from backend.data_processing.llm_postprocess import (
     ChunkAction,
     ChunkEnrichmentDecision,
@@ -60,6 +61,7 @@ RAW_TEXT_VECTOR_METADATA_DROP_KEYS = {
     "context_text",
 }
 MANIFEST_FILENAME = "postprocessed_graph_storage_manifest.json"
+POSTPROCESSED_PASSAGE_KIND = "postprocessed_embedding_passage"
 
 
 def parse_args() -> argparse.Namespace:
@@ -281,6 +283,87 @@ def copy_node_for_vector_store(node: Any, text_node_cls: Any, drop_metadata_keys
     return vector_node
 
 
+def _node_source_path(node: Any) -> str:
+    metadata = getattr(node, "metadata", {}) or {}
+    path = metadata.get("path") or metadata.get("heading_path") or []
+    if isinstance(path, str):
+        return path
+    if isinstance(path, (list, tuple)):
+        return " > ".join(str(part) for part in path if part)
+    return ""
+
+
+def _resolve_embedder_tokenizer(embedder: Any) -> Any | None:
+    for owner in (embedder, getattr(embedder, "_model", None), getattr(embedder, "model", None)):
+        if owner is None:
+            continue
+        tokenizer = getattr(owner, "tokenizer", None) or getattr(owner, "_tokenizer", None)
+        if tokenizer is not None:
+            return tokenizer
+    return None
+
+
+def _node_text(node: Any) -> str:
+    text = getattr(node, "text", None)
+    if text is not None:
+        return str(text)
+    get_content = getattr(node, "get_content", None)
+    return str(get_content() if callable(get_content) else "")
+
+
+def make_embedding_passage_nodes(nodes: list[Any], text_node_cls: Any, embedder: Any) -> list[Any]:
+    """Creates vector-search child passages while preserving parent chunk IDs.
+
+    The parent retrieval chunk stays in the docstore/property graph as the
+    evidence unit. Passage nodes are internal vector records that map back to
+    the parent through parent_chunk_id and chunk_id metadata.
+    """
+
+    token_counter = tokenizer_token_counter(_resolve_embedder_tokenizer(embedder))
+    passage_nodes: list[Any] = []
+    for node in nodes:
+        if not node.metadata.get("retrieval_enabled"):
+            continue
+        summary = str(node.metadata.get("postprocess_chunk_summary") or "")
+        passages = build_embedding_passages(
+            parent_chunk_id=node.id_,
+            text=_node_text(node),
+            source_path=_node_source_path(node),
+            summary=summary,
+            token_counter=token_counter,
+        )
+        for passage in passages:
+            metadata = dict(getattr(node, "metadata", {}) or {})
+            metadata.pop("kg_nodes", None)
+            metadata.pop("kg_relations", None)
+            metadata.update(
+                {
+                    "docstore_node_kind": POSTPROCESSED_PASSAGE_KIND,
+                    "vector_source": passage.passage_id,
+                    "parent_chunk_id": node.id_,
+                    "chunk_id": node.id_,
+                    "passage_id": passage.passage_id,
+                    "passage_index": passage.passage_index,
+                    "passage_char_start": passage.char_start,
+                    "passage_char_end": passage.char_end,
+                    "passage_token_count": passage.token_count,
+                    "passage_split_strategy": passage.split_strategy,
+                    "retrieval_enabled": True,
+                    "graph_enabled": False,
+                    "quarantined": False,
+                }
+            )
+            passage_node = text_node_cls(
+                text=passage.text,
+                metadata=metadata,
+                excluded_embed_metadata_keys=list(metadata.keys()),
+                excluded_llm_metadata_keys=list(getattr(node, "excluded_llm_metadata_keys", [])),
+            )
+            passage_node.id_ = passage.passage_id
+            passage_nodes.append(passage_node)
+    return passage_nodes
+
+
 def import_projection_to_property_graph(storage_context: Any, nodes: list[Any], projection: ConceptGraphProjection) -> dict[str, int]:
     from llama_index.core.graph_stores.types import EntityNode, KG_NODES_KEY, KG_RELATIONS_KEY, Relation
 
@@ -429,6 +512,10 @@ def embed_final_nodes(storage_context: Any, final_nodes: list[Any], projection: 
     vector_store = storage_context.vector_store
     vector_store.stores_text = True
     nodes_to_embed = [node for node in final_nodes if node.metadata.get("retrieval_enabled")]
+    passage_nodes = make_embedding_passage_nodes(nodes_to_embed, TextNode, embedder)
+    if passage_nodes:
+        storage_context.docstore.add_documents(passage_nodes, allow_update=True)
+
     entity_text_nodes: list[Any] = []
     for record in projection.nodes:
         text = record.get("canonical_name") or record["id"]
@@ -446,9 +533,13 @@ def embed_final_nodes(storage_context: Any, final_nodes: list[Any], projection: 
         entity_node.id_ = record["id"]
         entity_text_nodes.append(entity_node)
 
-    source_nodes = [*nodes_to_embed, *entity_text_nodes]
+    source_nodes = [*passage_nodes, *entity_text_nodes]
     if not source_nodes:
-        return {"embedded_retrieval_chunks": 0, "embedded_concept_nodes": 0}
+        return {
+            "embedded_retrieval_chunks": len(nodes_to_embed),
+            "embedded_retrieval_passages": 0,
+            "embedded_concept_nodes": 0,
+        }
     texts = [node.get_content() for node in source_nodes]
     vector_metadata_drop_keys = {KG_NODES_KEY, KG_RELATIONS_KEY, *RAW_TEXT_VECTOR_METADATA_DROP_KEYS}
     vector_nodes = [
@@ -461,6 +552,7 @@ def embed_final_nodes(storage_context: Any, final_nodes: list[Any], projection: 
     vector_store.add(vector_nodes)
     return {
         "embedded_retrieval_chunks": len(nodes_to_embed),
+        "embedded_retrieval_passages": len(passage_nodes),
         "embedded_concept_nodes": len(entity_text_nodes),
     }
 

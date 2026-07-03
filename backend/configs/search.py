@@ -58,6 +58,8 @@ class KnowledgeGraphSearchSettings(BaseSettings):
     analyst_relation_final_k: int = 5
     analyst_relation_min_relative_score: float = 0.50
     analyst_relation_min_raw_margin: float = 3.0
+    analyst_relation_seed_extra_k: int = 4
+    analyst_relation_seed_min_score: float = 0.50
     analyst_context_max_chars: int = 7000
     analyst_graph_depth: int = 1
     analyst_graph_relation_limit: int = 30

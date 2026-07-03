@@ -362,6 +362,8 @@ def load_source_metadata_by_id(path: Path) -> dict[str, dict[str, Any]]:
         metadata = node_data.get("metadata") or {}
         if not isinstance(metadata, dict):
             continue
+        if metadata.get("docstore_node_kind") == "postprocessed_embedding_passage":
+            continue
         source_id = str(metadata.get("chunk_id") or node_data.get("id_") or node_id)
         if source_id.startswith("chunk_"):
             source_metadata_by_id[source_id] = metadata
@@ -406,11 +408,21 @@ def load_embedded_source_ids(path: Path) -> set[str] | None:
     if not path.exists():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
-    return {
-        str(source_id)
-        for source_id in (data.get("embedding_dict") or {})
-        if str(source_id).startswith("chunk_")
-    }
+    embedded_ids: set[str] = set()
+    for source_id in (data.get("embedding_dict") or {}):
+        source_id = str(source_id)
+        if source_id.startswith("chunk_") and "::passage_" not in source_id:
+            embedded_ids.add(source_id)
+
+    metadata_dict = data.get("metadata_dict") or {}
+    if isinstance(metadata_dict, dict):
+        for metadata in metadata_dict.values():
+            if not isinstance(metadata, dict):
+                continue
+            parent_id = str(metadata.get("parent_chunk_id") or metadata.get("chunk_id") or "")
+            if parent_id.startswith("chunk_"):
+                embedded_ids.add(parent_id)
+    return embedded_ids
 
 
 def load_graph_triplets(path: Path) -> set[tuple[str, str, str]] | None:
@@ -482,6 +494,8 @@ def summarize_search_settings(settings: Any) -> dict[str, Any]:
         "analyst_relation_final_k",
         "analyst_relation_min_relative_score",
         "analyst_relation_min_raw_margin",
+        "analyst_relation_seed_extra_k",
+        "analyst_relation_seed_min_score",
         "analyst_context_max_chars",
         "analyst_graph_depth",
         "analyst_graph_relation_limit",
