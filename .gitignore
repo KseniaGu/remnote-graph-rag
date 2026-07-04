@@ -43,3 +43,4 @@ secrets.yml
 .venv/
 .agents/
 .pytest_cache/
+.devcontainer/**/devcontainer-lock.json

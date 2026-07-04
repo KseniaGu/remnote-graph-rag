@@ -3,14 +3,14 @@ from pathlib import Path
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from backend.configs.constants import ENV_PATH, DATA_DIR
+from backend.configs.constants import ENV_PATH, ROOT_DIR
 from backend.configs.enums import StorageType
 
 
 class LocalStorageSettings(BaseSettings):
     """Local file system storage settings configuration."""
     storage_type: StorageType = StorageType.local
-    storage_path: Path = DATA_DIR / "storage"
+    storage_path: Path = ROOT_DIR / "storage"
 
 
 class RedisSettings(BaseSettings):
