@@ -14,6 +14,8 @@ env:
   VLLM_MODEL_PATH: /mnt/models/qwen-9b
   MODEL_BUCKET_NAME: ${{ vars.MODEL_BUCKET_NAME }}
   MODEL_CACHE_BUILD_DIR: .docker-build/sentence-transformers
+  RUNTIME_STORAGE_BUCKET_NAME: remnote-graph-rag-storage
+  RUNTIME_STORAGE_BUILD_DIR: .docker-build/runtime-storage
 
 jobs:
   deploy:
@@ -162,10 +164,23 @@ jobs:
             exit 1
           fi
 
+      - name: Download runtime storage from Cloud Storage
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNTIME_STORAGE_BUILD_DIR"
+          mkdir -p "$RUNTIME_STORAGE_BUILD_DIR"
+          gcloud storage cp "gs://$RUNTIME_STORAGE_BUCKET_NAME/docstore.json" "$RUNTIME_STORAGE_BUILD_DIR/docstore.json"
+
+          if [ ! -s "$RUNTIME_STORAGE_BUILD_DIR/docstore.json" ]; then
+            echo "No runtime docstore was copied from gs://$RUNTIME_STORAGE_BUCKET_NAME/docstore.json"
+            exit 1
+          fi
+
       - name: Build backend Docker image
         run: |
           DOCKER_BUILDKIT=1 docker build \
             --build-context model-cache="$MODEL_CACHE_BUILD_DIR" \
+            --build-context runtime-storage="$RUNTIME_STORAGE_BUILD_DIR" \
             -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-backend:${{ github.sha }} \
             -f deploy/Dockerfile .
 

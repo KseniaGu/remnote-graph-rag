@@ -42,6 +42,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.local/share/reflex /home/appuser/.local/share/reflex
 
 COPY --from=builder /app /app
+RUN mkdir -p /app/storage
+COPY --from=runtime-storage /docstore.json /app/storage/docstore.json
 
 RUN chown -R appuser:appuser /app /home/appuser
 

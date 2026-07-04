@@ -116,7 +116,7 @@ class MongoDBSettings(BaseSettings):
 
 class StorageSettings(BaseSettings):
     """Aggregates storage configuration settings for different storage backends."""
-    document_storage: LocalStorageSettings | RedisSettings = RedisSettings()
+    document_storage: LocalStorageSettings | RedisSettings = LocalStorageSettings()
     index_storage: LocalStorageSettings | RedisSettings = RedisSettings()
     vector_storage: LocalStorageSettings | RedisSettings | PineconeSettings = PineconeSettings()
     property_graph_storage: LocalStorageSettings | Neo4jSettings | MemgraphSettings = MemgraphSettings()

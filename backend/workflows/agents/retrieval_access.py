@@ -73,6 +73,7 @@ class RetrievalStoreAccess:
         self.health_report = RetrievalHealthReport()
         self._concept_nodes: list[Any] | None = None
         self._concept_by_id: dict[str, Any] = {}
+        self._docstore_node_cache: dict[str, Any | None] = {}
 
     def query_vector(
         self,
@@ -266,8 +267,29 @@ class RetrievalStoreAccess:
         return node
 
     def docstore_node(self, node_id: str) -> Any | None:
+        if node_id in self._docstore_node_cache:
+            return self._docstore_node_cache[node_id]
+
         docstore = getattr(self.storage_context, "docstore", None)
-        return getattr(docstore, "docs", {}).get(node_id)
+        if docstore is None:
+            self._docstore_node_cache[node_id] = None
+            return None
+
+        get_document = getattr(docstore, "get_document", None)
+        if callable(get_document):
+            try:
+                node = get_document(node_id, raise_error=False)
+            except TypeError:
+                try:
+                    node = get_document(node_id)
+                except ValueError:
+                    node = None
+            self._docstore_node_cache[node_id] = node
+            return node
+
+        node = getattr(docstore, "docs", {}).get(node_id)
+        self._docstore_node_cache[node_id] = node
+        return node
 
     def _resolve_vector_store(self) -> Any | None:
         index = getattr(self.indexer, "index", None)
