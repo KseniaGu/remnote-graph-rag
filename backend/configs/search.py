@@ -31,7 +31,7 @@ class KnowledgeGraphSearchSettings(BaseSettings):
         populate_by_name=True,
     )
 
-    analyst_retrieval_mode: RetrievalPipelineMode = "optimized"
+    analyst_retrieval_mode: RetrievalPipelineMode = "legacy_vector_context"
     visualizer_retrieval_mode: RetrievalPipelineMode = "optimized"
     retriever_params: dict = {
         "VectorContextRetriever": {
