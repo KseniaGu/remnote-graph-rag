@@ -32,7 +32,7 @@ from backend.configs.enums import StorageType
 from backend.configs.paths import PathSettings
 from backend.configs.storage import StorageSettings
 from backend.knowledge_graph.custom_types import CustomMemgraphPropertyGraphStore, CustomNeo4jPropertyGraphStore
-from backend.utils.helpers import make_json_serializable
+from backend.utils.helpers import make_json_serializable, logger
 
 
 def _get_redis_vector_schema(embedding_dim: int) -> Any:
@@ -113,6 +113,14 @@ class KnowledgeGraphStorage:
         """
         if self.storage_settings.document_storage.storage_type == StorageType.local:
             storage_path = self.storage_settings.document_storage.storage_path
+            #TODO: drop after debugging
+            logger.info(f"get_document_storage: storage_path {storage_path} is not empty: {self.not_empty(storage_path)}")
+            import os
+            logger.info(str(os.listdir(self.storage_settings.document_storage.storage_path)))
+            if os.path.exists("/app/storage"):
+                logger.info(str(os.listdir("/app/storage")))
+            else:
+                logger.info("/app/storage is not found")
             if self.not_empty(storage_path):
                 document_storage = SimpleDocumentStore.from_persist_dir(persist_dir=str(storage_path))
             else:
@@ -252,6 +260,14 @@ class KnowledgeGraphStorage:
         """
         if self.storage_settings.property_graph_storage.storage_type == StorageType.local:
             storage_path = self.storage_settings.property_graph_storage.storage_path
+            #TODO: drop after debugging
+            logger.info(f"get_document_storage: storage_path {storage_path} is not empty: {self.not_empty(storage_path)}")
+            import os
+            logger.info(str(os.listdir(self.storage_settings.document_storage.storage_path)))
+            if os.path.exists("/app/storage"):
+                logger.info(str(os.listdir("/app/storage")))
+            else:
+                logger.info("/app/storage is not found")
             if self.not_empty(storage_path) and (storage_path / "property_graph_store.json").exists():
                 property_graph_storage = SimplePropertyGraphStore.from_persist_dir(persist_dir=str(storage_path))
             else:
