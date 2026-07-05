@@ -119,5 +119,5 @@ class StorageSettings(BaseSettings):
     document_storage: LocalStorageSettings | RedisSettings = LocalStorageSettings()
     index_storage: LocalStorageSettings | RedisSettings = RedisSettings()
     vector_storage: LocalStorageSettings | RedisSettings | PineconeSettings = PineconeSettings()
-    property_graph_storage: LocalStorageSettings | Neo4jSettings | MemgraphSettings = MemgraphSettings()
+    property_graph_storage: LocalStorageSettings | Neo4jSettings | MemgraphSettings = LocalStorageSettings()
     checkpoint_storage: MongoDBSettings = MongoDBSettings()

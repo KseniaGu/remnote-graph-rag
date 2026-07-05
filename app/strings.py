@@ -51,9 +51,9 @@ CHAT_PROCESSING_LABEL = "Processing"
 # ---------------------------------------------------------------------------
 QUICK_ACTIONS: list[tuple[str, str, str]] = [
     ("graduation-cap", "Practice a concept", "Quiz me on Transformer architecture"),
-    ("search", "Search my notes", "What information do I have about attention mechanisms?"),
+    ("search", "Search my notes", "What information do I have about Transformer architecture?"),
     ("book-open-text", "Research a topic", "Research the latest developments in fine-tuning LLMs"),
-    ("network", "Map relationships", "Visualize my knowledge about backpropagation algorithm"),
+    ("network", "Map relationships", "Visualize my knowledge about BERT"),
 ]
 
 

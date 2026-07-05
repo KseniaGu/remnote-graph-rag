@@ -91,9 +91,14 @@ jobs:
           rm -rf "$RUNTIME_STORAGE_BUILD_DIR"
           mkdir -p "$RUNTIME_STORAGE_BUILD_DIR"
           gcloud storage cp "gs://$RUNTIME_STORAGE_BUCKET_NAME/docstore.json" "$RUNTIME_STORAGE_BUILD_DIR/docstore.json"
+          gcloud storage cp "gs://$RUNTIME_STORAGE_BUCKET_NAME/property_graph_store.json" "$RUNTIME_STORAGE_BUILD_DIR/property_graph_store.json"
 
           if [ ! -s "$RUNTIME_STORAGE_BUILD_DIR/docstore.json" ]; then
             echo "No runtime docstore was copied from gs://$RUNTIME_STORAGE_BUCKET_NAME/docstore.json"
+            exit 1
+          fi
+          if [ ! -s "$RUNTIME_STORAGE_BUILD_DIR/property_graph_store.json" ]; then
+            echo "No runtime property_graph_store was copied from gs://$RUNTIME_STORAGE_BUCKET_NAME/property_graph_store.json"
             exit 1
           fi
 
