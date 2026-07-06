@@ -961,6 +961,7 @@ class KnowledgeGraphIndexer:
 
 if __name__ == '__main__':
     ...
+    """
     import argparse
     from pathlib import Path
 
@@ -1075,6 +1076,7 @@ if __name__ == '__main__':
     )
     print(f"Property graph index built in {path_settings.local_storage_dir}")
     """
+    """
     from backend.utils.prompt_engine import PromptEngine
     from backend.configs.storage import StorageSettings
     from backend.configs.models import ModelSettings
@@ -1117,8 +1119,8 @@ if __name__ == '__main__':
 
     retriever_params = {
         "VectorContextRetriever": {
-            "include_text": True, "similarity_top_k": 5, "similarity_score": None, "depth": 2,
-            "include_properties": True
+            "include_text": False, "similarity_top_k": 5, "similarity_score": None, "path_depth": 2,
+            "include_properties": False
         },
         # "VectorIndexRetriever": {"similarity_top_k": 3, }
     }
