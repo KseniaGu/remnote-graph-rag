@@ -50,7 +50,7 @@ CHAT_PROCESSING_LABEL = "Processing"
 # Quick action buttons: list of (icon_name, button_label, prefilled_action)
 # ---------------------------------------------------------------------------
 QUICK_ACTIONS: list[tuple[str, str, str]] = [
-    ("graduation-cap", "Practice a concept", "Quiz me on Transformer architecture"),
+    ("graduation-cap", "Practice a concept", "Quiz me on Diffusions topic"),
     ("search", "Search my notes", "What information do I have about Transformer architecture?"),
     ("book-open-text", "Research a topic", "Research the latest developments in fine-tuning LLMs"),
     ("network", "Map relationships", "Visualize my knowledge about BERT"),
