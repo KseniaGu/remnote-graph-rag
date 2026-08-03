@@ -16,17 +16,17 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.configs.enums import ModelRoleType, PromptType
 from backend.configs.models import OllamaSettings
 from backend.data_processing.concept_registry import (
+    MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS,
     ConceptAdjudicationFailure,
     ConceptAdjudicationResponse,
     ConceptResolution,
-    MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS,
     apply_concept_adjudications,
     build_concept_resolution,
     concept_adjudication_cache_key,
@@ -50,8 +50,8 @@ from backend.data_processing.llm_postprocess import (
     ChunkPostprocessInput,
     LLMResponseCache,
     PostprocessFailure,
-    build_batches,
     batch_prompt_payload,
+    build_batches,
     cache_key_for_batch,
     fake_llm_response_for_batch,
     make_failure,
@@ -64,7 +64,6 @@ from backend.data_processing.llm_postprocess import (
     validate_and_enrich_response,
 )
 from backend.utils.prompt_engine import PromptEngine
-
 
 GRAPH_ACTIONS = {
     ChunkAction.KEEP,
@@ -152,7 +151,9 @@ def effective_num_predict(args: argparse.Namespace, pass_name: str) -> int:
     return args.num_predict
 
 
-def generation_settings_for_pass(args: argparse.Namespace, pass_name: str) -> dict[str, Any]:
+def generation_settings_for_pass(
+    args: argparse.Namespace, pass_name: str
+) -> dict[str, Any]:
     """Builds the generation settings that participate in response cache keys."""
 
     return {
@@ -177,7 +178,9 @@ def legacy_generation_settings_for_args(args: argparse.Namespace) -> dict[str, A
 def can_use_legacy_cache_key(args: argparse.Namespace, pass_name: str) -> bool:
     """Returns whether current settings can read caches created before generation settings were keyed."""
 
-    return generation_settings_for_pass(args, pass_name) == legacy_generation_settings_for_args(args)
+    return generation_settings_for_pass(
+        args, pass_name
+    ) == legacy_generation_settings_for_args(args)
 
 
 def is_usage_limit_error(value: object) -> bool:
@@ -191,11 +194,11 @@ def is_usage_limit_error(value: object) -> bool:
     )
 
 
-def is_empty_llm_response(raw_response: Optional[str]) -> bool:
+def is_empty_llm_response(raw_response: str | None) -> bool:
     return raw_response is None or not raw_response.strip()
 
 
-def resolve_run_limit(limit: Optional[int], *, allow_full_run: bool) -> int:
+def resolve_run_limit(limit: int | None, *, allow_full_run: bool) -> int:
     if limit is None:
         return 0 if allow_full_run else DEFAULT_SMOKE_LIMIT
     return limit
@@ -204,7 +207,7 @@ def resolve_run_limit(limit: Optional[int], *, allow_full_run: bool) -> int:
 def select_run_inputs(
     inputs: list[Any],
     *,
-    limit: Optional[int],
+    limit: int | None,
     offset: int = 0,
     allow_full_run: bool,
 ) -> list[Any]:
@@ -222,7 +225,9 @@ def load_excluded_chunk_ids(output_dirs: list[Path]) -> set[str]:
     for output_dir in output_dirs:
         path = Path(output_dir) / INPUTS_FILENAME
         if not path.exists():
-            raise SystemExit(f"--exclude-output-dir is missing {INPUTS_FILENAME}: {output_dir}")
+            raise SystemExit(
+                f"--exclude-output-dir is missing {INPUTS_FILENAME}: {output_dir}"
+            )
         for row in read_jsonl(path):
             chunk_id = row.get("chunk_id")
             if chunk_id:
@@ -230,8 +235,16 @@ def load_excluded_chunk_ids(output_dirs: list[Path]) -> set[str]:
     return excluded
 
 
-def prompt_file_for_name(prompt_dir: Path, prompt_name: str, prompt_version: str) -> Path:
-    return prompt_dir / "learner_workflow" / "orchestrator" / prompt_name / f"{prompt_version}.yaml"
+def prompt_file_for_name(
+    prompt_dir: Path, prompt_name: str, prompt_version: str
+) -> Path:
+    return (
+        prompt_dir
+        / "learner_workflow"
+        / "orchestrator"
+        / prompt_name
+        / f"{prompt_version}.yaml"
+    )
 
 
 def resolved_prompt_name_for_pass(args: argparse.Namespace, pass_name: str) -> str:
@@ -243,7 +256,9 @@ def resolved_prompt_name_for_pass(args: argparse.Namespace, pass_name: str) -> s
     return DEFAULT_POSTPROCESS_PROMPT_NAME
 
 
-def postprocess_pass_spec(args: argparse.Namespace, pass_name: str) -> PostprocessPassSpec:
+def postprocess_pass_spec(
+    args: argparse.Namespace, pass_name: str
+) -> PostprocessPassSpec:
     """Resolves prompt and cache identity for a standalone, quality, or graph pass."""
 
     prompt_name = resolved_prompt_name_for_pass(args, pass_name)
@@ -262,7 +277,12 @@ def postprocess_pass_spec(args: argparse.Namespace, pass_name: str) -> Postproce
     )
 
 
-def load_prompt(prompt_dir: Path, prompt_version: str, *, prompt_name: str = DEFAULT_POSTPROCESS_PROMPT_NAME) -> tuple[str, str]:
+def load_prompt(
+    prompt_dir: Path,
+    prompt_version: str,
+    *,
+    prompt_name: str = DEFAULT_POSTPROCESS_PROMPT_NAME,
+) -> tuple[str, str]:
     user_template, system_payload = PromptEngine(prompt_dir).render(
         PromptType.learner_workflow,
         ModelRoleType.orchestrator,
@@ -274,17 +294,21 @@ def load_prompt(prompt_dir: Path, prompt_version: str, *, prompt_name: str = DEF
     return user_template, str(system_payload.get("system_instruction", ""))
 
 
-def load_prompt_for_pass(args: argparse.Namespace, pass_name: str) -> tuple[tuple[str, str], str]:
+def load_prompt_for_pass(
+    args: argparse.Namespace, pass_name: str
+) -> tuple[tuple[str, str], str]:
     prompt_name = resolved_prompt_name_for_pass(args, pass_name)
-    return load_prompt(args.prompt_dir, args.prompt_version, prompt_name=prompt_name), prompt_name
+    return load_prompt(
+        args.prompt_dir, args.prompt_version, prompt_name=prompt_name
+    ), prompt_name
 
 
 def build_ollama_llm(
     args: argparse.Namespace,
     *,
-    model_name: Optional[str] = None,
-    prompt_version: Optional[str] = None,
-    num_predict: Optional[int] = None,
+    model_name: str | None = None,
+    prompt_version: str | None = None,
+    num_predict: int | None = None,
 ) -> Any:
     """Creates the JSON-bound Ollama chat model used by post-processing calls."""
 
@@ -301,7 +325,9 @@ def build_ollama_llm(
         base_url=args.base_url,
         prompt_version=prompt_version or args.prompt_version,
     )
-    return AgentsFactory.add_retry(AgentsFactory.get_llm_by_role(settings), settings.provider).bind(format="json")
+    return AgentsFactory.add_retry(
+        AgentsFactory.get_llm_by_role(settings), settings.provider
+    ).bind(format="json")
 
 
 def invoke_llm_batch(
@@ -313,7 +339,9 @@ def invoke_llm_batch(
 ) -> tuple[str, dict[str, Any]]:
     user_template, system_prompt = prompt
     input_json = json.dumps(batch_prompt_payload(batch), ensure_ascii=False, indent=2)
-    schema_json = json.dumps(response_schema_hint(pass_name=pass_name), ensure_ascii=False, indent=2)
+    schema_json = json.dumps(
+        response_schema_hint(pass_name=pass_name), ensure_ascii=False, indent=2
+    )
     user_prompt = (
         user_template.replace("{input_json}", input_json)
         .replace("{response_schema}", schema_json)
@@ -334,8 +362,12 @@ def invoke_llm_repair(
 ) -> tuple[str, dict[str, Any]]:
     _, system_prompt = prompt
     input_json = json.dumps(batch_prompt_payload(batch), ensure_ascii=False, indent=2)
-    schema_json = json.dumps(response_schema_hint(pass_name=pass_name), ensure_ascii=False, indent=2)
-    failure_summary = "; ".join(f"{failure.error_type}: {failure.message[:300]}" for failure in failures)
+    schema_json = json.dumps(
+        response_schema_hint(pass_name=pass_name), ensure_ascii=False, indent=2
+    )
+    failure_summary = "; ".join(
+        f"{failure.error_type}: {failure.message[:300]}" for failure in failures
+    )
     if pass_name == "single":
         repair_prompt = (
             "Generate a fresh compact JSON response for the same input. "
@@ -356,11 +388,17 @@ def invoke_llm_repair(
             f"Field contract:\n{schema_json}\n\n"
             f"Previous response prefix for context only:\n{raw_response[:1200]}"
         )
-    return invoke_messages(llm, system_prompt.replace("{pass_name}", pass_name), repair_prompt)
+    return invoke_messages(
+        llm, system_prompt.replace("{pass_name}", pass_name), repair_prompt
+    )
 
 
-def invoke_messages(llm: Any, system_prompt: str, user_prompt: str) -> tuple[str, dict[str, Any]]:
-    response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
+def invoke_messages(
+    llm: Any, system_prompt: str, user_prompt: str
+) -> tuple[str, dict[str, Any]]:
+    response = llm.invoke(
+        [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
+    )
     raw_text = content_to_text(getattr(response, "content", response))
     metadata = {
         "response_metadata": getattr(response, "response_metadata", {}),
@@ -433,7 +471,12 @@ def _prompt_content_hash(spec: PostprocessPassSpec, prompt: tuple[str, str]) -> 
     return stable_hash(prompt, length=16)
 
 
-def _print_prefix(spec: PostprocessPassSpec, batch_number: int, batch_count: int, batch: ChunkPostprocessBatch) -> str:
+def _print_prefix(
+    spec: PostprocessPassSpec,
+    batch_number: int,
+    batch_count: int,
+    batch: ChunkPostprocessBatch,
+) -> str:
     if spec.pass_name == "single":
         return f"[{batch_number}/{batch_count}] {batch.batch_id}:"
     return f"[{spec.pass_name} {batch_number}/{batch_count}]"
@@ -460,15 +503,25 @@ def run_postprocess_pass(
     becoming future replay baselines.
     """
 
-    batches = build_batches(inputs, max_batch_chunks=args.max_batch_chunks, max_batch_chars=args.max_batch_chars)
+    batches = build_batches(
+        inputs,
+        max_batch_chunks=args.max_batch_chunks,
+        max_batch_chars=args.max_batch_chars,
+    )
     spec = postprocess_pass_spec(args, pass_name)
-    prompt = load_prompt(args.prompt_dir, args.prompt_version, prompt_name=spec.prompt_name)
+    prompt = load_prompt(
+        args.prompt_dir, args.prompt_version, prompt_name=spec.prompt_name
+    )
     prompt_content_hash = _prompt_content_hash(spec, prompt)
     cache = LLMResponseCache(_pass_cache_dir(output_dir, spec))
     generation_settings = generation_settings_for_pass(args, pass_name)
-    llm = None if args.fake_llm else build_ollama_llm(
-        args,
-        num_predict=effective_num_predict(args, pass_name),
+    llm = (
+        None
+        if args.fake_llm
+        else build_ollama_llm(
+            args,
+            num_predict=effective_num_predict(args, pass_name),
+        )
     )
     decisions: list[ChunkEnrichmentDecision] = []
     failures: list[PostprocessFailure] = []
@@ -483,7 +536,7 @@ def run_postprocess_pass(
             prompt_content_hash=prompt_content_hash,
             generation_settings=generation_settings,
         )
-        raw_response: Optional[str] = None
+        raw_response: str | None = None
         response_metadata: dict[str, Any] = {}
         if not args.fake_llm and not args.force_refresh_cache:
             raw_response = cache.get(cache_key)
@@ -526,7 +579,11 @@ def run_postprocess_pass(
                         pass_name=pass_name,
                     )
                 except Exception as exc:
-                    error_type = "llm_usage_limit_error" if is_usage_limit_error(exc) else "llm_call_error"
+                    error_type = (
+                        "llm_usage_limit_error"
+                        if is_usage_limit_error(exc)
+                        else "llm_call_error"
+                    )
                     failures.append(
                         make_failure(
                             error_type,
@@ -536,12 +593,18 @@ def run_postprocess_pass(
                             prompt_version=spec.prompt_version,
                         )
                     )
-                    print(f"{_print_prefix(spec, batch_number, len(batches), batch)} LLM call failed: {exc}")
+                    print(
+                        f"{_print_prefix(spec, batch_number, len(batches), batch)} LLM call failed: {exc}"
+                    )
                     if error_type == "llm_usage_limit_error":
                         if spec.pass_name == "single":
-                            print("Usage limit reached; stopping postprocess loop so it can resume from cache later.")
+                            print(
+                                "Usage limit reached; stopping postprocess loop so it can resume from cache later."
+                            )
                         else:
-                            print(f"[{spec.pass_name}] Usage limit reached; stopping pass so it can resume from cache later.")
+                            print(
+                                f"[{spec.pass_name}] Usage limit reached; stopping pass so it can resume from cache later."
+                            )
                         aborted = True
                         break
                     continue
@@ -560,7 +623,9 @@ def run_postprocess_pass(
                     prompt_version=spec.prompt_version,
                 )
             )
-            print(f"{_print_prefix(spec, batch_number, len(batches), batch)} empty LLM response")
+            print(
+                f"{_print_prefix(spec, batch_number, len(batches), batch)} empty LLM response"
+            )
             continue
 
         batch_decisions, batch_failures = validate_raw_response(
@@ -599,7 +664,11 @@ def run_postprocess_pass(
                 else:
                     batch_failures.extend(repair_failures)
             except Exception as exc:
-                error_type = "llm_usage_limit_error" if is_usage_limit_error(exc) else "json_repair_error"
+                error_type = (
+                    "llm_usage_limit_error"
+                    if is_usage_limit_error(exc)
+                    else "json_repair_error"
+                )
                 batch_failures.append(
                     make_failure(
                         error_type,
@@ -612,16 +681,22 @@ def run_postprocess_pass(
                 )
                 if error_type == "llm_usage_limit_error":
                     if spec.pass_name == "single":
-                        print("Usage limit reached during repair; stopping postprocess loop.")
+                        print(
+                            "Usage limit reached during repair; stopping postprocess loop."
+                        )
                     else:
-                        print(f"[{spec.pass_name}] Usage limit reached during repair; stopping pass.")
+                        print(
+                            f"[{spec.pass_name}] Usage limit reached during repair; stopping pass."
+                        )
                     aborted = True
 
         if batch_decisions and not batch_failures and not args.fake_llm:
             cache.set(cache_key, raw_response, metadata=response_metadata)
         decisions.extend(batch_decisions)
         failures.extend(batch_failures)
-        print(f"{_print_prefix(spec, batch_number, len(batches), batch)} {len(batch_decisions)} valid, {len(batch_failures)} failures")
+        print(
+            f"{_print_prefix(spec, batch_number, len(batches), batch)} {len(batch_decisions)} valid, {len(batch_failures)} failures"
+        )
         if aborted:
             break
     return PostprocessPassResult(decisions, failures, cache_hits, cache_misses, aborted)
@@ -634,7 +709,9 @@ def graph_worthy_inputs(
 ) -> list[ChunkPostprocessInput]:
     """Select chunks whose quality decision allows a second graph-enrichment pass."""
 
-    failed_chunk_ids = {failure.chunk_id for failure in quality_failures if failure.chunk_id}
+    failed_chunk_ids = {
+        failure.chunk_id for failure in quality_failures if failure.chunk_id
+    }
     decisions_by_chunk = {decision.chunk_id: decision for decision in quality_decisions}
     selected: list[ChunkPostprocessInput] = []
     for item in quality_inputs:
@@ -667,10 +744,16 @@ def merge_quality_and_graph_decisions(
         payload = quality.model_dump(mode="json")
         payload.update(
             {
-                "concepts": [concept.model_dump(mode="json") for concept in graph.concepts],
-                "relations": [relation.model_dump(mode="json") for relation in graph.relations],
+                "concepts": [
+                    concept.model_dump(mode="json") for concept in graph.concepts
+                ],
+                "relations": [
+                    relation.model_dump(mode="json") for relation in graph.relations
+                ],
                 "chunk_summary": graph.chunk_summary or quality.chunk_summary,
-                "warnings": unique_preserving_order([*quality.warnings, *graph.warnings]),
+                "warnings": unique_preserving_order(
+                    [*quality.warnings, *graph.warnings]
+                ),
                 "confidence": min(quality.confidence, graph.confidence),
                 "decision_id": f"decision_{stable_hash(['two_pass', quality.decision_id, graph.decision_id], length=24)}",
                 "prompt_version": f"{quality.prompt_version}+graph:{graph.prompt_version}",
@@ -687,7 +770,7 @@ def validate_raw_concept_adjudication(
     *,
     model_name: str,
     prompt_version: str,
-) -> tuple[Optional[ConceptAdjudicationResponse], list[ConceptAdjudicationFailure]]:
+) -> tuple[ConceptAdjudicationResponse | None, list[ConceptAdjudicationFailure]]:
     try:
         parsed = parse_concept_adjudication_response(raw_response)
     except Exception as exc:
@@ -733,9 +816,17 @@ def render_concept_adjudication_user_prompt(
     resolution: ConceptResolution,
 ) -> str:
     user_template, _ = prompt
-    input_json = json.dumps(concept_adjudication_prompt_payload(cluster, resolution.mentions), ensure_ascii=False, indent=2)
-    schema_json = json.dumps(concept_adjudication_schema_hint(), ensure_ascii=False, indent=2)
-    return user_template.replace("{input_json}", input_json).replace("{response_schema}", schema_json)
+    input_json = json.dumps(
+        concept_adjudication_prompt_payload(cluster, resolution.mentions),
+        ensure_ascii=False,
+        indent=2,
+    )
+    schema_json = json.dumps(
+        concept_adjudication_schema_hint(), ensure_ascii=False, indent=2
+    )
+    return user_template.replace("{input_json}", input_json).replace(
+        "{response_schema}", schema_json
+    )
 
 
 def invoke_concept_adjudication_repair(
@@ -747,9 +838,17 @@ def invoke_concept_adjudication_repair(
     failures: list[ConceptAdjudicationFailure],
 ) -> tuple[str, dict[str, Any]]:
     _, system_prompt = prompt
-    input_json = json.dumps(concept_adjudication_prompt_payload(cluster, resolution.mentions), ensure_ascii=False, indent=2)
-    schema_json = json.dumps(concept_adjudication_schema_hint(), ensure_ascii=False, indent=2)
-    failure_summary = "; ".join(f"{failure.error_type}: {failure.message[:300]}" for failure in failures)
+    input_json = json.dumps(
+        concept_adjudication_prompt_payload(cluster, resolution.mentions),
+        ensure_ascii=False,
+        indent=2,
+    )
+    schema_json = json.dumps(
+        concept_adjudication_schema_hint(), ensure_ascii=False, indent=2
+    )
+    failure_summary = "; ".join(
+        f"{failure.error_type}: {failure.message[:300]}" for failure in failures
+    )
     repair_prompt = (
         "Generate a fresh compact JSON response for the same concept cluster. "
         "Do not continue the previous answer. Return JSON only. "
@@ -772,7 +871,9 @@ def run_concept_adjudications(
     cache: LLMResponseCache,
     model_name: str,
     prompt_version: str,
-) -> tuple[list[ConceptAdjudicationResponse], list[ConceptAdjudicationFailure], int, int]:
+) -> tuple[
+    list[ConceptAdjudicationResponse], list[ConceptAdjudicationFailure], int, int
+]:
     """Runs optional LLM adjudication for uncertain concept clusters.
 
     Deterministic concept resolution builds the full candidate registry first.
@@ -799,7 +900,9 @@ def run_concept_adjudications(
     generation_settings = generation_settings_for_pass(args, "concept_resolution")
     stopped_for_usage_limit = False
     for cluster_number, cluster in enumerate(clusters, start=1):
-        rendered_prompt_chars = len(render_concept_adjudication_user_prompt(prompt, cluster, resolution))
+        rendered_prompt_chars = len(
+            render_concept_adjudication_user_prompt(prompt, cluster, resolution)
+        )
         if rendered_prompt_chars > MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS:
             failure = make_concept_adjudication_failure(
                 "prompt_budget_exceeded",
@@ -824,7 +927,7 @@ def run_concept_adjudications(
             prompt_version=prompt_version,
             generation_settings=generation_settings,
         )
-        raw_response: Optional[str] = None
+        raw_response: str | None = None
         response_metadata: dict[str, Any] = {}
         if not args.fake_llm and not args.force_refresh_cache:
             raw_response = cache.get(cache_key)
@@ -859,7 +962,11 @@ def run_concept_adjudications(
                         resolution,
                     )
                 except Exception as exc:
-                    error_type = "llm_usage_limit_error" if is_usage_limit_error(exc) else "llm_call_error"
+                    error_type = (
+                        "llm_usage_limit_error"
+                        if is_usage_limit_error(exc)
+                        else "llm_call_error"
+                    )
                     failure = make_concept_adjudication_failure(
                         error_type,
                         f"{type(exc).__name__}: {exc}",
@@ -873,7 +980,9 @@ def run_concept_adjudications(
                         f"LLM call failed for {cluster.cluster_id}: {exc}"
                     )
                     if error_type == "llm_usage_limit_error":
-                        print("Usage limit reached; stopping concept adjudication so it can resume from cache later.")
+                        print(
+                            "Usage limit reached; stopping concept adjudication so it can resume from cache later."
+                        )
                         stopped_for_usage_limit = True
                         break
                     continue
@@ -891,7 +1000,9 @@ def run_concept_adjudications(
                     prompt_version=prompt_version,
                 )
             )
-            print(f"[concept {cluster_number}/{len(clusters)}] {cluster.cluster_id}: empty LLM response")
+            print(
+                f"[concept {cluster_number}/{len(clusters)}] {cluster.cluster_id}: empty LLM response"
+            )
             continue
 
         adjudication, cluster_failures = validate_raw_concept_adjudication(
@@ -910,11 +1021,13 @@ def run_concept_adjudications(
                     raw_response,
                     cluster_failures,
                 )
-                repair_adjudication, repair_failures = validate_raw_concept_adjudication(
-                    repair_raw,
-                    cluster,
-                    model_name=model_name,
-                    prompt_version=prompt_version,
+                repair_adjudication, repair_failures = (
+                    validate_raw_concept_adjudication(
+                        repair_raw,
+                        cluster,
+                        model_name=model_name,
+                        prompt_version=prompt_version,
+                    )
                 )
                 if repair_adjudication and not repair_failures:
                     raw_response = repair_raw
@@ -928,7 +1041,11 @@ def run_concept_adjudications(
                 else:
                     cluster_failures.extend(repair_failures)
             except Exception as exc:
-                error_type = "llm_usage_limit_error" if is_usage_limit_error(exc) else "json_repair_error"
+                error_type = (
+                    "llm_usage_limit_error"
+                    if is_usage_limit_error(exc)
+                    else "json_repair_error"
+                )
                 cluster_failures.append(
                     make_concept_adjudication_failure(
                         error_type,
@@ -940,7 +1057,9 @@ def run_concept_adjudications(
                     )
                 )
                 if error_type == "llm_usage_limit_error":
-                    print("Usage limit reached during concept repair; stopping concept adjudication.")
+                    print(
+                        "Usage limit reached during concept repair; stopping concept adjudication."
+                    )
                     stopped_for_usage_limit = True
 
         if adjudication and not cluster_failures:
@@ -977,20 +1096,33 @@ def resolve_concepts(
         f"{len(resolution.review_clusters)} uncertain clusters."
     )
     if args.concept_resolution_mode == "llm" and resolution.review_clusters:
-        resolved_model_name = concept_model_name or args.concept_resolution_model_name or args.model_name
+        resolved_model_name = (
+            concept_model_name or args.concept_resolution_model_name or args.model_name
+        )
         concept_prompt = load_prompt(
             args.prompt_dir,
             args.concept_resolution_prompt_version,
             prompt_name="remnote_concept_resolution",
         )
-        concept_cache = LLMResponseCache(output_dir / CACHE_DIRNAME / "concept_resolution")
-        concept_llm = None if args.fake_llm else build_ollama_llm(
-            args,
-            model_name=resolved_model_name,
-            prompt_version=args.concept_resolution_prompt_version,
-            num_predict=effective_num_predict(args, "concept_resolution"),
+        concept_cache = LLMResponseCache(
+            output_dir / CACHE_DIRNAME / "concept_resolution"
         )
-        adjudications, adjudication_failures, concept_cache_hits, concept_cache_misses = run_concept_adjudications(
+        concept_llm = (
+            None
+            if args.fake_llm
+            else build_ollama_llm(
+                args,
+                model_name=resolved_model_name,
+                prompt_version=args.concept_resolution_prompt_version,
+                num_predict=effective_num_predict(args, "concept_resolution"),
+            )
+        )
+        (
+            adjudications,
+            adjudication_failures,
+            concept_cache_hits,
+            concept_cache_misses,
+        ) = run_concept_adjudications(
             args,
             resolution,
             llm=concept_llm,
@@ -1003,24 +1135,44 @@ def resolve_concepts(
             resolution = apply_concept_adjudications(resolution, adjudications)
         if adjudication_failures:
             resolution = resolution.model_copy(
-                update={"adjudication_failures": [*resolution.adjudication_failures, *adjudication_failures]}
+                update={
+                    "adjudication_failures": [
+                        *resolution.adjudication_failures,
+                        *adjudication_failures,
+                    ]
+                }
             )
-    return ConceptResolutionRunResult(resolution, concept_cache_hits, concept_cache_misses)
+    return ConceptResolutionRunResult(
+        resolution, concept_cache_hits, concept_cache_misses
+    )
 
 
 def load_existing_postprocess_sidecars(
     input_dir: Path,
-) -> tuple[list[ChunkPostprocessInput], list[ChunkEnrichmentDecision], list[PostprocessFailure]]:
+) -> tuple[
+    list[ChunkPostprocessInput], list[ChunkEnrichmentDecision], list[PostprocessFailure]
+]:
     """Load prior sidecars for concept-resolution-only reruns."""
 
     input_dir = Path(input_dir)
-    inputs = [ChunkPostprocessInput.model_validate(row) for row in read_jsonl(input_dir / INPUTS_FILENAME)]
-    decisions = [ChunkEnrichmentDecision.model_validate(row) for row in read_jsonl(input_dir / DECISIONS_FILENAME)]
-    failures = [PostprocessFailure.model_validate(row) for row in read_jsonl_if_exists(input_dir / FAILURES_FILENAME)]
+    inputs = [
+        ChunkPostprocessInput.model_validate(row)
+        for row in read_jsonl(input_dir / INPUTS_FILENAME)
+    ]
+    decisions = [
+        ChunkEnrichmentDecision.model_validate(row)
+        for row in read_jsonl(input_dir / DECISIONS_FILENAME)
+    ]
+    failures = [
+        PostprocessFailure.model_validate(row)
+        for row in read_jsonl_if_exists(input_dir / FAILURES_FILENAME)
+    ]
     return inputs, decisions, failures
 
 
-def infer_concept_resolution_model_name(args: argparse.Namespace, decisions: list[ChunkEnrichmentDecision]) -> str:
+def infer_concept_resolution_model_name(
+    args: argparse.Namespace, decisions: list[ChunkEnrichmentDecision]
+) -> str:
     """Chooses the model name recorded for concept-resolution-only sidecars.
 
     When the caller does not explicitly pass a model, reuse the most common
@@ -1032,7 +1184,9 @@ def infer_concept_resolution_model_name(args: argparse.Namespace, decisions: lis
         return args.concept_resolution_model_name
     if "--model-name" in sys.argv:
         return args.model_name
-    counts = Counter(decision.model_name for decision in decisions if decision.model_name)
+    counts = Counter(
+        decision.model_name for decision in decisions if decision.model_name
+    )
     if counts:
         return counts.most_common(1)[0][0]
     return args.model_name or DEFAULT_MODEL_NAME
@@ -1064,11 +1218,15 @@ def validate_concept_resolution_only_args(args: argparse.Namespace) -> None:
     input_dir = args.input_dir.resolve()
     output_dir = args.output_dir.resolve()
     if input_dir == output_dir and not args.allow_in_place:
-        raise SystemExit("--output-dir equals --input-dir. Use --allow-in-place to overwrite sidecars in place.")
+        raise SystemExit(
+            "--output-dir equals --input-dir. Use --allow-in-place to overwrite sidecars in place."
+        )
     if not args.input_dir.exists():
         raise SystemExit(f"--input-dir does not exist: {args.input_dir}")
     if args.concept_resolution_mode == "off":
-        raise SystemExit("--concept-resolution-only requires --concept-resolution-mode deterministic or llm")
+        raise SystemExit(
+            "--concept-resolution-only requires --concept-resolution-mode deterministic or llm"
+        )
     _validate_concept_resolution_limits(args)
     if args.dry_run:
         raise SystemExit("--dry-run is not supported with --concept-resolution-only")
@@ -1079,17 +1237,25 @@ def _validate_concept_resolution_limits(args: argparse.Namespace) -> None:
         raise SystemExit("--concept-resolution-limit must be >= 0")
     if args.num_predict <= 0:
         raise SystemExit("--num-predict must be > 0")
-    if args.concept_resolution_num_predict is not None and args.concept_resolution_num_predict <= 0:
+    if (
+        args.concept_resolution_num_predict is not None
+        and args.concept_resolution_num_predict <= 0
+    ):
         raise SystemExit("--concept-resolution-num-predict must be > 0")
     args.concept_resolution_limit = resolve_run_limit(
         args.concept_resolution_limit,
         allow_full_run=args.allow_full_run,
     )
     if args.concept_resolution_mode == "llm":
-        if not args.allow_full_run and args.concept_resolution_limit > DEFAULT_SMOKE_LIMIT:
+        if (
+            not args.allow_full_run
+            and args.concept_resolution_limit > DEFAULT_SMOKE_LIMIT
+        ):
             raise SystemExit(
                 f"--concept-resolution-limit defaults to a smoke-test ceiling of {DEFAULT_SMOKE_LIMIT}. "
                 "Use --allow-full-run to adjudicate more clusters."
             )
         if args.concept_resolution_limit == 0 and not args.allow_full_run:
-            raise SystemExit("--concept-resolution-limit 0 means all clusters and requires --allow-full-run")
+            raise SystemExit(
+                "--concept-resolution-limit 0 means all clusters and requires --allow-full-run"
+            )

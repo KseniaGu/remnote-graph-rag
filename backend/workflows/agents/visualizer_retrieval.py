@@ -4,8 +4,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.configs.constants import WORKFLOW_LOGGING
+from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.utils.helpers import get_logger
 from backend.workflows.agents.retrieval_access import (
     POSTPROCESSED_CHUNK_KIND,
@@ -13,7 +13,6 @@ from backend.workflows.agents.retrieval_access import (
     POSTPROCESSED_PASSAGE_KIND,
     RetrievalStoreAccess,
 )
-
 
 logger = get_logger(WORKFLOW_LOGGING)
 
@@ -55,7 +54,11 @@ class EdgeCandidate:
 class VisualizerRetrievalPipeline:
     """Concept-first graph retrieval for the Visualizer tool."""
 
-    def __init__(self, knowledge_graph_indexer: Any, settings: KnowledgeGraphSearchSettings | None = None) -> None:
+    def __init__(
+        self,
+        knowledge_graph_indexer: Any,
+        settings: KnowledgeGraphSearchSettings | None = None,
+    ) -> None:
         self.indexer = knowledge_graph_indexer
         self.settings = settings or knowledge_graph_indexer.kg_search_settings
         self.access = RetrievalStoreAccess(knowledge_graph_indexer)
@@ -68,7 +71,9 @@ class VisualizerRetrievalPipeline:
     def health_report(self):
         return self.access.health_report
 
-    def visualize(self, queries: list[str]) -> tuple[list[str], list[tuple[str, str, str]], list[str]]:
+    def visualize(
+        self, queries: list[str]
+    ) -> tuple[list[str], list[tuple[str, str, str]], list[str]]:
         original_queries = list(queries)
         if not queries:
             return [], [], original_queries
@@ -91,11 +96,15 @@ class VisualizerRetrievalPipeline:
             anchors = self._resolve_anchors(query_text)
             if not anchors:
                 continue
-            source_chunk_ids = self._filter_source_chunks_for_anchors(source_chunk_ids, anchors)
+            source_chunk_ids = self._filter_source_chunks_for_anchors(
+                source_chunk_ids, anchors
+            )
 
             mentioned = self._concepts_mentioned_by_chunks(source_chunk_ids, query_text)
             for concept in [*anchors, *mentioned]:
-                self._merge_concept_candidate(concept_candidates, concept, query_text, concept.support_chunk_ids)
+                self._merge_concept_candidate(
+                    concept_candidates, concept, query_text, concept.support_chunk_ids
+                )
 
             query_edges = self._semantic_edges_for_query(
                 query_text,
@@ -107,7 +116,10 @@ class VisualizerRetrievalPipeline:
             for edge in query_edges:
                 self._merge_edge_candidate(edge_candidates, edge)
 
-            if self.settings.visualizer_allow_synthetic_edges and not comparison_like_query:
+            if (
+                self.settings.visualizer_allow_synthetic_edges
+                and not comparison_like_query
+            ):
                 synthetic_edges = self._synthetic_edges_for_query(
                     query_text,
                     anchors,
@@ -156,18 +168,30 @@ class VisualizerRetrievalPipeline:
                     support_chunk_ids=self._node_source_chunk_ids(node),
                     is_anchor=True,
                 )
-                self._merge_concept_candidate(anchors, candidate, query, candidate.support_chunk_ids)
+                self._merge_concept_candidate(
+                    anchors, candidate, query, candidate.support_chunk_ids
+                )
 
-        if not anchors or max((candidate.score for candidate in anchors.values()), default=0.0) < 1.0:
+        if (
+            not anchors
+            or max((candidate.score for candidate in anchors.values()), default=0.0)
+            < 1.0
+        ):
             for candidate in self._vector_concept_candidates(query):
                 if candidate.score < self.settings.visualizer_anchor_min_score:
                     continue
                 candidate.is_anchor = True
-                self._merge_concept_candidate(anchors, candidate, query, candidate.support_chunk_ids)
+                self._merge_concept_candidate(
+                    anchors, candidate, query, candidate.support_chunk_ids
+                )
 
         return sorted(
             anchors.values(),
-            key=lambda item: (item.score, self._salience(item.node), item.label.lower()),
+            key=lambda item: (
+                item.score,
+                self._salience(item.node),
+                item.label.lower(),
+            ),
             reverse=True,
         )[: self.settings.visualizer_anchor_top_k]
 
@@ -209,7 +233,10 @@ class VisualizerRetrievalPipeline:
             parent_id, node, matched_text = resolved
             metadata = getattr(node, "metadata", {}) or {}
             text = matched_text or self._node_text(node)
-            score = self._clip_score(float(similarity or 0.0) + self._source_query_boost(query, text, metadata))
+            score = self._clip_score(
+                float(similarity or 0.0)
+                + self._source_query_boost(query, text, metadata)
+            )
             scored_ids.append((parent_id, score))
 
         return scored_ids
@@ -221,7 +248,11 @@ class VisualizerRetrievalPipeline:
 
         hit_metadata = getattr(hit_node, "metadata", {}) or {}
         if hit_metadata.get("docstore_node_kind") == POSTPROCESSED_PASSAGE_KIND:
-            parent_id = str(hit_metadata.get("parent_chunk_id") or hit_metadata.get("chunk_id") or "")
+            parent_id = str(
+                hit_metadata.get("parent_chunk_id")
+                or hit_metadata.get("chunk_id")
+                or ""
+            )
             if not parent_id:
                 return None
             parent_node = self._get_docstore_node(parent_id)
@@ -239,7 +270,11 @@ class VisualizerRetrievalPipeline:
         chunk_ids: list[str],
         anchors: list[ConceptCandidate],
     ) -> list[str]:
-        if not self.settings.visualizer_anchor_source_filter or not chunk_ids or not anchors:
+        if (
+            not self.settings.visualizer_anchor_source_filter
+            or not chunk_ids
+            or not anchors
+        ):
             return chunk_ids
 
         anchor_source_keys = self._source_scope_for_concepts(anchors)
@@ -253,7 +288,9 @@ class VisualizerRetrievalPipeline:
             if self._source_scope_key(metadata) in anchor_source_keys:
                 scoped_chunk_ids.append(chunk_id)
 
-        return scoped_chunk_ids or chunk_ids[: max(self.settings.visualizer_min_nodes, 1)]
+        return (
+            scoped_chunk_ids or chunk_ids[: max(self.settings.visualizer_min_nodes, 1)]
+        )
 
     def _vector_concept_candidates(self, query: str) -> list[ConceptCandidate]:
         if self.vector_store is None:
@@ -290,7 +327,9 @@ class VisualizerRetrievalPipeline:
                 )
             )
 
-        return sorted(candidates, key=lambda item: (item.score, item.label.lower()), reverse=True)
+        return sorted(
+            candidates, key=lambda item: (item.score, item.label.lower()), reverse=True
+        )
 
     def _semantic_edges_for_query(
         self,
@@ -310,7 +349,9 @@ class VisualizerRetrievalPipeline:
         if not anchors:
             return []
 
-        seed_candidates = self._semantic_seed_candidates(anchors, mentioned, source_chunk_ids)
+        seed_candidates = self._semantic_seed_candidates(
+            anchors, mentioned, source_chunk_ids
+        )
         seed_nodes = [candidate.node for candidate in seed_candidates]
         triplets = self._get_relation_map(seed_nodes)
         anchor_ids = {candidate.node_id for candidate in anchors}
@@ -337,8 +378,13 @@ class VisualizerRetrievalPipeline:
 
             subject_candidate = self._concept_candidate_from_node(subject, query)
             object_candidate = self._concept_candidate_from_node(object_, query)
-            if predicate == self.settings.visualizer_synthetic_edge_label or predicate == "RELATED_TO":
-                endpoint_candidate = object_candidate if subject_id in anchor_ids else subject_candidate
+            if (
+                predicate == self.settings.visualizer_synthetic_edge_label
+                or predicate == "RELATED_TO"
+            ):
+                endpoint_candidate = (
+                    object_candidate if subject_id in anchor_ids else subject_candidate
+                )
                 facet_score = self._facet_candidate_score(
                     query_terms,
                     endpoint_candidate.label,
@@ -346,19 +392,35 @@ class VisualizerRetrievalPipeline:
                 )
                 if self._facet_excludes_candidate(query_terms, facet_score):
                     continue
-            self._merge_concept_candidate(concept_candidates, subject_candidate, query, evidence_chunk_ids)
-            self._merge_concept_candidate(concept_candidates, object_candidate, query, evidence_chunk_ids)
+            self._merge_concept_candidate(
+                concept_candidates, subject_candidate, query, evidence_chunk_ids
+            )
+            self._merge_concept_candidate(
+                concept_candidates, object_candidate, query, evidence_chunk_ids
+            )
 
             relation_properties = getattr(relation, "properties", {}) or {}
             confidence = self._float_or_none(
                 relation_properties.get("max_confidence")
                 or relation_properties.get("confidence")
             )
-            predicate_family = self._string_or_none(relation_properties.get("predicate_family"))
-            relation_phrases = self._string_list(relation_properties.get("relation_phrases"))
-            generality_score = self._float_or_none(relation_properties.get("max_generality_score"))
-            visualization_usefulness = self._float_or_none(relation_properties.get("max_visualization_usefulness"))
-            generic_penalty = 0.06 if predicate == "RELATED_TO" or predicate_family == "other" else 0.0
+            predicate_family = self._string_or_none(
+                relation_properties.get("predicate_family")
+            )
+            relation_phrases = self._string_list(
+                relation_properties.get("relation_phrases")
+            )
+            generality_score = self._float_or_none(
+                relation_properties.get("max_generality_score")
+            )
+            visualization_usefulness = self._float_or_none(
+                relation_properties.get("max_visualization_usefulness")
+            )
+            generic_penalty = (
+                0.06
+                if predicate == "RELATED_TO" or predicate_family == "other"
+                else 0.0
+            )
             score = (
                 0.35
                 + max(subject_candidate.score, object_candidate.score) * 0.35
@@ -367,7 +429,9 @@ class VisualizerRetrievalPipeline:
                 + ((confidence or 0.0) * 0.08)
                 + ((visualization_usefulness or 0.0) * 0.12)
                 + ((generality_score or 0.0) * 0.06)
-                + self._relation_query_boost(query, subject_candidate.label, predicate, object_candidate.label)
+                + self._relation_query_boost(
+                    query, subject_candidate.label, predicate, object_candidate.label
+                )
                 - generic_penalty
             )
             edges.append(
@@ -393,7 +457,9 @@ class VisualizerRetrievalPipeline:
         source_chunk_ids: list[str],
     ) -> list[ConceptCandidate]:
         source_chunk_set = set(source_chunk_ids)
-        seeds: dict[str, ConceptCandidate] = {candidate.node_id: candidate for candidate in anchors}
+        seeds: dict[str, ConceptCandidate] = {
+            candidate.node_id: candidate for candidate in anchors
+        }
         mentioned_limit = max(self.settings.visualizer_anchor_top_k, 1)
         for candidate in mentioned:
             if len(seeds) >= len(anchors) + mentioned_limit:
@@ -424,7 +490,8 @@ class VisualizerRetrievalPipeline:
         edges: list[EdgeCandidate] = []
         for anchor in anchors:
             anchor_source_chunks = [
-                chunk_id for chunk_id in anchor.support_chunk_ids
+                chunk_id
+                for chunk_id in anchor.support_chunk_ids
                 if chunk_id in source_chunk_set
             ]
             anchor_source_chunk_set = set(anchor_source_chunks)
@@ -432,23 +499,38 @@ class VisualizerRetrievalPipeline:
                 if concept.node_id == anchor.node_id:
                     continue
                 concept_source_chunks = [
-                    chunk_id for chunk_id in concept.support_chunk_ids
+                    chunk_id
+                    for chunk_id in concept.support_chunk_ids
                     if chunk_id in source_chunk_set
                 ]
                 if not concept_source_chunks:
                     continue
                 truly_shared_chunks = [
-                    chunk_id for chunk_id in concept_source_chunks
+                    chunk_id
+                    for chunk_id in concept_source_chunks
                     if chunk_id in anchor_source_chunk_set
                 ]
-                shared_chunks = self._ordered_unique(truly_shared_chunks or concept_source_chunks)
-                facet_score = self._facet_candidate_score(query_terms, concept.label, shared_chunks)
+                shared_chunks = self._ordered_unique(
+                    truly_shared_chunks or concept_source_chunks
+                )
+                facet_score = self._facet_candidate_score(
+                    query_terms, concept.label, shared_chunks
+                )
                 if self._facet_excludes_candidate(query_terms, facet_score):
                     continue
-                if strict_query_match and not self._has_term_overlap(query_terms, concept.label) and facet_score <= 0:
+                if (
+                    strict_query_match
+                    and not self._has_term_overlap(query_terms, concept.label)
+                    and facet_score <= 0
+                ):
                     continue
-                self._merge_concept_candidate(concept_candidates, concept, "", shared_chunks)
-                best_shared_rank = min(source_rank.get(chunk_id, len(source_rank)) for chunk_id in shared_chunks)
+                self._merge_concept_candidate(
+                    concept_candidates, concept, "", shared_chunks
+                )
+                best_shared_rank = min(
+                    source_rank.get(chunk_id, len(source_rank))
+                    for chunk_id in shared_chunks
+                )
                 source_rank_boost = max(0.0, 0.10 - (best_shared_rank * 0.015))
                 score = self._clip_score(
                     (anchor.score * 0.45)
@@ -471,23 +553,35 @@ class VisualizerRetrievalPipeline:
         edges.sort(key=lambda item: (item.score, item.object_id), reverse=True)
         return edges[: self.settings.visualizer_synthetic_edge_limit]
 
-    def _concepts_mentioned_by_chunks(self, chunk_ids: list[str], query: str) -> list[ConceptCandidate]:
+    def _concepts_mentioned_by_chunks(
+        self, chunk_ids: list[str], query: str
+    ) -> list[ConceptCandidate]:
         if not chunk_ids or self.graph_store is None:
             return []
 
         candidates: dict[str, ConceptCandidate] = {}
-        for source_node, relation, target_node in self._get_triplets(ids=chunk_ids, relation_names=["MENTIONS"]):
+        for source_node, relation, target_node in self._get_triplets(
+            ids=chunk_ids, relation_names=["MENTIONS"]
+        ):
             if self._relation_label(relation) != "MENTIONS":
                 continue
             target_id = self._node_id(target_node)
             if not target_id or not self._is_concept_node(target_node):
                 continue
-            evidence_chunk_ids = self._relation_evidence_chunk_ids(relation) or [self._node_id(source_node)]
+            evidence_chunk_ids = self._relation_evidence_chunk_ids(relation) or [
+                self._node_id(source_node)
+            ]
             candidate = self._concept_candidate_from_node(target_node, query)
-            candidate.support_chunk_ids = self._ordered_unique([*candidate.support_chunk_ids, *evidence_chunk_ids])
+            candidate.support_chunk_ids = self._ordered_unique(
+                [*candidate.support_chunk_ids, *evidence_chunk_ids]
+            )
             self._merge_concept_candidate(candidates, candidate, "", evidence_chunk_ids)
 
-        return sorted(candidates.values(), key=lambda item: (item.score, item.label.lower()), reverse=True)
+        return sorted(
+            candidates.values(),
+            key=lambda item: (item.score, item.label.lower()),
+            reverse=True,
+        )
 
     def _shape_graph(
         self,
@@ -497,13 +591,15 @@ class VisualizerRetrievalPipeline:
         concepts, edges = self._dedupe_concepts_by_label(concepts, edges)
         edges = self._drop_redundant_generic_edges(edges)
         edge_list = [
-            edge for edge in edges.values()
+            edge
+            for edge in edges.values()
             if edge.predicate not in self.settings.visualizer_denied_relation_labels
         ]
         edge_list.sort(
             key=lambda item: (
                 not item.synthetic,
-                item.predicate not in {self.settings.visualizer_synthetic_edge_label, "RELATED_TO"},
+                item.predicate
+                not in {self.settings.visualizer_synthetic_edge_label, "RELATED_TO"},
                 bool(item.evidence_chunk_ids),
                 item.score,
                 item.subject_id,
@@ -529,10 +625,14 @@ class VisualizerRetrievalPipeline:
                 continue
             selected_node_set = set(selected_node_ids)
             new_node_ids = [
-                node_id for node_id in (edge.subject_id, edge.object_id)
+                node_id
+                for node_id in (edge.subject_id, edge.object_id)
                 if node_id not in selected_node_set
             ]
-            if len(selected_node_ids) + len(new_node_ids) > self.settings.visualizer_max_nodes:
+            if (
+                len(selected_node_ids) + len(new_node_ids)
+                > self.settings.visualizer_max_nodes
+            ):
                 continue
             selected_edges.append(edge)
             selected_node_ids.extend(new_node_ids)
@@ -540,18 +640,26 @@ class VisualizerRetrievalPipeline:
             degree_counts[edge.object_id] = degree_counts.get(edge.object_id, 0) + 1
 
         anchors = [
-            candidate for candidate in concepts.values()
+            candidate
+            for candidate in concepts.values()
             if candidate.is_anchor and candidate.node_id not in selected_node_ids
         ]
         other_nodes: list[ConceptCandidate] = []
         if self.settings.visualizer_include_isolated_nodes:
             other_nodes = [
-                candidate for candidate in concepts.values()
-                if not candidate.is_anchor and candidate.node_id not in selected_node_ids
+                candidate
+                for candidate in concepts.values()
+                if not candidate.is_anchor
+                and candidate.node_id not in selected_node_ids
             ]
         ordered_extra_nodes = sorted(
             [*anchors, *other_nodes],
-            key=lambda item: (item.is_anchor, item.score, self._salience(item.node), item.label.lower()),
+            key=lambda item: (
+                item.is_anchor,
+                item.score,
+                self._salience(item.node),
+                item.label.lower(),
+            ),
             reverse=True,
         )
         for candidate in ordered_extra_nodes:
@@ -561,11 +669,17 @@ class VisualizerRetrievalPipeline:
 
         selected_node_set = set(selected_node_ids)
         selected_edges = [
-            edge for edge in selected_edges
-            if edge.subject_id in selected_node_set and edge.object_id in selected_node_set
+            edge
+            for edge in selected_edges
+            if edge.subject_id in selected_node_set
+            and edge.object_id in selected_node_set
         ]
         if not self.settings.visualizer_show_chunks:
-            selected_node_ids = [node_id for node_id in selected_node_ids if not node_id.startswith("chunk_")]
+            selected_node_ids = [
+                node_id
+                for node_id in selected_node_ids
+                if not node_id.startswith("chunk_")
+            ]
 
         return selected_node_ids, selected_edges
 
@@ -595,7 +709,9 @@ class VisualizerRetrievalPipeline:
         ids: list[str] | None = None,
         relation_names: list[str] | None = None,
     ) -> list[tuple[Any, Any, Any]]:
-        return self.access.triplets(ids=ids, relation_names=relation_names, component="visualizer")
+        return self.access.triplets(
+            ids=ids, relation_names=relation_names, component="visualizer"
+        )
 
     def _all_concepts(self) -> list[Any]:
         return self.access.all_concepts(component="visualizer")
@@ -609,7 +725,11 @@ class VisualizerRetrievalPipeline:
     def _concept_candidate_from_node(self, node: Any, query: str) -> ConceptCandidate:
         node_id = self._node_id(node) or ""
         label = self._node_label(node)
-        score = 0.35 + (self._salience(node) * 0.25) + self._label_query_boost(query, label, self._node_aliases(node))
+        score = (
+            0.35
+            + (self._salience(node) * 0.25)
+            + self._label_query_boost(query, label, self._node_aliases(node))
+        )
         return ConceptCandidate(
             node_id=node_id,
             node=node,
@@ -627,10 +747,15 @@ class VisualizerRetrievalPipeline:
     ) -> None:
         if not candidate.node_id:
             return
-        candidate.support_chunk_ids = self._ordered_unique([*candidate.support_chunk_ids, *support_chunk_ids])
+        candidate.support_chunk_ids = self._ordered_unique(
+            [*candidate.support_chunk_ids, *support_chunk_ids]
+        )
         if query:
             candidate.score = self._clip_score(
-                candidate.score + self._label_query_boost(query, candidate.label, self._node_aliases(candidate.node))
+                candidate.score
+                + self._label_query_boost(
+                    query, candidate.label, self._node_aliases(candidate.node)
+                )
             )
         existing = candidates.get(candidate.node_id)
         if existing is None:
@@ -638,10 +763,14 @@ class VisualizerRetrievalPipeline:
             return
         existing.score = max(existing.score, candidate.score)
         existing.is_anchor = existing.is_anchor or candidate.is_anchor
-        existing.support_chunk_ids = self._ordered_unique([*existing.support_chunk_ids, *candidate.support_chunk_ids])
+        existing.support_chunk_ids = self._ordered_unique(
+            [*existing.support_chunk_ids, *candidate.support_chunk_ids]
+        )
 
     @staticmethod
-    def _merge_edge_candidate(candidates: dict[tuple[str, str, str], EdgeCandidate], candidate: EdgeCandidate) -> None:
+    def _merge_edge_candidate(
+        candidates: dict[tuple[str, str, str], EdgeCandidate], candidate: EdgeCandidate
+    ) -> None:
         key = (candidate.subject_id, candidate.predicate, candidate.object_id)
         existing = candidates.get(key)
         if existing is None or candidate.score > existing.score:
@@ -740,7 +869,8 @@ class VisualizerRetrievalPipeline:
         return {
             key: edge
             for key, edge in edges.items()
-            if edge.predicate not in generic_labels or (edge.subject_id, edge.object_id) not in specific_pairs
+            if edge.predicate not in generic_labels
+            or (edge.subject_id, edge.object_id) not in specific_pairs
         }
 
     def _dedupe_keys_for_candidate(self, candidate: ConceptCandidate) -> set[str]:
@@ -776,7 +906,9 @@ class VisualizerRetrievalPipeline:
         return self._normalize_text(source)
 
     def _anchor_terms(self, query: str) -> list[str]:
-        terms = [part.strip() for part in COMPARISON_PATTERN.split(query) if part.strip()]
+        terms = [
+            part.strip() for part in COMPARISON_PATTERN.split(query) if part.strip()
+        ]
         return terms or [query]
 
     @staticmethod
@@ -799,7 +931,9 @@ class VisualizerRetrievalPipeline:
         summary = str(metadata.get("postprocess_chunk_summary") or "")
         return bool(text.strip() or summary.strip())
 
-    def _source_query_boost(self, query: str, text: str, metadata: dict[str, Any]) -> float:
+    def _source_query_boost(
+        self, query: str, text: str, metadata: dict[str, Any]
+    ) -> float:
         query_terms = self._query_terms(query)
         metadata_text = " ".join(
             [
@@ -819,14 +953,18 @@ class VisualizerRetrievalPipeline:
             boost -= 0.12
         return boost
 
-    def _exact_anchor_score(self, term_key: str, label: str, aliases: list[str]) -> float:
+    def _exact_anchor_score(
+        self, term_key: str, label: str, aliases: list[str]
+    ) -> float:
         label_key = self._normalize_text(label)
         alias_keys = [self._normalize_text(alias) for alias in aliases]
         if term_key == label_key or term_key in alias_keys:
             return 1.0
         term_tokens = term_key.split()
         label_tokens = label_key.split()
-        if self._can_partially_match_key(term_tokens) and self._token_sequence_overlaps(term_tokens, label_tokens):
+        if self._can_partially_match_key(term_tokens) and self._token_sequence_overlaps(
+            term_tokens, label_tokens
+        ):
             return 0.85
         if any(
             alias_key
@@ -846,11 +984,19 @@ class VisualizerRetrievalPipeline:
         boost += self._facet_label_boost(query_terms, label_text)
         return boost
 
-    def _relation_query_boost(self, query: str, subject: str, predicate: str, object_: str) -> float:
+    def _relation_query_boost(
+        self, query: str, subject: str, predicate: str, object_: str
+    ) -> float:
         relation_text = f"{subject} {predicate} {object_}"
-        return 0.08 if self._has_term_overlap(self._query_terms(query), relation_text) else 0.0
+        return (
+            0.08
+            if self._has_term_overlap(self._query_terms(query), relation_text)
+            else 0.0
+        )
 
-    def _facet_candidate_score(self, query_terms: set[str], label: str, evidence_chunk_ids: list[str]) -> float:
+    def _facet_candidate_score(
+        self, query_terms: set[str], label: str, evidence_chunk_ids: list[str]
+    ) -> float:
         evidence_text_parts = [label]
         for chunk_id in evidence_chunk_ids[:3]:
             node = self._get_docstore_node(chunk_id)
@@ -865,17 +1011,33 @@ class VisualizerRetrievalPipeline:
             )
 
         evidence_text = " ".join(part for part in evidence_text_parts if part)
-        return self._facet_label_boost(query_terms, label) + self._facet_source_boost(query_terms, evidence_text)
+        return self._facet_label_boost(query_terms, label) + self._facet_source_boost(
+            query_terms, evidence_text
+        )
 
     @staticmethod
     def _facet_excludes_candidate(query_terms: set[str], facet_score: float) -> bool:
-        if query_terms & {"dataset", "datasets", "benchmark", "benchmarks", "corpus", "corpora"}:
+        if query_terms & {
+            "dataset",
+            "datasets",
+            "benchmark",
+            "benchmarks",
+            "corpus",
+            "corpora",
+        }:
             return facet_score <= 0.0
         if query_terms & {"architecture", "component", "components"}:
             return facet_score <= 0.0
         if query_terms & {"training", "objective", "loss"}:
             return facet_score <= 0.0
-        if query_terms & {"method", "methods", "model", "models", "classifier", "classifiers"}:
+        if query_terms & {
+            "method",
+            "methods",
+            "model",
+            "models",
+            "classifier",
+            "classifiers",
+        }:
             return facet_score < -0.05
         return False
 
@@ -883,38 +1045,102 @@ class VisualizerRetrievalPipeline:
     def _facet_source_boost(query_terms: set[str], text: str) -> float:
         lowered = text.lower()
         boost = 0.0
-        if query_terms & {"method", "methods", "model", "models", "classifier", "classifiers"}:
-            if any(term in lowered for term in ("method", "model", "classifier", "component", "architecture")):
+        if query_terms & {
+            "method",
+            "methods",
+            "model",
+            "models",
+            "classifier",
+            "classifiers",
+        }:
+            if any(
+                term in lowered
+                for term in (
+                    "method",
+                    "model",
+                    "classifier",
+                    "component",
+                    "architecture",
+                )
+            ):
                 boost += 0.10
-            if any(term in lowered for term in ("dataset", "datasets", "benchmark", "corpus")):
+            if any(
+                term in lowered
+                for term in ("dataset", "datasets", "benchmark", "corpus")
+            ):
                 boost -= 0.12
-        if query_terms & {"dataset", "datasets", "benchmark", "benchmarks", "corpus", "corpora"}:
-            if any(term in lowered for term in ("dataset", "datasets", "benchmark", "corpus")):
+        if query_terms & {
+            "dataset",
+            "datasets",
+            "benchmark",
+            "benchmarks",
+            "corpus",
+            "corpora",
+        }:
+            if any(
+                term in lowered
+                for term in ("dataset", "datasets", "benchmark", "corpus")
+            ):
                 boost += 0.12
-            if any(term in lowered for term in ("classifier examples", "model for", "training using")):
+            if any(
+                term in lowered
+                for term in ("classifier examples", "model for", "training using")
+            ):
                 boost -= 0.08
         if query_terms & {"architecture", "component", "components"}:
-            if any(term in lowered for term in ("architecture", "component", "encoder", "decoder")):
+            if any(
+                term in lowered
+                for term in ("architecture", "component", "encoder", "decoder")
+            ):
                 boost += 0.12
         if query_terms & {"training", "objective", "loss"}:
-            if any(term in lowered for term in ("training", "objective", "loss", "pretraining")):
+            if any(
+                term in lowered
+                for term in ("training", "objective", "loss", "pretraining")
+            ):
                 boost += 0.12
         return boost
 
     @staticmethod
     def _facet_label_boost(query_terms: set[str], label_text: str) -> float:
         lowered = label_text.lower()
-        if query_terms & {"method", "methods", "model", "models", "classifier", "classifiers"}:
-            if any(term in lowered for term in ("classifier", "model", "method", "component", "extractor")):
+        if query_terms & {
+            "method",
+            "methods",
+            "model",
+            "models",
+            "classifier",
+            "classifiers",
+        }:
+            if any(
+                term in lowered
+                for term in ("classifier", "model", "method", "component", "extractor")
+            ):
                 return 0.12
-        if query_terms & {"dataset", "datasets", "benchmark", "benchmarks", "corpus", "corpora"}:
-            if any(term in lowered for term in ("dataset", "corpus", "ag news", "dbpedia", "yelp")):
+        if query_terms & {
+            "dataset",
+            "datasets",
+            "benchmark",
+            "benchmarks",
+            "corpus",
+            "corpora",
+        }:
+            if any(
+                term in lowered
+                for term in ("dataset", "corpus", "ag news", "dbpedia", "yelp")
+            ):
                 return 0.12
         if query_terms & {"architecture", "component", "components"}:
-            if any(term in lowered for term in ("encoder", "decoder", "architecture", "component")):
+            if any(
+                term in lowered
+                for term in ("encoder", "decoder", "architecture", "component")
+            ):
                 return 0.12
         if query_terms & {"training", "objective", "loss"}:
-            if any(term in lowered for term in ("objective", "loss", "training", "supervision", "encoder")):
+            if any(
+                term in lowered
+                for term in ("objective", "loss", "training", "supervision", "encoder")
+            ):
                 return 0.10
         return 0.0
 
@@ -957,9 +1183,7 @@ class VisualizerRetrievalPipeline:
     @staticmethod
     def _query_terms(query: str) -> set[str]:
         return {
-            token.lower()
-            for token in TOKEN_PATTERN.findall(query)
-            if len(token) > 2
+            token.lower() for token in TOKEN_PATTERN.findall(query) if len(token) > 2
         }
 
     @staticmethod
@@ -978,12 +1202,18 @@ class VisualizerRetrievalPipeline:
         return bool(tokens) and (len(tokens) >= 2 or len(tokens[0]) >= 3)
 
     @classmethod
-    def _token_sequence_overlaps(cls, left_tokens: list[str], right_tokens: list[str]) -> bool:
+    def _token_sequence_overlaps(
+        cls, left_tokens: list[str], right_tokens: list[str]
+    ) -> bool:
         if not left_tokens or not right_tokens:
             return False
-        if not cls._can_partially_match_key(left_tokens) or not cls._can_partially_match_key(right_tokens):
+        if not cls._can_partially_match_key(
+            left_tokens
+        ) or not cls._can_partially_match_key(right_tokens):
             return False
-        return cls._contains_token_sequence(left_tokens, right_tokens) or cls._contains_token_sequence(
+        return cls._contains_token_sequence(
+            left_tokens, right_tokens
+        ) or cls._contains_token_sequence(
             right_tokens,
             left_tokens,
         )

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
-
+from typing import Any
 
 DEFAULT_TARGET_TOKENS = 220
 DEFAULT_OVERLAP_TOKENS = 40
@@ -90,7 +90,10 @@ def build_embedding_passages(
         if current and _units_token_count(candidate_units, count_tokens) > body_budget:
             flush()
             candidate_units = [*current, unit]
-        if not current or _units_token_count(candidate_units, count_tokens) <= body_budget:
+        if (
+            not current
+            or _units_token_count(candidate_units, count_tokens) <= body_budget
+        ):
             current.append(unit)
         else:
             _append_passage(
@@ -178,7 +181,11 @@ def _semantic_units(text: str) -> list[_TextUnit]:
         paragraph = paragraph_match.group(0).strip()
         if not paragraph:
             continue
-        paragraph_start = paragraph_match.start() + len(paragraph_match.group(0)) - len(paragraph_match.group(0).lstrip())
+        paragraph_start = (
+            paragraph_match.start()
+            + len(paragraph_match.group(0))
+            - len(paragraph_match.group(0).lstrip())
+        )
         paragraph_end = paragraph_start + len(paragraph)
 
         line_units = _list_or_line_units(paragraph, paragraph_start)
@@ -216,14 +223,22 @@ def _sentence_units(paragraph: str, start: int, end: int) -> list[_TextUnit]:
         sentence = match.group(0).strip()
         if not sentence:
             continue
-        sentence_start = start + match.start() + len(match.group(0)) - len(match.group(0).lstrip())
-        units.append(_TextUnit(sentence, sentence_start, sentence_start + len(sentence), "sentence"))
+        sentence_start = (
+            start + match.start() + len(match.group(0)) - len(match.group(0).lstrip())
+        )
+        units.append(
+            _TextUnit(
+                sentence, sentence_start, sentence_start + len(sentence), "sentence"
+            )
+        )
     if units:
         return units
     return [_TextUnit(paragraph.strip(), start, end, "paragraph")]
 
 
-def _split_oversized_unit(unit: _TextUnit, body_budget: int, count_tokens: TokenCounter) -> list[_TextUnit]:
+def _split_oversized_unit(
+    unit: _TextUnit, body_budget: int, count_tokens: TokenCounter
+) -> list[_TextUnit]:
     if count_tokens(unit.text) <= body_budget:
         return [unit]
 
@@ -250,7 +265,9 @@ def _split_oversized_unit(unit: _TextUnit, body_budget: int, count_tokens: Token
         current_words = []
 
     for word in words:
-        candidate = " ".join([*(match.group(0) for match in current_words), word.group(0)])
+        candidate = " ".join(
+            [*(match.group(0) for match in current_words), word.group(0)]
+        )
         if current_words and count_tokens(candidate) > body_budget:
             flush()
         current_words.append(word)
@@ -271,7 +288,11 @@ def _append_passage(
         return
     text = f"{prefix}\n\n{body}" if prefix else body
     strategies = {unit.strategy for unit in units}
-    strategy = "hard_token_fallback" if "hard_token_fallback" in strategies else units[0].strategy
+    strategy = (
+        "hard_token_fallback"
+        if "hard_token_fallback" in strategies
+        else units[0].strategy
+    )
     passage_index = len(passages)
     passages.append(
         EmbeddingPassage(
@@ -287,7 +308,9 @@ def _append_passage(
     )
 
 
-def _overlap_tail(units: list[_TextUnit], overlap_budget: int, count_tokens: TokenCounter) -> list[_TextUnit]:
+def _overlap_tail(
+    units: list[_TextUnit], overlap_budget: int, count_tokens: TokenCounter
+) -> list[_TextUnit]:
     if overlap_budget <= 0:
         return []
     tail: list[_TextUnit] = []

@@ -9,12 +9,14 @@ from backend.configs.enums import StorageType
 
 class LocalStorageSettings(BaseSettings):
     """Local file system storage settings configuration."""
+
     storage_type: StorageType = StorageType.local
     storage_path: Path = ROOT_DIR / "storage"
 
 
 class RedisSettings(BaseSettings):
     """Redis settings configuration."""
+
     storage_type: StorageType = StorageType.redis
     host: str = "localhost"
     port: int = 6379
@@ -37,6 +39,7 @@ class RedisSettings(BaseSettings):
 
 class PineconeSettings(BaseSettings):
     """Pinecone vector database settings configuration."""
+
     storage_type: StorageType = StorageType.pinecone
     api_key: SecretStr = SecretStr("")
     environment: str = ""  # e.g., "us-east-1-aws"
@@ -53,11 +56,14 @@ class PineconeSettings(BaseSettings):
 
 class Neo4jSettings(BaseSettings):
     """Neo4j graph database settings configuration."""
+
     storage_type: StorageType = StorageType.neo4j
     username: SecretStr = SecretStr("neo4j")
     password: SecretStr = SecretStr("12345678")
     database: str = "neo4j"
-    uri: str = ""  # Full URI (e.g., neo4j+s://xxx.databases.neo4j.io) - takes precedence
+    uri: str = (
+        ""  # Full URI (e.g., neo4j+s://xxx.databases.neo4j.io) - takes precedence
+    )
     host: str = "localhost"
     port: int = 7687
     init_from_local: bool = False
@@ -72,12 +78,15 @@ class Neo4jSettings(BaseSettings):
     def get_connection_url(self, driver: str = "bolt") -> str:
         # If URI is provided (cloud), convert to bolt format
         if self.uri:
-            return self.uri.replace("neo4j+s://", "bolt+s://").replace("neo4j://", "bolt://")
+            return self.uri.replace("neo4j+s://", "bolt+s://").replace(
+                "neo4j://", "bolt://"
+            )
         return f"{driver}://{self.host}:{self.port}"
 
 
 class MemgraphSettings(BaseSettings):
     """Memgraph graph database settings configuration."""
+
     storage_type: StorageType = StorageType.memgraph
     username: SecretStr = SecretStr("")
     password: SecretStr = SecretStr("")
@@ -96,12 +105,15 @@ class MemgraphSettings(BaseSettings):
 
     def get_connection_url(self, driver: str = "bolt") -> str:
         if self.uri:
-            return self.uri.replace("neo4j+s://", "bolt+s://").replace("neo4j://", "bolt://")
+            return self.uri.replace("neo4j+s://", "bolt+s://").replace(
+                "neo4j://", "bolt://"
+            )
         return f"{driver}://{self.host}:{self.port}"
 
 
 class MongoDBSettings(BaseSettings):
     """MongoDB settings for LangGraph checkpointing."""
+
     storage_type: StorageType = StorageType.mongodb
     uri: SecretStr = SecretStr("mongodb://localhost:27017/langgraph_checkpoints")
     db_name: str = "langgraph_checkpoints"
@@ -116,8 +128,13 @@ class MongoDBSettings(BaseSettings):
 
 class StorageSettings(BaseSettings):
     """Aggregates storage configuration settings for different storage backends."""
+
     document_storage: LocalStorageSettings | RedisSettings = LocalStorageSettings()
     index_storage: LocalStorageSettings | RedisSettings = RedisSettings()
-    vector_storage: LocalStorageSettings | RedisSettings | PineconeSettings = PineconeSettings()
-    property_graph_storage: LocalStorageSettings | Neo4jSettings | MemgraphSettings = LocalStorageSettings()
+    vector_storage: LocalStorageSettings | RedisSettings | PineconeSettings = (
+        PineconeSettings()
+    )
+    property_graph_storage: LocalStorageSettings | Neo4jSettings | MemgraphSettings = (
+        LocalStorageSettings()
+    )
     checkpoint_storage: MongoDBSettings = MongoDBSettings()

@@ -3,8 +3,9 @@ import logging
 import os
 import pickle
 import threading
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 def write_file(file: Any, path: Path):
@@ -19,13 +20,15 @@ def write_file(file: Any, path: Path):
         with open(path, "wb") as f:
             pickle.dump(file, f)
     elif extension in (".txt", ".md"):
-        with open(path, "w", encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(file)
     elif extension == ".json":
         with open(path, "w") as f:
             json.dump(file, f)
     else:
-        raise ValueError(f"Unsupported extension: {extension} (.pickle, .txt, .md, .json are only available for now)")
+        raise ValueError(
+            f"Unsupported extension: {extension} (.pickle, .txt, .md, .json are only available for now)"
+        )
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -37,7 +40,9 @@ def write_json(path: Path, payload: Any) -> None:
     """
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def write_jsonl(path: Path, rows: Iterable[Any]) -> None:
@@ -71,15 +76,17 @@ def read_file(path: Path) -> Any:
         elif extension == ".yaml":
             import yaml
 
-            with open(path, "r") as f:
+            with open(path) as f:
                 file = yaml.safe_load(f)
         elif extension == ".txt":
-            file = open(path, "r").read()
+            file = open(path).read()
         elif extension == ".json":
-            with open(path, "r") as f:
+            with open(path) as f:
                 file = json.load(f)
         else:
-            print(f"Unsupported extension: {extension} (.pickle, .yaml, .txt, .json are only available)")
+            print(
+                f"Unsupported extension: {extension} (.pickle, .yaml, .txt, .json are only available)"
+            )
             return None
     except FileNotFoundError:
         print(f"File {path} not found")
@@ -89,6 +96,7 @@ def read_file(path: Path) -> Any:
 
 _configure_lock = threading.Lock()
 _configured = False
+
 
 def _configure_logging() -> None:
     """Configures structlog globally with async-compatible JSON output."""

@@ -11,13 +11,13 @@ import hashlib
 import json
 import re
 import unicodedata
-from collections import Counter, defaultdict
+from collections import defaultdict
+from collections.abc import Iterable
 from difflib import SequenceMatcher
 from enum import StrEnum
-from typing import Any, Iterable, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 SCHEMA_VERSION = "1.0"
 DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION = "v1"
@@ -233,10 +233,18 @@ class ConceptMention(BaseModel):
     raw_type: str = ""
     aliases: list[str] = Field(default_factory=list)
     salience: float = Field(ge=0.0, le=1.0)
-    description: Optional[str] = None
+    description: str | None = None
     evidence_spans: list[str] = Field(default_factory=list)
 
-    @field_validator("mention_id", "decision_id", "chunk_id", "local_id", "canonical_name", "display_name", "type")
+    @field_validator(
+        "mention_id",
+        "decision_id",
+        "chunk_id",
+        "local_id",
+        "canonical_name",
+        "display_name",
+        "type",
+    )
     @classmethod
     def clean_required_text(cls, value: str) -> str:
         value = normalize_whitespace(value)
@@ -247,11 +255,17 @@ class ConceptMention(BaseModel):
     @field_validator("aliases", "evidence_spans")
     @classmethod
     def clean_string_list(cls, values: list[str]) -> list[str]:
-        return unique_preserving_order(normalize_whitespace(value) for value in values if normalize_whitespace(value))
+        return unique_preserving_order(
+            normalize_whitespace(value)
+            for value in values
+            if normalize_whitespace(value)
+        )
 
     @model_validator(mode="after")
-    def normalize_type_and_description(self) -> "ConceptMention":
-        self.raw_type = normalize_whitespace(self.raw_type or self.type).upper() or "CONCEPT"
+    def normalize_type_and_description(self) -> ConceptMention:
+        self.raw_type = (
+            normalize_whitespace(self.raw_type or self.type).upper() or "CONCEPT"
+        )
         self.type = canonicalize_concept_type(
             self.raw_type,
             self.canonical_name,
@@ -274,16 +288,8 @@ class ConceptMention(BaseModel):
 
     def merge_names(self) -> list[str]:
         return unique_preserving_order(
-            [
-                name
-                for name in self.primary_names()
-                if is_safe_primary_name(name)
-            ]
-            + [
-                alias
-                for alias in self.aliases
-                if is_merge_safe_name(alias)
-            ]
+            [name for name in self.primary_names() if is_safe_primary_name(name)]
+            + [alias for alias in self.aliases if is_merge_safe_name(alias)]
         )
 
     def registry_aliases(self) -> list[str]:
@@ -341,7 +347,7 @@ class ConceptRegistryEntry(BaseModel):
     resolution_sources: list[str] = Field(default_factory=list)
     merge_status: str
     merge_statuses: list[str] = Field(default_factory=list)
-    merge_score: Optional[float] = None
+    merge_score: float | None = None
     merge_flags: list[str] = Field(default_factory=list)
     adjudication_cluster_ids: list[str] = Field(default_factory=list)
     adjudication_actions: list[str] = Field(default_factory=list)
@@ -354,7 +360,7 @@ class ConceptAdjudicationGroup(BaseModel):
 
     mention_ids: list[str]
     canonical_name: str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     type: str
     aliases: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
@@ -362,12 +368,20 @@ class ConceptAdjudicationGroup(BaseModel):
     @field_validator("mention_ids")
     @classmethod
     def clean_mention_ids(cls, values: list[str]) -> list[str]:
-        return [normalize_whitespace(value) for value in values if normalize_whitespace(value)]
+        return [
+            normalize_whitespace(value)
+            for value in values
+            if normalize_whitespace(value)
+        ]
 
     @field_validator("aliases")
     @classmethod
     def clean_aliases(cls, values: list[str]) -> list[str]:
-        return unique_preserving_order(normalize_whitespace(value) for value in values if normalize_whitespace(value))
+        return unique_preserving_order(
+            normalize_whitespace(value)
+            for value in values
+            if normalize_whitespace(value)
+        )
 
     @field_validator("canonical_name", "type")
     @classmethod
@@ -378,9 +392,11 @@ class ConceptAdjudicationGroup(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def fill_display_name(self) -> "ConceptAdjudicationGroup":
+    def fill_display_name(self) -> ConceptAdjudicationGroup:
         self.type = normalize_whitespace(self.type).upper()
-        self.display_name = normalize_whitespace(self.display_name or self.canonical_name)
+        self.display_name = normalize_whitespace(
+            self.display_name or self.canonical_name
+        )
         return self
 
 
@@ -390,7 +406,7 @@ class ConceptAdjudicationResponse(BaseModel):
     cluster_id: str
     action: ConceptAdjudicationAction
     groups: list[ConceptAdjudicationGroup]
-    rationale: Optional[str] = None
+    rationale: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
     @field_validator("cluster_id")
@@ -404,10 +420,12 @@ class ConceptAdjudicationResponse(BaseModel):
     @field_validator("warnings")
     @classmethod
     def clean_warnings(cls, values: list[str]) -> list[str]:
-        return unique_preserving_order(normalize_warning(value) for value in values if normalize_warning(value))
+        return unique_preserving_order(
+            normalize_warning(value) for value in values if normalize_warning(value)
+        )
 
     @model_validator(mode="after")
-    def require_groups(self) -> "ConceptAdjudicationResponse":
+    def require_groups(self) -> ConceptAdjudicationResponse:
         if not self.groups:
             raise ValueError("adjudication must include at least one group")
         if self.rationale is not None:
@@ -425,7 +443,7 @@ class ConceptAdjudicationFailure(BaseModel):
     model_name: str
     error_type: str
     message: str
-    raw_response: Optional[str] = None
+    raw_response: str | None = None
 
 
 class ConceptResolution(BaseModel):
@@ -438,10 +456,16 @@ class ConceptResolution(BaseModel):
     review_clusters: list[UncertainConceptCluster] = Field(default_factory=list)
     pair_scores: list[ConceptPairScore] = Field(default_factory=list)
     adjudications: list[ConceptAdjudicationResponse] = Field(default_factory=list)
-    adjudication_failures: list[ConceptAdjudicationFailure] = Field(default_factory=list)
+    adjudication_failures: list[ConceptAdjudicationFailure] = Field(
+        default_factory=list
+    )
 
-    def concept_id_for(self, decision_id: str, chunk_id: str, local_id: str) -> Optional[str]:
-        return self.mention_to_concept_id.get(mention_id_for(decision_id, chunk_id, local_id))
+    def concept_id_for(
+        self, decision_id: str, chunk_id: str, local_id: str
+    ) -> str | None:
+        return self.mention_to_concept_id.get(
+            mention_id_for(decision_id, chunk_id, local_id)
+        )
 
 
 class _DisjointSet:
@@ -475,7 +499,9 @@ def build_concept_resolution(decisions: Iterable[Any]) -> ConceptResolution:
     return build_concept_resolution_from_mentions(mentions)
 
 
-def build_concept_resolution_from_mentions(mentions: Iterable[ConceptMention]) -> ConceptResolution:
+def build_concept_resolution_from_mentions(
+    mentions: Iterable[ConceptMention],
+) -> ConceptResolution:
     mention_list = sorted(list(mentions), key=lambda item: item.mention_id)
     mention_ids = [mention.mention_id for mention in mention_list]
     if not mention_list:
@@ -496,10 +522,16 @@ def build_concept_resolution_from_mentions(mentions: Iterable[ConceptMention]) -
             auto_dsu.union(first, mention_id)
     auto_groups = auto_dsu.groups()
     pair_scores = downgrade_guarded_auto_merge_pairs(pair_scores, auto_groups)
-    review_clusters = build_uncertain_clusters(pair_scores, auto_dsu, auto_groups, mention_list)
+    review_clusters = build_uncertain_clusters(
+        pair_scores, auto_dsu, auto_groups, mention_list
+    )
     group_specs = []
     for root, ids in auto_groups.items():
-        status = ConceptMergeStatus.AUTO_MERGED if len(ids) > 1 else ConceptMergeStatus.SINGLE
+        status = (
+            ConceptMergeStatus.AUTO_MERGED
+            if len(ids) > 1
+            else ConceptMergeStatus.SINGLE
+        )
         group_pairs = [
             pair
             for pair in pair_scores
@@ -517,7 +549,9 @@ def build_concept_resolution_from_mentions(mentions: Iterable[ConceptMention]) -
             }
         )
 
-    registry_entries, mention_to_concept_id = build_registry_from_group_specs(mention_list, group_specs)
+    registry_entries, mention_to_concept_id = build_registry_from_group_specs(
+        mention_list, group_specs
+    )
     return ConceptResolution(
         mentions=mention_list,
         registry_entries=registry_entries,
@@ -531,11 +565,11 @@ def extract_concept_mentions(decisions: Iterable[Any]) -> list[ConceptMention]:
     mentions: list[ConceptMention] = []
     for decision in decisions:
         for concept in getattr(decision, "concepts", []):
-            local_id = str(getattr(concept, "local_id"))
-            chunk_id = str(getattr(decision, "chunk_id"))
-            decision_id = str(getattr(decision, "decision_id"))
-            canonical_name = str(getattr(concept, "canonical_name"))
-            display_name = str(getattr(concept, "display_name") or canonical_name)
+            local_id = str(concept.local_id)
+            chunk_id = str(decision.chunk_id)
+            decision_id = str(decision.decision_id)
+            canonical_name = str(concept.canonical_name)
+            display_name = str(concept.display_name or canonical_name)
             mentions.append(
                 ConceptMention(
                     mention_id=mention_id_for(decision_id, chunk_id, local_id),
@@ -544,11 +578,11 @@ def extract_concept_mentions(decisions: Iterable[Any]) -> list[ConceptMention]:
                     local_id=local_id,
                     canonical_name=canonical_name,
                     display_name=display_name,
-                    type=str(getattr(concept, "type")),
-                    aliases=list(getattr(concept, "aliases") or []),
-                    salience=float(getattr(concept, "salience")),
+                    type=str(concept.type),
+                    aliases=list(concept.aliases or []),
+                    salience=float(concept.salience),
                     description=getattr(concept, "description", None),
-                    evidence_spans=list(getattr(concept, "evidence_spans") or []),
+                    evidence_spans=list(concept.evidence_spans or []),
                 )
             )
     return mentions
@@ -567,11 +601,18 @@ def score_candidate_pairs(mentions: list[ConceptMention]) -> list[ConceptPairSco
         if len(ids) < 2 or len(ids) > 50:
             continue
         for index, left in enumerate(ids):
-            for right in ids[index + 1:]:
+            for right in ids[index + 1 :]:
                 pair_ids.add((left, right))
 
-    scores = [score_concept_pair(by_id[left], by_id[right]) for left, right in sorted(pair_ids)]
-    return [score for score in scores if score.recommended_action != ConceptPairAction.NO_MERGE]
+    scores = [
+        score_concept_pair(by_id[left], by_id[right])
+        for left, right in sorted(pair_ids)
+    ]
+    return [
+        score
+        for score in scores
+        if score.recommended_action != ConceptPairAction.NO_MERGE
+    ]
 
 
 def split_unsafe_auto_groups(
@@ -608,7 +649,8 @@ def downgrade_guarded_auto_merge_pairs(
     for pair in pair_scores:
         if (
             pair.recommended_action == ConceptPairAction.AUTO_MERGE
-            and root_by_mention_id.get(pair.source_mention_id) != root_by_mention_id.get(pair.target_mention_id)
+            and root_by_mention_id.get(pair.source_mention_id)
+            != root_by_mention_id.get(pair.target_mention_id)
         ):
             guarded_scores.append(
                 pair.model_copy(
@@ -633,9 +675,13 @@ def auto_group_needs_safety_split(mentions: list[ConceptMention]) -> bool:
         for mention in mentions
         if normalize_name(mention.canonical_name)
     }
-    if len(canonical_keys) == 1 and all(is_safe_exact_primary_name(mention.canonical_name) for mention in mentions):
+    if len(canonical_keys) == 1 and all(
+        is_safe_exact_primary_name(mention.canonical_name) for mention in mentions
+    ):
         return False
-    concrete_types = {mention.type for mention in mentions if mention.type not in GENERIC_TYPES}
+    concrete_types = {
+        mention.type for mention in mentions if mention.type not in GENERIC_TYPES
+    }
     if len(concrete_types) > 1:
         return True
     if len(canonical_keys) > AUTO_GROUP_MAX_DISTINCT_CANONICAL_NAMES:
@@ -674,7 +720,9 @@ def score_concept_pair(left: ConceptMention, right: ConceptMention) -> ConceptPa
     if exact_primary_match:
         score = max(score, 0.98)
         signals.append("exact_normalized_name")
-        if not is_safe_primary_name(left.canonical_name) or not is_safe_primary_name(right.canonical_name):
+        if not is_safe_primary_name(left.canonical_name) or not is_safe_primary_name(
+            right.canonical_name
+        ):
             risk_flags.append("short_symbolic_alias")
     elif exact_alias_match:
         score = max(score, 0.95)
@@ -721,7 +769,11 @@ def score_concept_pair(left: ConceptMention, right: ConceptMention) -> ConceptPa
             score = max(score, 0.68)
             signals.append("token_overlap")
 
-    ratio = SequenceMatcher(None, left_primary, right_primary).ratio() if left_primary and right_primary else 0.0
+    ratio = (
+        SequenceMatcher(None, left_primary, right_primary).ratio()
+        if left_primary and right_primary
+        else 0.0
+    )
     if ratio >= 0.88:
         score = max(score, 0.82)
         signals.append("high_string_similarity")
@@ -737,10 +789,16 @@ def score_concept_pair(left: ConceptMention, right: ConceptMention) -> ConceptPa
         score = max(0.0, score - 0.10)
         risk_flags.append("type_conflict")
 
-    if score and (left_primary in GENERIC_NAMES or right_primary in GENERIC_NAMES) and left_primary != right_primary:
+    if (
+        score
+        and (left_primary in GENERIC_NAMES or right_primary in GENERIC_NAMES)
+        and left_primary != right_primary
+    ):
         risk_flags.append("generic_name")
         score = min(score, 0.80)
-    if score and any(is_formula_like_name(alias) for alias in [*left.aliases, *right.aliases]):
+    if score and any(
+        is_formula_like_name(alias) for alias in [*left.aliases, *right.aliases]
+    ):
         risk_flags.append("formula_or_symbol_alias")
 
     signals = unique_preserving_order(signals)
@@ -793,11 +851,20 @@ def should_send_pair_to_llm(signals: list[str], risk_flags: list[str]) -> bool:
     }
     if not (signal_set & identity_signals):
         return False
-    if "ocr_like_short_variant" in risk_set and "exact_normalized_name" not in signal_set:
+    if (
+        "ocr_like_short_variant" in risk_set
+        and "exact_normalized_name" not in signal_set
+    ):
         return False
-    if "formula_or_symbol_alias" in risk_set and "exact_normalized_name" not in signal_set:
+    if (
+        "formula_or_symbol_alias" in risk_set
+        and "exact_normalized_name" not in signal_set
+    ):
         return False
-    if risk_set & {"type_conflict", "type_broadening"} and "exact_normalized_name" not in signal_set:
+    if (
+        risk_set & {"type_conflict", "type_broadening"}
+        and "exact_normalized_name" not in signal_set
+    ):
         return False
     return True
 
@@ -820,7 +887,10 @@ def build_uncertain_clusters(
         if left_root == right_root:
             continue
         uncertain_pairs.append(pair)
-        roots_by_pair[(pair.source_mention_id, pair.target_mention_id)] = (left_root, right_root)
+        roots_by_pair[(pair.source_mention_id, pair.target_mention_id)] = (
+            left_root,
+            right_root,
+        )
         if is_strong_review_edge(pair):
             strong_roots.union(left_root, right_root)
         elif should_review_weak_pair(pair):
@@ -839,11 +909,14 @@ def build_uncertain_clusters(
         component_pairs = [
             pair
             for pair in uncertain_pairs
-            if set(roots_by_pair[(pair.source_mention_id, pair.target_mention_id)]) <= root_id_set
+            if set(roots_by_pair[(pair.source_mention_id, pair.target_mention_id)])
+            <= root_id_set
         ]
         if not any(is_strong_review_edge(pair) for pair in component_pairs):
             continue
-        mention_ids = sorted({mention_id for root_id in root_ids for mention_id in auto_groups[root_id]})
+        mention_ids = sorted(
+            {mention_id for root_id in root_ids for mention_id in auto_groups[root_id]}
+        )
         clusters.extend(
             bounded_review_clusters(
                 mention_ids,
@@ -855,17 +928,27 @@ def build_uncertain_clusters(
     strong_cluster_mention_sets = [set(cluster.mention_ids) for cluster in clusters]
     for pair in weak_pairs:
         mention_ids = sorted([pair.source_mention_id, pair.target_mention_id])
-        if any(set(mention_ids) <= cluster_ids for cluster_ids in strong_cluster_mention_sets):
+        if any(
+            set(mention_ids) <= cluster_ids
+            for cluster_ids in strong_cluster_mention_sets
+        ):
             continue
         clusters.extend(bounded_review_clusters(mention_ids, [pair], mentions_by_id))
 
-    deduped: dict[tuple[tuple[str, ...], tuple[tuple[str, str], ...]], UncertainConceptCluster] = {}
+    deduped: dict[
+        tuple[tuple[str, ...], tuple[tuple[str, str], ...]], UncertainConceptCluster
+    ] = {}
     for cluster in clusters:
         if len(cluster.mention_ids) < 2:
             continue
         key = (
             tuple(cluster.mention_ids),
-            tuple(sorted((pair.source_mention_id, pair.target_mention_id) for pair in cluster.pair_scores)),
+            tuple(
+                sorted(
+                    (pair.source_mention_id, pair.target_mention_id)
+                    for pair in cluster.pair_scores
+                )
+            ),
         )
         previous = deduped.get(key)
         if previous is None or cluster.score > previous.score:
@@ -888,12 +971,18 @@ def bounded_review_clusters(
     pair_scores: list[ConceptPairScore],
     mentions_by_id: dict[str, ConceptMention],
 ) -> list[UncertainConceptCluster]:
-    mention_ids = sorted(set(mention_id for mention_id in mention_ids if mention_id in mentions_by_id))
-    pair_scores = sorted(pair_scores, key=lambda item: (-item.score, item.source_mention_id, item.target_mention_id))
+    mention_ids = sorted(
+        set(mention_id for mention_id in mention_ids if mention_id in mentions_by_id)
+    )
+    pair_scores = sorted(
+        pair_scores,
+        key=lambda item: (-item.score, item.source_mention_id, item.target_mention_id),
+    )
     pair_scores = [
         pair
         for pair in pair_scores
-        if pair.source_mention_id in mention_ids and pair.target_mention_id in mention_ids
+        if pair.source_mention_id in mention_ids
+        and pair.target_mention_id in mention_ids
     ]
     if len(mention_ids) < 2 or not pair_scores:
         return []
@@ -903,18 +992,26 @@ def bounded_review_clusters(
         return [candidate]
 
     type_clusters: list[UncertainConceptCluster] = []
-    for grouped_ids in split_cluster_mentions(mention_ids, mentions_by_id, by_type=True):
+    for grouped_ids in split_cluster_mentions(
+        mention_ids, mentions_by_id, by_type=True
+    ):
         grouped_pairs = pair_scores_for_mentions(pair_scores, grouped_ids)
         if 1 < len(grouped_ids) < len(mention_ids) and grouped_pairs:
-            type_clusters.extend(bounded_review_clusters(grouped_ids, grouped_pairs, mentions_by_id))
+            type_clusters.extend(
+                bounded_review_clusters(grouped_ids, grouped_pairs, mentions_by_id)
+            )
     if type_clusters:
         return type_clusters
 
     clusters: list[UncertainConceptCluster] = []
-    for grouped_ids in split_cluster_mentions(mention_ids, mentions_by_id, by_type=False):
+    for grouped_ids in split_cluster_mentions(
+        mention_ids, mentions_by_id, by_type=False
+    ):
         grouped_pairs = pair_scores_for_mentions(pair_scores, grouped_ids)
         if 1 < len(grouped_ids) < len(mention_ids) and grouped_pairs:
-            clusters.extend(bounded_review_clusters(grouped_ids, grouped_pairs, mentions_by_id))
+            clusters.extend(
+                bounded_review_clusters(grouped_ids, grouped_pairs, mentions_by_id)
+            )
     if clusters:
         return clusters
 
@@ -942,17 +1039,27 @@ def make_uncertain_cluster(
     cluster_mentions = [mentions_by_id[mention_id] for mention_id in mention_ids]
     cluster_payload = {
         "mention_ids": mention_ids,
-        "pair_ids": [(pair.source_mention_id, pair.target_mention_id) for pair in pair_scores],
+        "pair_ids": [
+            (pair.source_mention_id, pair.target_mention_id) for pair in pair_scores
+        ],
     }
     return UncertainConceptCluster(
         cluster_id=f"concept_cluster_{stable_hash(cluster_payload, length=20)}",
         mention_ids=mention_ids,
-        concept_names=unique_preserving_order(mention.canonical_name for mention in cluster_mentions),
+        concept_names=unique_preserving_order(
+            mention.canonical_name for mention in cluster_mentions
+        ),
         types=unique_preserving_order(mention.type for mention in cluster_mentions),
-        source_chunk_ids=unique_preserving_order(mention.chunk_id for mention in cluster_mentions),
+        source_chunk_ids=unique_preserving_order(
+            mention.chunk_id for mention in cluster_mentions
+        ),
         score=max(pair.score for pair in pair_scores),
-        risk_flags=unique_preserving_order(flag for pair in pair_scores for flag in pair.risk_flags),
-        signals=unique_preserving_order(signal for pair in pair_scores for signal in pair.signals),
+        risk_flags=unique_preserving_order(
+            flag for pair in pair_scores for flag in pair.risk_flags
+        ),
+        signals=unique_preserving_order(
+            signal for pair in pair_scores for signal in pair.signals
+        ),
         pair_scores=pair_scores,
     )
 
@@ -965,8 +1072,15 @@ def review_cluster_within_bounds(
         return False
     if len(cluster.pair_scores) > MAX_REVIEW_CLUSTER_PAIR_SCORES:
         return False
-    mentions = [mentions_by_id[mention_id] for mention_id in cluster.mention_ids if mention_id in mentions_by_id]
-    return concept_adjudication_prompt_char_count(cluster, mentions) <= MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS
+    mentions = [
+        mentions_by_id[mention_id]
+        for mention_id in cluster.mention_ids
+        if mention_id in mentions_by_id
+    ]
+    return (
+        concept_adjudication_prompt_char_count(cluster, mentions)
+        <= MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS
+    )
 
 
 def split_cluster_mentions(
@@ -991,7 +1105,8 @@ def pair_scores_for_mentions(
     return [
         pair
         for pair in pair_scores
-        if pair.source_mention_id in mention_id_set and pair.target_mention_id in mention_id_set
+        if pair.source_mention_id in mention_id_set
+        and pair.target_mention_id in mention_id_set
     ]
 
 
@@ -1000,10 +1115,12 @@ def resolution_source_for_status(status: str) -> str:
         return "single"
     if status == ConceptMergeStatus.AUTO_MERGED.value:
         return "deterministic"
-    if status in {ConceptMergeStatus.LLM_MERGED.value, ConceptMergeStatus.LLM_SPLIT.value}:
+    if status in {
+        ConceptMergeStatus.LLM_MERGED.value,
+        ConceptMergeStatus.LLM_SPLIT.value,
+    }:
         return "llm_adjudicated"
     return "unknown"
-
 
 
 def build_registry_from_group_specs(
@@ -1015,11 +1132,15 @@ def build_registry_from_group_specs(
     mention_to_concept_id: dict[str, str] = {}
 
     for spec in group_specs:
-        group_mentions = [mentions_by_id[mention_id] for mention_id in spec["mention_ids"]]
+        group_mentions = [
+            mentions_by_id[mention_id] for mention_id in spec["mention_ids"]
+        ]
         override = spec.get("override")
         if override:
             canonical_name = canonicalize_display_name(override["canonical_name"])
-            display_name = normalize_whitespace(override.get("display_name") or canonical_name)
+            display_name = normalize_whitespace(
+                override.get("display_name") or canonical_name
+            )
             concept_type = canonicalize_concept_type(
                 override["type"],
                 canonical_name,
@@ -1035,7 +1156,9 @@ def build_registry_from_group_specs(
         concept_id = concept_id_for(canonical_name, concept_type)
         group_pairs = list(spec.get("pairs") or [])
         group_score = max((pair.score for pair in group_pairs), default=None)
-        group_flags = unique_preserving_order(flag for pair in group_pairs for flag in pair.risk_flags)
+        group_flags = unique_preserving_order(
+            flag for pair in group_pairs for flag in pair.risk_flags
+        )
         status = str(spec["status"])
         resolution_source = resolution_source_for_status(status)
         adjudication = spec.get("adjudication") or {}
@@ -1066,18 +1189,33 @@ def build_registry_from_group_specs(
                 "max_salience": 0.0,
             },
         )
-        record["merge_statuses"] = unique_preserving_order([*record["merge_statuses"], status])
-        record["merge_status"] = record["merge_statuses"][0] if len(record["merge_statuses"]) == 1 else "mixed"
-        record["resolution_sources"] = unique_preserving_order([*record["resolution_sources"], resolution_source])
+        record["merge_statuses"] = unique_preserving_order(
+            [*record["merge_statuses"], status]
+        )
+        record["merge_status"] = (
+            record["merge_statuses"][0]
+            if len(record["merge_statuses"]) == 1
+            else "mixed"
+        )
+        record["resolution_sources"] = unique_preserving_order(
+            [*record["resolution_sources"], resolution_source]
+        )
         record["resolution_source"] = (
-            record["resolution_sources"][0] if len(record["resolution_sources"]) == 1 else "mixed"
+            record["resolution_sources"][0]
+            if len(record["resolution_sources"]) == 1
+            else "mixed"
         )
         if group_score is not None:
             record["merge_score"] = max(record["merge_score"] or 0.0, group_score)
-        record["merge_flags"] = unique_preserving_order([*record["merge_flags"], *group_flags])
+        record["merge_flags"] = unique_preserving_order(
+            [*record["merge_flags"], *group_flags]
+        )
         if adjudication:
             record["adjudication_cluster_ids"] = unique_preserving_order(
-                [*record["adjudication_cluster_ids"], adjudication.get("cluster_id", "")]
+                [
+                    *record["adjudication_cluster_ids"],
+                    adjudication.get("cluster_id", ""),
+                ]
             )
             record["adjudication_actions"] = unique_preserving_order(
                 [*record["adjudication_actions"], adjudication.get("action", "")]
@@ -1091,14 +1229,28 @@ def build_registry_from_group_specs(
         for mention in group_mentions:
             source_names = mention.audit_source_names()
             aliases.extend(mention.registry_aliases())
-            record["source_names"] = unique_preserving_order([*record["source_names"], *source_names])
-            record["source_types"] = unique_preserving_order([*record["source_types"], mention.raw_type])
+            record["source_names"] = unique_preserving_order(
+                [*record["source_names"], *source_names]
+            )
+            record["source_types"] = unique_preserving_order(
+                [*record["source_types"], mention.raw_type]
+            )
             if mention.description:
-                record["descriptions"] = unique_preserving_order([*record["descriptions"], mention.description])
-            record["source_chunk_ids"] = unique_preserving_order([*record["source_chunk_ids"], mention.chunk_id])
-            record["evidence_spans"] = unique_preserving_order([*record["evidence_spans"], *mention.evidence_spans])
-            record["mention_ids"] = unique_preserving_order([*record["mention_ids"], mention.mention_id])
-            record["source_decision_ids"] = unique_preserving_order([*record["source_decision_ids"], mention.decision_id])
+                record["descriptions"] = unique_preserving_order(
+                    [*record["descriptions"], mention.description]
+                )
+            record["source_chunk_ids"] = unique_preserving_order(
+                [*record["source_chunk_ids"], mention.chunk_id]
+            )
+            record["evidence_spans"] = unique_preserving_order(
+                [*record["evidence_spans"], *mention.evidence_spans]
+            )
+            record["mention_ids"] = unique_preserving_order(
+                [*record["mention_ids"], mention.mention_id]
+            )
+            record["source_decision_ids"] = unique_preserving_order(
+                [*record["source_decision_ids"], mention.decision_id]
+            )
             record["max_salience"] = max(record["max_salience"], mention.salience)
             mention_to_concept_id[mention.mention_id] = concept_id
 
@@ -1106,11 +1258,16 @@ def build_registry_from_group_specs(
         record["aliases"] = unique_preserving_order(
             alias
             for alias in aliases
-            if is_registry_alias_name(alias) and normalize_name(alias) != normalize_name(canonical_name)
+            if is_registry_alias_name(alias)
+            and normalize_name(alias) != normalize_name(canonical_name)
         )
 
-    entries = [ConceptRegistryEntry.model_validate(record) for record in records.values()]
-    return sorted(entries, key=lambda item: (item.type, item.canonical_name, item.concept_id)), mention_to_concept_id
+    entries = [
+        ConceptRegistryEntry.model_validate(record) for record in records.values()
+    ]
+    return sorted(
+        entries, key=lambda item: (item.type, item.canonical_name, item.concept_id)
+    ), mention_to_concept_id
 
 
 def apply_concept_adjudications(
@@ -1125,7 +1282,10 @@ def apply_concept_adjudications(
     mentions_by_id = {mention.mention_id: mention for mention in mentions}
     mention_ids = set(mentions_by_id)
     adjudicated_ids = {
-        mention_id for adjudication in adjudication_list for group in adjudication.groups for mention_id in group.mention_ids
+        mention_id
+        for adjudication in adjudication_list
+        for group in adjudication.groups
+        for mention_id in group.mention_ids
     }
     if not adjudicated_ids <= mention_ids:
         unknown = sorted(adjudicated_ids - mention_ids)
@@ -1171,8 +1331,14 @@ def apply_concept_adjudications(
                 if len(group.mention_ids) > 1
                 else ConceptMergeStatus.LLM_SPLIT.value
             )
-            previous_entry = previous_entry_by_mention_id.get(group.mention_ids[0]) if len(group.mention_ids) == 1 else None
-            previous_entry_matches_group = previous_entry is not None and set(previous_entry.mention_ids) == set(group.mention_ids)
+            previous_entry = (
+                previous_entry_by_mention_id.get(group.mention_ids[0])
+                if len(group.mention_ids) == 1
+                else None
+            )
+            previous_entry_matches_group = previous_entry is not None and set(
+                previous_entry.mention_ids
+            ) == set(group.mention_ids)
             if previous_entry_matches_group:
                 override = {
                     "canonical_name": previous_entry.canonical_name,
@@ -1228,9 +1394,13 @@ def apply_concept_adjudications(
                 }
             )
 
-    registry_entries, mention_to_concept_id = build_registry_from_group_specs(mentions, group_specs)
+    registry_entries, mention_to_concept_id = build_registry_from_group_specs(
+        mentions, group_specs
+    )
     remaining_review_clusters = [
-        cluster for cluster in resolution.review_clusters if not set(cluster.mention_ids) <= adjudicated_ids
+        cluster
+        for cluster in resolution.review_clusters
+        if not set(cluster.mention_ids) <= adjudicated_ids
     ]
     return ConceptResolution(
         mentions=mentions,
@@ -1285,8 +1455,14 @@ def concept_adjudication_prompt_char_count(
     cluster: UncertainConceptCluster,
     mentions: Iterable[ConceptMention],
 ) -> int:
-    payload_json = json.dumps(concept_adjudication_prompt_payload(cluster, mentions), ensure_ascii=False, indent=2)
-    schema_json = json.dumps(concept_adjudication_schema_hint(), ensure_ascii=False, indent=2)
+    payload_json = json.dumps(
+        concept_adjudication_prompt_payload(cluster, mentions),
+        ensure_ascii=False,
+        indent=2,
+    )
+    schema_json = json.dumps(
+        concept_adjudication_schema_hint(), ensure_ascii=False, indent=2
+    )
     return len(payload_json) + len(schema_json)
 
 
@@ -1314,7 +1490,7 @@ def concept_adjudication_cache_key(
     *,
     model_name: str,
     prompt_version: str,
-    generation_settings: Optional[dict[str, Any]] = None,
+    generation_settings: dict[str, Any] | None = None,
 ) -> str:
     return stable_hash(
         {
@@ -1328,7 +1504,9 @@ def concept_adjudication_cache_key(
     )
 
 
-def parse_concept_adjudication_response(raw_response: str) -> ConceptAdjudicationResponse:
+def parse_concept_adjudication_response(
+    raw_response: str,
+) -> ConceptAdjudicationResponse:
     payload = load_json_payload(clean_json_markdown(raw_response))
     if isinstance(payload, list):
         payload = {"groups": payload}
@@ -1360,7 +1538,10 @@ def validate_concept_adjudication_response(
         if unknown:
             errors.append(f"adjudication has unknown mention_ids: {unknown}")
 
-    if response.action == ConceptAdjudicationAction.MERGE_ALL and len(response.groups) != 1:
+    if (
+        response.action == ConceptAdjudicationAction.MERGE_ALL
+        and len(response.groups) != 1
+    ):
         errors.append("merge_all must return exactly one group")
     if response.action == ConceptAdjudicationAction.SPLIT_ALL:
         if any(len(group.mention_ids) != 1 for group in response.groups):
@@ -1377,7 +1558,7 @@ def make_concept_adjudication_failure(
     cluster: UncertainConceptCluster,
     model_name: str,
     prompt_version: str,
-    raw_response: Optional[str] = None,
+    raw_response: str | None = None,
 ) -> ConceptAdjudicationFailure:
     payload = {
         "cluster_id": cluster.cluster_id,
@@ -1456,7 +1637,9 @@ def stable_hash(payload: Any, *, length: int = 16) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:length]
 
 
-def canonicalize_concept_type(raw_type: str, name: str, aliases: Iterable[str] = ()) -> str:
+def canonicalize_concept_type(
+    raw_type: str, name: str, aliases: Iterable[str] = ()
+) -> str:
     raw = normalize_whitespace(raw_type).upper()
     names = [name, *aliases]
     if raw in CANONICAL_CONCEPT_TYPES:
@@ -1469,14 +1652,24 @@ def canonicalize_concept_type(raw_type: str, name: str, aliases: Iterable[str] =
         return "TOOL" if looks_like_tool_name(names) else "CONCEPT"
     if raw == "DATA":
         return "DATASET" if looks_like_dataset_name(names) else "CONCEPT"
-    if raw in {"INPUT", "OUTPUT", "PROPERTY", "STATISTIC", "MATRIX", "FUNCTION", "COMPUTATION"}:
+    if raw in {
+        "INPUT",
+        "OUTPUT",
+        "PROPERTY",
+        "STATISTIC",
+        "MATRIX",
+        "FUNCTION",
+        "COMPUTATION",
+    }:
         return canonicalize_name_based_type(names)
     return "CONCEPT"
 
 
 def canonicalize_name_based_type(names: Iterable[str]) -> str:
     name_list = list(names)
-    normalized_names = [normalize_name(name) for name in name_list if normalize_name(name)]
+    normalized_names = [
+        normalize_name(name) for name in name_list if normalize_name(name)
+    ]
     if any(is_formula_like_name(name) for name in name_list):
         return "FORMULA"
     if any(has_any_token(name, METRIC_HINT_TOKENS) for name in normalized_names):
@@ -1490,7 +1683,9 @@ def canonicalize_name_based_type(names: Iterable[str]) -> str:
 
 def looks_like_dataset_name(names: Iterable[str]) -> bool:
     name_list = list(names)
-    normalized_names = [normalize_name(name) for name in name_list if normalize_name(name)]
+    normalized_names = [
+        normalize_name(name) for name in name_list if normalize_name(name)
+    ]
     return any(
         has_any_token(name, DATASET_HINT_TOKENS)
         or name.endswith(" dataset")
@@ -1502,7 +1697,9 @@ def looks_like_dataset_name(names: Iterable[str]) -> bool:
 
 def looks_like_tool_name(names: Iterable[str]) -> bool:
     name_list = list(names)
-    normalized_names = [normalize_name(name) for name in name_list if normalize_name(name)]
+    normalized_names = [
+        normalize_name(name) for name in name_list if normalize_name(name)
+    ]
     return any(has_any_token(name, TOOL_HINT_TOKENS) for name in normalized_names)
 
 
@@ -1521,7 +1718,9 @@ def concept_id_for(canonical_name: str, concept_type: str) -> str:
 
 def normalize_name(value: str) -> str:
     value = unicodedata.normalize("NFKC", normalize_whitespace(value)).casefold()
-    value = value.replace("_", " ").replace("-", " ").replace("–", " ").replace("—", " ")
+    value = (
+        value.replace("_", " ").replace("-", " ").replace("–", " ").replace("—", " ")
+    )
     value = PUNCT_RE.sub(" ", value)
     return normalize_whitespace(value)
 
@@ -1568,7 +1767,9 @@ def derivational_normalize(value: str) -> str:
 
 
 def content_tokens(value: str) -> set[str]:
-    return {token for token in NAME_TOKEN_RE.findall(value) if token not in TOKEN_STOPWORDS}
+    return {
+        token for token in NAME_TOKEN_RE.findall(value) if token not in TOKEN_STOPWORDS
+    }
 
 
 def concept_name_forms(mention: ConceptMention) -> dict[str, set[str]]:
@@ -1585,7 +1786,9 @@ def concept_name_forms(mention: ConceptMention) -> dict[str, set[str]]:
         maybe_acronym = acronym_key(original_name)
         if maybe_acronym:
             acronym.add(maybe_acronym)
-    for original_name, normalized_name in zip(merge_names, [normalize_name(name) for name in merge_names]):
+    for original_name, normalized_name in zip(
+        merge_names, [normalize_name(name) for name in merge_names]
+    ):
         expansion = acronym_from_expansion(normalized_name)
         if expansion:
             expansion_acronym.add(expansion)
@@ -1608,7 +1811,14 @@ def blocking_keys(mention: ConceptMention) -> set[str]:
     primary = normalize_name(mention.canonical_name)
     if primary and is_safe_primary_name(mention.canonical_name):
         keys.add(f"primary:{primary}")
-    for family in ("normalized", "singular", "derivational", "acronym", "expansion_acronym", "ocr_short"):
+    for family in (
+        "normalized",
+        "singular",
+        "derivational",
+        "acronym",
+        "expansion_acronym",
+        "ocr_short",
+    ):
         for value in forms[family]:
             if value:
                 keys.add(f"{family}:{value}")
@@ -1628,7 +1838,7 @@ def primary_family_key(mention: ConceptMention) -> str:
     return f"{mention.type}:{primary or mention.mention_id}"
 
 
-def acronym_key(value: str) -> Optional[str]:
+def acronym_key(value: str) -> str | None:
     if is_formula_like_name(value):
         return None
     compact = re.sub(r"[^A-Za-z0-9]", "", value)
@@ -1710,15 +1920,17 @@ def is_sentence_like_name(value: str) -> bool:
     return bool(re.search(r"\.\s+|[.!?]$", value))
 
 
-def acronym_from_expansion(value: str) -> Optional[str]:
-    tokens = [token for token in NAME_TOKEN_RE.findall(value) if token not in TOKEN_STOPWORDS]
+def acronym_from_expansion(value: str) -> str | None:
+    tokens = [
+        token for token in NAME_TOKEN_RE.findall(value) if token not in TOKEN_STOPWORDS
+    ]
     if len(tokens) < 2 or len(tokens) > 8:
         return None
     acronym = "".join(token[0] for token in tokens).upper()
     return acronym if len(acronym) >= 3 else None
 
 
-def ocr_short_key(value: str) -> Optional[str]:
+def ocr_short_key(value: str) -> str | None:
     compact = re.sub(r"[^a-z0-9]", "", value.casefold())
     if not (2 <= len(compact) <= 8):
         return None
@@ -1793,9 +2005,9 @@ def load_json_payload(text: str) -> Any:
         raise
 
 
-def extract_json_candidate(text: str) -> Optional[str]:
+def extract_json_candidate(text: str) -> str | None:
     stripped = text.strip()
     starts = [index for index in (stripped.find("{"), stripped.find("[")) if index >= 0]
     if not starts:
         return None
-    return stripped[min(starts):].strip()
+    return stripped[min(starts) :].strip()

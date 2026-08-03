@@ -10,6 +10,7 @@ RetrievalPipelineMode = Literal["optimized", "legacy_vector_context"]
 
 class TavilySettings(BaseSettings):
     """Tavily search engine settings configuration."""
+
     api_key: SecretStr | None = None
 
     model_config = SettingsConfigDict(
@@ -35,14 +36,20 @@ class KnowledgeGraphSearchSettings(BaseSettings):
     visualizer_retrieval_mode: RetrievalPipelineMode = "optimized"
     retriever_params: dict = {
         "VectorContextRetriever": {
-            "include_text": True, "similarity_top_k": 5, "similarity_score": None, "path_depth": 2,
-            "include_properties": True
+            "include_text": True,
+            "similarity_top_k": 5,
+            "similarity_score": None,
+            "path_depth": 2,
+            "include_properties": True,
         }
     }
     visualizer_retriever_params: dict = {
         "VectorContextRetriever": {
-            "include_text": False, "similarity_top_k": 5, "similarity_score": None, "path_depth": 4,
-            "include_properties": False
+            "include_text": False,
+            "similarity_top_k": 5,
+            "similarity_score": None,
+            "path_depth": 4,
+            "include_properties": False,
         },
         # "VectorIndexRetriever": {"similarity_top_k": 10,}
     }
@@ -63,7 +70,9 @@ class KnowledgeGraphSearchSettings(BaseSettings):
     analyst_context_max_chars: int = 7000
     analyst_graph_depth: int = 1
     analyst_graph_relation_limit: int = 30
-    analyst_reranker_mode: Literal["disabled", "sentence_transformers", "ollama_llm_rerank"] = "sentence_transformers"
+    analyst_reranker_mode: Literal[
+        "disabled", "sentence_transformers", "ollama_llm_rerank"
+    ] = "sentence_transformers"
     analyst_source_rerank_candidate_k: int = 10
     analyst_source_rerank_max_chars: int = 1200
     analyst_relation_reranker_enabled: bool = False

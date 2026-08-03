@@ -18,7 +18,9 @@ if str(ROOT) not in sys.path:
 
 from backend.configs.paths import PathSettings
 from backend.configs.storage import LocalStorageSettings, StorageSettings
-from backend.data_processing.concept_registry import DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION
+from backend.data_processing.concept_registry import (
+    DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION,
+)
 from backend.data_processing.llm_postprocess import (
     DEFAULT_CONCEPT_RESOLUTION_NUM_PREDICT,
     DEFAULT_GRAPH_NUM_PREDICT,
@@ -51,14 +53,15 @@ from backend.data_processing.llm_postprocess_runner import (
 )
 from backend.data_processing.parser_optimized import RemNoteParserOptimized
 
-
 MANIFEST_FILENAME = "optimized_postprocess_pipeline_manifest.json"
 
 
 def parse_args() -> argparse.Namespace:
     """Parses CLI options for the optimized parser plus postprocess pipeline."""
 
-    parser = argparse.ArgumentParser(description="Run optimized parser and LLM postprocess pipeline.")
+    parser = argparse.ArgumentParser(
+        description="Run optimized parser and LLM postprocess pipeline."
+    )
     parser.add_argument("--raw-data-dir", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--parsed-pdfs-dir", type=Path, default=None)
@@ -89,7 +92,9 @@ def parse_args() -> argparse.Namespace:
         help="Do not download/OCR missing external artifacts; unresolved resources remain metadata only.",
     )
     parser.add_argument("--force-rebuild-staging", action="store_true")
-    parser.add_argument("--coverage", choices=("two-pass", "all", "candidates"), default="two-pass")
+    parser.add_argument(
+        "--coverage", choices=("two-pass", "all", "candidates"), default="two-pass"
+    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -105,8 +110,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force-refresh-cache", action="store_true")
     parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--prompt-version", default=DEFAULT_PROMPT_VERSION)
-    parser.add_argument("--concept-resolution-mode", choices=("off", "deterministic", "llm"), default="llm")
-    parser.add_argument("--concept-resolution-prompt-version", default=DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION)
+    parser.add_argument(
+        "--concept-resolution-mode",
+        choices=("off", "deterministic", "llm"),
+        default="llm",
+    )
+    parser.add_argument(
+        "--concept-resolution-prompt-version",
+        default=DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION,
+    )
     parser.add_argument("--concept-resolution-model-name", default=None)
     parser.add_argument(
         "--concept-resolution-limit",
@@ -117,8 +129,12 @@ def parse_args() -> argparse.Namespace:
             "--allow-full-run, otherwise the smoke-test limit."
         ),
     )
-    parser.add_argument("--prompt-dir", type=Path, default=ROOT / "backend" / "llm" / "prompts")
-    parser.add_argument("--max-batch-chunks", type=int, default=DEFAULT_MAX_BATCH_CHUNKS)
+    parser.add_argument(
+        "--prompt-dir", type=Path, default=ROOT / "backend" / "llm" / "prompts"
+    )
+    parser.add_argument(
+        "--max-batch-chunks", type=int, default=DEFAULT_MAX_BATCH_CHUNKS
+    )
     parser.add_argument("--max-batch-chars", type=int, default=DEFAULT_MAX_BATCH_CHARS)
     parser.add_argument("--base-url", default=DEFAULT_LLM_BASE_URL)
     parser.add_argument("--temperature", type=float, default=DEFAULT_LLM_TEMPERATURE)
@@ -156,32 +172,52 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--offset must be >= 0")
     args.limit = resolve_run_limit(args.limit, allow_full_run=args.allow_full_run)
     if args.limit == 0 and not args.allow_full_run:
-        raise SystemExit("--limit 0 means all selected chunks and requires --allow-full-run")
+        raise SystemExit(
+            "--limit 0 means all selected chunks and requires --allow-full-run"
+        )
     if not args.allow_full_run and args.limit > DEFAULT_SMOKE_LIMIT:
-        raise SystemExit(f"Use --allow-full-run to process more than {DEFAULT_SMOKE_LIMIT} chunks")
+        raise SystemExit(
+            f"Use --allow-full-run to process more than {DEFAULT_SMOKE_LIMIT} chunks"
+        )
     if args.concept_resolution_limit is not None and args.concept_resolution_limit < 0:
         raise SystemExit("--concept-resolution-limit must be >= 0")
     args.concept_resolution_limit = resolve_run_limit(
         args.concept_resolution_limit,
         allow_full_run=args.allow_full_run,
     )
-    if args.concept_resolution_mode == "llm" and args.concept_resolution_limit == 0 and not args.allow_full_run:
-        raise SystemExit("--concept-resolution-limit 0 means all clusters and requires --allow-full-run")
+    if (
+        args.concept_resolution_mode == "llm"
+        and args.concept_resolution_limit == 0
+        and not args.allow_full_run
+    ):
+        raise SystemExit(
+            "--concept-resolution-limit 0 means all clusters and requires --allow-full-run"
+        )
     if args.copy_existing_artifacts and args.existing_artifacts_dir is None:
         raise SystemExit("--copy-existing-artifacts requires --existing-artifacts-dir")
     if args.num_predict <= 0:
         raise SystemExit("--num-predict must be > 0")
-    for name in ("quality_num_predict", "graph_num_predict", "concept_resolution_num_predict"):
+    for name in (
+        "quality_num_predict",
+        "graph_num_predict",
+        "concept_resolution_num_predict",
+    ):
         value = getattr(args, name)
         if value is not None and value <= 0:
             raise SystemExit(f"--{name.replace('_', '-')} must be > 0")
 
 
-def make_staging_settings(args: argparse.Namespace) -> tuple[PathSettings, StorageSettings]:
+def make_staging_settings(
+    args: argparse.Namespace,
+) -> tuple[PathSettings, StorageSettings]:
     """Builds isolated local settings for optimized parser staging outputs."""
 
     output_root = args.output_root.expanduser().resolve()
-    staging_storage_dir = (args.staging_storage_dir or output_root / "staging_storage").expanduser().resolve()
+    staging_storage_dir = (
+        (args.staging_storage_dir or output_root / "staging_storage")
+        .expanduser()
+        .resolve()
+    )
     defaults = PathSettings()
     path_settings = PathSettings(
         raw_data_dir=args.raw_data_dir.expanduser().resolve(),
@@ -230,8 +266,14 @@ def run_optimized_parse(args: argparse.Namespace) -> Path:
 def select_inputs(args: argparse.Namespace, all_inputs: list) -> list:
     """Applies coverage mode and shared smoke/full-run limits to loaded chunks."""
 
-    pool = select_candidate_inputs(all_inputs) if args.coverage == "candidates" else list(all_inputs)
-    return select_run_inputs(pool, limit=args.limit, offset=args.offset, allow_full_run=args.allow_full_run)
+    pool = (
+        select_candidate_inputs(all_inputs)
+        if args.coverage == "candidates"
+        else list(all_inputs)
+    )
+    return select_run_inputs(
+        pool, limit=args.limit, offset=args.offset, allow_full_run=args.allow_full_run
+    )
 
 
 def main() -> int:
@@ -240,12 +282,18 @@ def main() -> int:
     args = parse_args()
     validate_args(args)
     args.output_root = args.output_root.expanduser().resolve()
-    output_dir = (args.postprocess_dir or args.output_root / "llm_postprocess").expanduser().resolve()
+    output_dir = (
+        (args.postprocess_dir or args.output_root / "llm_postprocess")
+        .expanduser()
+        .resolve()
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     ir_dir = run_optimized_parse(args)
     all_inputs = inputs_from_jsonl_dir(ir_dir)
     selected_inputs = select_inputs(args, all_inputs)
-    print(f"Loaded {len(all_inputs)} chunks from {ir_dir}; selected {len(selected_inputs)} for {args.coverage} coverage.")
+    print(
+        f"Loaded {len(all_inputs)} chunks from {ir_dir}; selected {len(selected_inputs)} for {args.coverage} coverage."
+    )
 
     quality = run_postprocess_pass(
         args,
@@ -259,7 +307,9 @@ def main() -> int:
     graph_misses = 0
     graph_aborted = False
     if args.coverage == "two-pass" and not quality.aborted:
-        graph_inputs = graph_worthy_inputs(selected_inputs, quality.decisions, quality.failures)
+        graph_inputs = graph_worthy_inputs(
+            selected_inputs, quality.decisions, quality.failures
+        )
         print(f"Graph pass selected {len(graph_inputs)} graph-worthy chunks.")
         graph = run_postprocess_pass(
             args,
@@ -272,7 +322,9 @@ def main() -> int:
         graph_hits = graph.cache_hits
         graph_misses = graph.cache_misses
         graph_aborted = graph.aborted
-        final_decisions = merge_quality_and_graph_decisions(quality.decisions, graph.decisions)
+        final_decisions = merge_quality_and_graph_decisions(
+            quality.decisions, graph.decisions
+        )
     else:
         if quality.aborted and args.coverage == "two-pass":
             print("Skipping graph pass because quality pass stopped early.")
@@ -281,7 +333,9 @@ def main() -> int:
     failures = [*quality.failures, *graph_failures]
     original_concept_resolution_mode = args.concept_resolution_mode
     if (quality.aborted or graph_aborted) and args.concept_resolution_mode == "llm":
-        print("Skipping LLM concept adjudication because an earlier LLM pass stopped early.")
+        print(
+            "Skipping LLM concept adjudication because an earlier LLM pass stopped early."
+        )
         args.concept_resolution_mode = "deterministic"
     concept = resolve_concepts(args, output_dir, final_decisions)
     args.concept_resolution_mode = original_concept_resolution_mode
@@ -310,7 +364,10 @@ def main() -> int:
         "aborted": quality.aborted or graph_aborted,
         "aborted_passes": [
             name
-            for name, aborted in (("quality", quality.aborted), ("graph", graph_aborted))
+            for name, aborted in (
+                ("quality", quality.aborted),
+                ("graph", graph_aborted),
+            )
             if aborted
         ],
         "prompt_names": {
@@ -321,14 +378,20 @@ def main() -> int:
         "generation_settings": {
             "quality": generation_settings_for_pass(args, "quality"),
             "graph": generation_settings_for_pass(args, "graph"),
-            "concept_resolution": generation_settings_for_pass(args, "concept_resolution"),
+            "concept_resolution": generation_settings_for_pass(
+                args, "concept_resolution"
+            ),
         },
         "report": report,
     }
     write_json(output_dir / MANIFEST_FILENAME, manifest)
-    print(f"Postprocess pipeline complete. Report: {output_dir / 'llm_postprocess_report.md'}")
+    print(
+        f"Postprocess pipeline complete. Report: {output_dir / 'llm_postprocess_report.md'}"
+    )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
-    concept_failures = concept.resolution.adjudication_failures if concept.resolution else []
+    concept_failures = (
+        concept.resolution.adjudication_failures if concept.resolution else []
+    )
     return 1 if concept_failures or quality.aborted or graph_aborted else 0
 
 

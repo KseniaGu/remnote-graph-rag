@@ -15,7 +15,7 @@ try:
 except ImportError:
     GoogleAPIError = Exception  # type: ignore[assignment,misc]
 
-from backend.configs.constants import WORKFLOW_LOGGING, MAX_RETRIES
+from backend.configs.constants import MAX_RETRIES, WORKFLOW_LOGGING
 from backend.configs.enums import LLMProviderType
 from backend.utils.common_funcs import get_logger
 
@@ -31,9 +31,7 @@ class GoogleAuthAsyncClient(httpx.AsyncClient):
 
     async def send(self, request: httpx.Request, **kwargs):
         token = await asyncio.to_thread(
-            google.oauth2.id_token.fetch_id_token,
-            self.auth_req,
-            self.target_audience
+            google.oauth2.id_token.fetch_id_token, self.auth_req, self.target_audience
         )
         request.headers["Authorization"] = f"Bearer {token}"
         return await super().send(request, **kwargs)
@@ -56,19 +54,25 @@ class AgentsFactory:
             Configured LangChain chat model instance.
         """
         provider = getattr(model_settings, "provider", LLMProviderType.ollama)
-        api_key = model_settings.api_key.get_secret_value() if model_settings.api_key else None
+        api_key = (
+            model_settings.api_key.get_secret_value()
+            if model_settings.api_key
+            else None
+        )
 
         if provider == LLMProviderType.ollama:
             return ChatOllama(
                 model=model_settings.model_name,
-                client_kwargs={
-                    "headers": {"Authorization": f"Bearer {api_key}"}
-                } if api_key else {},
+                client_kwargs={"headers": {"Authorization": f"Bearer {api_key}"}}
+                if api_key
+                else {},
                 **model_settings.ollama_chat_params(),
             )
 
         if provider == LLMProviderType.vllm:
-            async_auth_client = GoogleAuthAsyncClient(target_audience=model_settings.base_url)
+            async_auth_client = GoogleAuthAsyncClient(
+                target_audience=model_settings.base_url
+            )
             return ChatOpenAI(
                 model=model_settings.model_name,
                 api_key=api_key or "EMPTY",
@@ -94,7 +98,9 @@ class AgentsFactory:
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
     @classmethod
-    def add_retry(cls, runnable: Any, provider: LLMProviderType = LLMProviderType.ollama) -> Any:
+    def add_retry(
+        cls, runnable: Any, provider: LLMProviderType = LLMProviderType.ollama
+    ) -> Any:
         """Applies retry logic to a runnable, scoped to provider-specific transient errors.
 
         Args:

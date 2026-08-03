@@ -4,11 +4,14 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
-from llama_index.core.vector_stores import MetadataFilter, MetadataFilters, VectorStoreQuery
+from llama_index.core.vector_stores import (
+    MetadataFilter,
+    MetadataFilters,
+    VectorStoreQuery,
+)
 
 from backend.configs.constants import WORKFLOW_LOGGING
 from backend.utils.helpers import get_logger
-
 
 logger = get_logger(WORKFLOW_LOGGING)
 
@@ -93,7 +96,9 @@ class RetrievalStoreAccess:
             return SimpleNamespace(ids=[], similarities=[])
 
         filters = (
-            MetadataFilters(filters=[MetadataFilter(key="docstore_node_kind", value=node_kind)])
+            MetadataFilters(
+                filters=[MetadataFilter(key="docstore_node_kind", value=node_kind)]
+            )
             if node_kind
             else None
         )
@@ -122,7 +127,9 @@ class RetrievalStoreAccess:
                 component=component,
                 details={"node_kind": node_kind},
             )
-            fallback_query = VectorStoreQuery(query_embedding=query_embedding, similarity_top_k=top_k)
+            fallback_query = VectorStoreQuery(
+                query_embedding=query_embedding, similarity_top_k=top_k
+            )
             try:
                 return self.vector_store.query(fallback_query)
             except Exception:
@@ -195,9 +202,13 @@ class RetrievalStoreAccess:
             return []
 
         try:
-            return list(self.graph_store.get_triplets(ids=ids, relation_names=relation_names))
+            return list(
+                self.graph_store.get_triplets(ids=ids, relation_names=relation_names)
+            )
         except Exception:
-            logger.warning(f"{component.capitalize()} graph triplet lookup failed.", exc_info=True)
+            logger.warning(
+                f"{component.capitalize()} graph triplet lookup failed.", exc_info=True
+            )
             self.health_report.record(
                 "graph_triplet_lookup_failed",
                 "Graph triplet lookup failed.",
@@ -222,7 +233,9 @@ class RetrievalStoreAccess:
         try:
             nodes = list(self.graph_store.get())
         except Exception:
-            logger.warning(f"{component.capitalize()} concept enumeration failed.", exc_info=True)
+            logger.warning(
+                f"{component.capitalize()} concept enumeration failed.", exc_info=True
+            )
             self.health_report.record(
                 "concept_enumeration_failed",
                 "Graph concept enumeration failed.",
@@ -252,7 +265,10 @@ class RetrievalStoreAccess:
         try:
             nodes = list(self.graph_store.get(ids=[node_id]))
         except Exception:
-            logger.warning(f"{component.capitalize()} graph node lookup failed for {node_id}.", exc_info=True)
+            logger.warning(
+                f"{component.capitalize()} graph node lookup failed for {node_id}.",
+                exc_info=True,
+            )
             self.health_report.record(
                 "graph_node_lookup_failed",
                 "Graph node lookup failed.",
@@ -314,7 +330,11 @@ class RetrievalStoreAccess:
             return False
         if label == "text_chunk":
             return False
-        return bool(properties.get("entity_name") or properties.get("display_name") or (node_id and node_id.startswith("concept_")))
+        return bool(
+            properties.get("entity_name")
+            or properties.get("display_name")
+            or (node_id and node_id.startswith("concept_"))
+        )
 
     @staticmethod
     def node_id(node: Any) -> str | None:
@@ -378,7 +398,11 @@ class RetrievalStoreAccess:
     @staticmethod
     def salience(node: Any) -> float:
         properties = getattr(node, "properties", {}) or {}
-        value = properties.get("postprocess_max_salience") or properties.get("max_salience") or 0.0
+        value = (
+            properties.get("postprocess_max_salience")
+            or properties.get("max_salience")
+            or 0.0
+        )
         try:
             return float(value)
         except (TypeError, ValueError):

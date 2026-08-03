@@ -10,13 +10,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import Counter, defaultdict
-from html import unescape
-from html.parser import HTMLParser
+from collections import Counter
+from collections.abc import Iterable
 from difflib import SequenceMatcher
 from enum import StrEnum
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Iterable, Literal, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -38,7 +39,6 @@ from backend.data_processing.parser_optimized import (
     normalize_nfc,
 )
 from backend.utils.common_funcs import write_json, write_jsonl
-
 
 SCHEMA_VERSION = "1.1"
 DEFAULT_PROMPT_VERSION = "v1"
@@ -106,10 +106,15 @@ SOURCE_CARD_FIELD_RE = re.compile(
     r"^(?:title|url|hostname|description|sitename|date|author|tags|categories):\s*",
     re.IGNORECASE | re.MULTILINE,
 )
-CAPTION_RE = re.compile(r"\b(?:fig(?:ure)?|chart|plot|diagram|visualization|snippet|image|table)\b", re.IGNORECASE)
+CAPTION_RE = re.compile(
+    r"\b(?:fig(?:ure)?|chart|plot|diagram|visualization|snippet|image|table)\b",
+    re.IGNORECASE,
+)
 PREDICATE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9_+-]{1,}")
-MARKUP_TAG_NAMES_PATTERN = r"(?:div|img|html|body|table|thead|tbody|tr|td|th|center|span|br|p)"
+MARKUP_TAG_NAMES_PATTERN = (
+    r"(?:div|img|html|body|table|thead|tbody|tr|td|th|center|span|br|p)"
+)
 MARKUP_ATTRS_PATTERN = (
     r"(?:\s+[A-Za-z_:][-A-Za-z0-9_:.]*(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+))?)*"
 )
@@ -197,25 +202,29 @@ class ChunkPostprocessInput(BaseModel):
     source_block_ids: list[str] = Field(default_factory=list)
     external_resource_ids: list[str] = Field(default_factory=list)
     text: str
-    embedding_text: Optional[str] = None
-    display_text: Optional[str] = None
-    context_text: Optional[str] = None
-    artifact_path: Optional[str] = None
-    artifact_line_start: Optional[int] = None
-    artifact_line_end: Optional[int] = None
+    embedding_text: str | None = None
+    display_text: str | None = None
+    context_text: str | None = None
+    artifact_path: str | None = None
+    artifact_line_start: int | None = None
+    artifact_line_end: int | None = None
     chunk_quality_flags: list[str] = Field(default_factory=list)
     external_resource_urls: list[str] = Field(default_factory=list)
     external_resource_content_type_hints: list[str] = Field(default_factory=list)
     external_resource_parse_statuses: list[str] = Field(default_factory=list)
     artifact_gate_policy_by_resource_id: dict[str, str] = Field(default_factory=dict)
-    artifact_gate_reason_codes_by_resource_id: dict[str, list[str]] = Field(default_factory=dict)
-    artifact_gate_stats_by_resource_id: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    artifact_gate_reason_codes_by_resource_id: dict[str, list[str]] = Field(
+        default_factory=dict
+    )
+    artifact_gate_stats_by_resource_id: dict[str, dict[str, Any]] = Field(
+        default_factory=dict
+    )
     preflags: ChunkPreflags = Field(default_factory=ChunkPreflags)
     processing_mode: ProcessingMode = ProcessingMode.ENRICHMENT
     input_hash: str = ""
 
     @model_validator(mode="after")
-    def set_hash(self) -> "ChunkPostprocessInput":
+    def set_hash(self) -> ChunkPostprocessInput:
         if not self.input_hash:
             payload = self.model_dump(exclude={"input_hash"}, mode="json")
             self.input_hash = stable_hash(payload, length=24)
@@ -239,7 +248,7 @@ class ChunkPostprocessBatch(BaseModel):
     chunks: list[ChunkPostprocessInput]
 
     @model_validator(mode="after")
-    def require_chunks(self) -> "ChunkPostprocessBatch":
+    def require_chunks(self) -> ChunkPostprocessBatch:
         if not self.chunks:
             raise ValueError("batch must contain at least one chunk")
         return self
@@ -254,11 +263,11 @@ class ConceptCandidate(BaseModel):
 
     local_id: str
     canonical_name: str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     type: str = "CONCEPT"
     aliases: list[str] = Field(default_factory=list)
     salience: float = Field(ge=0.0, le=1.0)
-    description: Optional[str] = None
+    description: str | None = None
     evidence_spans: list[str] = Field(default_factory=list)
 
     @field_validator("local_id", "canonical_name", "type")
@@ -272,10 +281,14 @@ class ConceptCandidate(BaseModel):
     @field_validator("aliases", "evidence_spans")
     @classmethod
     def clean_lists(cls, values: list[str]) -> list[str]:
-        return unique_preserving_order(normalize_whitespace(value) for value in values if normalize_whitespace(value))
+        return unique_preserving_order(
+            normalize_whitespace(value)
+            for value in values
+            if normalize_whitespace(value)
+        )
 
     @model_validator(mode="after")
-    def defaults(self) -> "ConceptCandidate":
+    def defaults(self) -> ConceptCandidate:
         if self.display_name is None:
             self.display_name = self.canonical_name
         else:
@@ -293,8 +306,8 @@ class RelationCandidate(BaseModel):
     canonical_predicate: str
     predicate_status: PredicateStatus
     predicate_family: str
-    predicate_definition: Optional[str] = None
-    relation_phrase: Optional[str] = None
+    predicate_definition: str | None = None
+    relation_phrase: str | None = None
     generality_score: float = Field(default=0.5, ge=0.0, le=1.0)
     retrieval_usefulness: float = Field(default=0.5, ge=0.0, le=1.0)
     visualization_usefulness: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -327,11 +340,15 @@ class RelationCandidate(BaseModel):
     @field_validator("evidence_chunk_ids", "evidence_spans")
     @classmethod
     def clean_lists(cls, values: list[str]) -> list[str]:
-        return unique_preserving_order(normalize_whitespace(value) for value in values if normalize_whitespace(value))
+        return unique_preserving_order(
+            normalize_whitespace(value)
+            for value in values
+            if normalize_whitespace(value)
+        )
 
     @field_validator("relation_phrase", "predicate_definition")
     @classmethod
-    def clean_optional_short_text(cls, value: Optional[str]) -> Optional[str]:
+    def clean_optional_short_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         cleaned = normalize_whitespace(value)
@@ -349,12 +366,12 @@ class LLMChunkDecision(BaseModel):
     educational_usefulness: float = Field(ge=0.0, le=1.0)
     confidence: float = Field(ge=0.0, le=1.0)
     warnings: list[str] = Field(default_factory=list)
-    cleaned_embedding_text: Optional[str] = None
-    cleaned_display_text: Optional[str] = None
-    chunk_summary: Optional[str] = None
+    cleaned_embedding_text: str | None = None
+    cleaned_display_text: str | None = None
+    chunk_summary: str | None = None
     concepts: list[ConceptCandidate] = Field(default_factory=list)
     relations: list[RelationCandidate] = Field(default_factory=list)
-    reason: Optional[str] = None
+    reason: str | None = None
 
     @field_validator("chunk_id")
     @classmethod
@@ -367,11 +384,17 @@ class LLMChunkDecision(BaseModel):
     @field_validator("issue_types", "warnings")
     @classmethod
     def clean_string_lists(cls, values: list[str]) -> list[str]:
-        return unique_preserving_order(normalize_issue_label(value) for value in values if normalize_issue_label(value))
+        return unique_preserving_order(
+            normalize_issue_label(value)
+            for value in values
+            if normalize_issue_label(value)
+        )
 
-    @field_validator("cleaned_embedding_text", "cleaned_display_text", "chunk_summary", "reason")
+    @field_validator(
+        "cleaned_embedding_text", "cleaned_display_text", "chunk_summary", "reason"
+    )
     @classmethod
-    def clean_optional_text(cls, value: Optional[str]) -> Optional[str]:
+    def clean_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         cleaned = value.strip()
@@ -386,7 +409,7 @@ class LLMPostprocessBatchResponse(BaseModel):
     decisions: list[LLMChunkDecision]
 
     @model_validator(mode="after")
-    def require_decisions(self) -> "LLMPostprocessBatchResponse":
+    def require_decisions(self) -> LLMPostprocessBatchResponse:
         if not self.decisions:
             raise ValueError("LLM response must contain at least one decision")
         return self
@@ -406,15 +429,15 @@ class PostprocessFailure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     failure_id: str
-    chunk_id: Optional[str] = None
-    batch_id: Optional[str] = None
+    chunk_id: str | None = None
+    batch_id: str | None = None
     schema_version: str = SCHEMA_VERSION
     prompt_version: str = DEFAULT_PROMPT_VERSION
     model_name: str = DEFAULT_MODEL_NAME
-    input_hash: Optional[str] = None
+    input_hash: str | None = None
     error_type: str
     message: str
-    raw_response: Optional[str] = None
+    raw_response: str | None = None
 
 
 class ConceptGraphProjection(BaseModel):
@@ -435,17 +458,21 @@ class LLMResponseCache:
     def _path(self, key: str) -> Path:
         return self.cache_dir / f"{key}.json"
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         path = self._path(key)
         if not path.exists():
             return None
         payload = json.loads(path.read_text(encoding="utf-8"))
         return payload.get("raw_response")
 
-    def set(self, key: str, raw_response: str, metadata: Optional[dict[str, Any]] = None) -> None:
+    def set(
+        self, key: str, raw_response: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         payload = {"raw_response": raw_response, "metadata": metadata or {}}
-        self._path(key).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        self._path(key).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 def normalize_whitespace(text: str) -> str:
@@ -486,10 +513,10 @@ class _EmbeddingMarkupParser(HTMLParser):
         self.removed_image_count = 0
         self.preserved_alt_texts: list[str] = []
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._record_tag(tag, attrs, is_end=False)
 
-    def handle_startendtag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._record_tag(tag, attrs, is_end=False)
 
     def handle_endtag(self, tag: str) -> None:
@@ -499,7 +526,9 @@ class _EmbeddingMarkupParser(HTMLParser):
         if data:
             self.parts.append(data)
 
-    def _record_tag(self, tag: str, attrs: list[tuple[str, Optional[str]]], *, is_end: bool) -> None:
+    def _record_tag(
+        self, tag: str, attrs: list[tuple[str, str | None]], *, is_end: bool
+    ) -> None:
         tag = tag.casefold()
         self.removed_tag_count += 1
         if tag == "img" and not is_end:
@@ -509,7 +538,18 @@ class _EmbeddingMarkupParser(HTMLParser):
                 self.preserved_alt_texts.append(alt_text)
                 self.parts.extend([" ", alt_text, " "])
             return
-        if tag in {"br", "p", "div", "center", "tr", "table", "thead", "tbody", "html", "body"}:
+        if tag in {
+            "br",
+            "p",
+            "div",
+            "center",
+            "tr",
+            "table",
+            "thead",
+            "tbody",
+            "html",
+            "body",
+        }:
             self.parts.append("\n")
         elif tag in {"td", "th"}:
             self.parts.append(" | ")
@@ -517,12 +557,14 @@ class _EmbeddingMarkupParser(HTMLParser):
             self.parts.append("\n")
 
 
-def meaningful_image_alt(value: Optional[str]) -> Optional[str]:
+def meaningful_image_alt(value: str | None) -> str | None:
     if value is None:
         return None
     text = normalize_whitespace(unescape(value))
     normalized = re.sub(r"[^a-zа-яё0-9]+", " ", text.casefold()).strip()
-    if normalized in GENERIC_IMAGE_ALT_TEXTS or re.fullmatch(r"(?:image|img|figure)\s*\d*", normalized):
+    if normalized in GENERIC_IMAGE_ALT_TEXTS or re.fullmatch(
+        r"(?:image|img|figure)\s*\d*", normalized
+    ):
         return None
     return text[:180] if text else None
 
@@ -556,7 +598,9 @@ def sanitize_markup_for_embedding(text: str) -> MarkupSanitizationResult:
     return MarkupSanitizationResult(
         text=sanitized,
         changed=sanitized != original_normalized,
-        removed_tag_count=parser.removed_tag_count + partial_tag_count + incomplete_tag_count,
+        removed_tag_count=parser.removed_tag_count
+        + partial_tag_count
+        + incomplete_tag_count,
         removed_image_count=parser.removed_image_count + incomplete_image_count,
         preserved_alt_texts=unique_preserving_order(parser.preserved_alt_texts),
     )
@@ -612,7 +656,9 @@ def span_supported(span: str, evidence_text: str) -> bool:
     return normalize_whitespace(span) in normalize_whitespace(evidence_text)
 
 
-def cleaned_text_is_safe(text: Optional[str], chunk_input: ChunkPostprocessInput) -> tuple[bool, Optional[str]]:
+def cleaned_text_is_safe(
+    text: str | None, chunk_input: ChunkPostprocessInput
+) -> tuple[bool, str | None]:
     if not text:
         return True, None
     evidence_text = chunk_input.evidence_text()
@@ -651,12 +697,20 @@ def detect_preflags(chunk: dict[str, Any]) -> ChunkPreflags:
         "как работает youtube",
     )
     boilerplate_candidate = any(marker in lower for marker in boilerplate_markers)
-    has_visual_marker = "<img" in lower or "img src" in lower or "image_box" in lower or "chart_box" in lower
+    has_visual_marker = (
+        "<img" in lower
+        or "img src" in lower
+        or "image_box" in lower
+        or "chart_box" in lower
+    )
     caption_like = bool(CAPTION_RE.search(combined))
     short_after_html = len(combined_no_html) <= 260
-    caption_only_candidate = caption_like and (short_after_html or combined_no_html.casefold().startswith("visualization:"))
+    caption_only_candidate = caption_like and (
+        short_after_html or combined_no_html.casefold().startswith("visualization:")
+    )
     visual_content_missing_candidate = has_visual_marker or (
-        caption_only_candidate and not re.search(r"\b(?:explains|shows that|means|because|therefore)\b", lower)
+        caption_only_candidate
+        and not re.search(r"\b(?:explains|shows that|means|because|therefore)\b", lower)
     )
     small_but_kept = "small_but_kept" in set(chunk.get("chunk_quality_flags") or [])
     return ChunkPreflags(
@@ -669,7 +723,9 @@ def detect_preflags(chunk: dict[str, Any]) -> ChunkPreflags:
     )
 
 
-def processing_mode_for(chunk: dict[str, Any], preflags: ChunkPreflags) -> ProcessingMode:
+def processing_mode_for(
+    chunk: dict[str, Any], preflags: ChunkPreflags
+) -> ProcessingMode:
     if preflags.suspicious_count:
         if len(normalize_whitespace(chunk.get("text") or "")) >= 220:
             return ProcessingMode.BOTH
@@ -709,7 +765,9 @@ def chunk_to_input(
         artifact_line_end=chunk.get("artifact_line_end"),
         chunk_quality_flags=list(chunk.get("chunk_quality_flags") or []),
         external_resource_urls=[
-            resources_by_id[resource_id]["url"] for resource_id in resource_ids if resource_id in resources_by_id
+            resources_by_id[resource_id]["url"]
+            for resource_id in resource_ids
+            if resource_id in resources_by_id
         ],
         external_resource_content_type_hints=[
             resources_by_id[resource_id].get("content_type_hint", "")
@@ -722,14 +780,16 @@ def chunk_to_input(
             if resource_id in resources_by_id
         ],
         artifact_gate_policy_by_resource_id={
-            resource_id: decision.get("policy", "") for resource_id, decision in gate_decisions.items()
+            resource_id: decision.get("policy", "")
+            for resource_id, decision in gate_decisions.items()
         },
         artifact_gate_reason_codes_by_resource_id={
             resource_id: list(decision.get("reason_codes") or [])
             for resource_id, decision in gate_decisions.items()
         },
         artifact_gate_stats_by_resource_id={
-            resource_id: dict(decision.get("stats") or {}) for resource_id, decision in gate_decisions.items()
+            resource_id: dict(decision.get("stats") or {})
+            for resource_id, decision in gate_decisions.items()
         },
         preflags=preflags,
         processing_mode=processing_mode_for(chunk, preflags),
@@ -743,19 +803,31 @@ def inputs_from_jsonl_dir(input_dir: Path) -> list[ChunkPostprocessInput]:
     gates = read_jsonl_if_exists(input_dir / "artifact_gate_decisions.jsonl")
     resources_by_id = {row["id"]: row for row in resources}
     gates_by_resource_id = {row["external_resource_id"]: row for row in gates}
-    return [chunk_to_input(chunk, resources_by_id, gates_by_resource_id) for chunk in chunks]
+    return [
+        chunk_to_input(chunk, resources_by_id, gates_by_resource_id) for chunk in chunks
+    ]
 
 
-def inputs_from_optimized_result(result: OptimizedParseResult) -> list[ChunkPostprocessInput]:
+def inputs_from_optimized_result(
+    result: OptimizedParseResult,
+) -> list[ChunkPostprocessInput]:
     chunks = [_model_or_dataclass_to_dict(chunk) for chunk in result.retrieval_chunks]
-    resources = [_model_or_dataclass_to_dict(resource) for resource in result.external_resources]
-    gates = [_model_or_dataclass_to_dict(gate) for gate in result.artifact_gate_decisions]
+    resources = [
+        _model_or_dataclass_to_dict(resource) for resource in result.external_resources
+    ]
+    gates = [
+        _model_or_dataclass_to_dict(gate) for gate in result.artifact_gate_decisions
+    ]
     resources_by_id = {row["id"]: row for row in resources}
     gates_by_resource_id = {row["external_resource_id"]: row for row in gates}
-    return [chunk_to_input(chunk, resources_by_id, gates_by_resource_id) for chunk in chunks]
+    return [
+        chunk_to_input(chunk, resources_by_id, gates_by_resource_id) for chunk in chunks
+    ]
 
 
-def select_candidate_inputs(inputs: Iterable[ChunkPostprocessInput]) -> list[ChunkPostprocessInput]:
+def select_candidate_inputs(
+    inputs: Iterable[ChunkPostprocessInput],
+) -> list[ChunkPostprocessInput]:
     candidates = [
         item
         for item in inputs
@@ -784,13 +856,15 @@ def build_batches(
     batches: list[ChunkPostprocessBatch] = []
     current: list[ChunkPostprocessInput] = []
     current_chars = 0
-    current_key: Optional[tuple[str, tuple[str, ...]]] = None
+    current_key: tuple[str, tuple[str, ...]] | None = None
 
     def flush() -> None:
         nonlocal current, current_chars, current_key
         if not current:
             return
-        batch_id = f"batch_{stable_hash([item.input_hash for item in current], length=20)}"
+        batch_id = (
+            f"batch_{stable_hash([item.input_hash for item in current], length=20)}"
+        )
         batches.append(ChunkPostprocessBatch(batch_id=batch_id, chunks=current))
         current = []
         current_chars = 0
@@ -860,7 +934,9 @@ def response_schema_hint(*, pass_name: str = "single") -> dict[str, Any]:
                         "aliases": ["exact source aliases"],
                         "salience": "0.0-1.0",
                         "description": "null or <=15 words",
-                        "evidence_spans": ["exact substring copied from provided input"],
+                        "evidence_spans": [
+                            "exact substring copied from provided input"
+                        ],
                     }
                 ],
                 "relations": [
@@ -878,7 +954,9 @@ def response_schema_hint(*, pass_name: str = "single") -> dict[str, Any]:
                         "visualization_usefulness": "0.0-1.0",
                         "confidence": "0.0-1.0",
                         "evidence_chunk_ids": ["current chunk_id"],
-                        "evidence_spans": ["exact substring copied from provided input"],
+                        "evidence_spans": [
+                            "exact substring copied from provided input"
+                        ],
                     }
                 ],
                 "reason": "<=20 words",
@@ -892,8 +970,8 @@ def cache_key_for_batch(
     *,
     model_name: str,
     prompt_version: str,
-    prompt_content_hash: Optional[str] = None,
-    generation_settings: Optional[dict[str, Any]] = None,
+    prompt_content_hash: str | None = None,
+    generation_settings: dict[str, Any] | None = None,
 ) -> str:
     return stable_hash(
         {
@@ -931,7 +1009,7 @@ def load_llm_json_payload(text: str) -> Any:
         raise original_error
 
 
-def repair_llm_json_text(text: str) -> Optional[str]:
+def repair_llm_json_text(text: str) -> str | None:
     candidate = extract_json_candidate(text)
     if not candidate:
         return None
@@ -944,7 +1022,7 @@ def repair_llm_json_text(text: str) -> Optional[str]:
 
     decision_object = extract_first_decision_object(candidate)
     if decision_object:
-        return '{"decisions":[' + decision_object + ']}'
+        return '{"decisions":[' + decision_object + "]}"
     if candidate.startswith("{"):
         single_object = extract_balanced_json_object(candidate, 0)
         if single_object:
@@ -952,7 +1030,7 @@ def repair_llm_json_text(text: str) -> Optional[str]:
     return None
 
 
-def extract_json_candidate(text: str) -> Optional[str]:
+def extract_json_candidate(text: str) -> str | None:
     stripped = text.strip()
     if not stripped:
         return None
@@ -963,7 +1041,7 @@ def extract_json_candidate(text: str) -> Optional[str]:
     return stripped[start:].strip()
 
 
-def extract_first_decision_object(text: str) -> Optional[str]:
+def extract_first_decision_object(text: str) -> str | None:
     decisions_index = text.find('"decisions"')
     if decisions_index < 0:
         return None
@@ -976,7 +1054,7 @@ def extract_first_decision_object(text: str) -> Optional[str]:
     return extract_balanced_json_object(text, object_index)
 
 
-def extract_balanced_json_object(text: str, start_index: int) -> Optional[str]:
+def extract_balanced_json_object(text: str, start_index: int) -> str | None:
     if start_index < 0 or start_index >= len(text) or text[start_index] != "{":
         return None
     depth = 0
@@ -999,7 +1077,7 @@ def extract_balanced_json_object(text: str, start_index: int) -> Optional[str]:
         elif char == "}":
             depth -= 1
             if depth == 0:
-                return text[start_index:index + 1]
+                return text[start_index : index + 1]
     return None
 
 
@@ -1009,7 +1087,7 @@ def validate_and_enrich_response(
     *,
     model_name: str,
     prompt_version: str,
-    raw_response: Optional[str] = None,
+    raw_response: str | None = None,
 ) -> tuple[list[ChunkEnrichmentDecision], list[PostprocessFailure]]:
     by_chunk_id = {chunk.chunk_id: chunk for chunk in batch.chunks}
     seen_decisions: set[str] = set()
@@ -1109,12 +1187,16 @@ def normalize_decision_against_input(
             changed = True
 
     for concept in payload.get("concepts") or []:
-        spans, span_changed = normalize_evidence_spans(concept.get("evidence_spans") or [], evidence_text)
+        spans, span_changed = normalize_evidence_spans(
+            concept.get("evidence_spans") or [], evidence_text
+        )
         concept["evidence_spans"] = spans
         changed = changed or span_changed
 
     for relation in payload.get("relations") or []:
-        canonical_predicate = normalize_predicate(relation.get("canonical_predicate", ""))
+        canonical_predicate = normalize_predicate(
+            relation.get("canonical_predicate", "")
+        )
         canonical_alias = PREDICATE_CANONICAL_ALIASES.get(canonical_predicate)
         if canonical_alias:
             relation["canonical_predicate"] = canonical_alias
@@ -1127,20 +1209,28 @@ def normalize_decision_against_input(
             and canonical_predicate not in EXISTING_RELATION_LABELS
         ):
             relation["predicate_status"] = PredicateStatus.PROPOSED.value
-            relation["predicate_definition"] = relation.get("predicate_definition") or "Proposed grounded relation."
+            relation["predicate_definition"] = (
+                relation.get("predicate_definition") or "Proposed grounded relation."
+            )
             warnings.append(UNKNOWN_EXISTING_PREDICATE_WARNING)
             changed = True
-        spans, span_changed = normalize_evidence_spans(relation.get("evidence_spans") or [], evidence_text)
+        spans, span_changed = normalize_evidence_spans(
+            relation.get("evidence_spans") or [], evidence_text
+        )
         relation["evidence_spans"] = spans
         changed = changed or span_changed
 
     if changed:
-        warnings = unique_preserving_order([*warnings, "postprocess_normalized_llm_output"])
+        warnings = unique_preserving_order(
+            [*warnings, "postprocess_normalized_llm_output"]
+        )
         payload["warnings"] = warnings
     return LLMChunkDecision.model_validate(payload)
 
 
-def normalize_evidence_spans(spans: list[str], evidence_text: str) -> tuple[list[str], bool]:
+def normalize_evidence_spans(
+    spans: list[str], evidence_text: str
+) -> tuple[list[str], bool]:
     normalized: list[str] = []
     changed = False
     for span in spans:
@@ -1156,14 +1246,14 @@ def normalize_evidence_spans(spans: list[str], evidence_text: str) -> tuple[list
     return unique_preserving_order(normalized), changed
 
 
-def find_supported_evidence_variant(span: str, evidence_text: str) -> Optional[str]:
+def find_supported_evidence_variant(span: str, evidence_text: str) -> str | None:
     span = normalize_whitespace(span)
     if not span or not evidence_text:
         return None
 
     casefold_index = evidence_text.casefold().find(span.casefold())
     if casefold_index >= 0:
-        return evidence_text[casefold_index:casefold_index + len(span)]
+        return evidence_text[casefold_index : casefold_index + len(span)]
 
     target_key = fuzzy_evidence_key(span)
     if not target_key:
@@ -1174,13 +1264,15 @@ def find_supported_evidence_variant(span: str, evidence_text: str) -> Optional[s
         return None
 
     best_score = 0.0
-    best_candidate: Optional[str] = None
+    best_candidate: str | None = None
     min_size = max(1, target_token_count - 2)
     max_size = min(len(source_tokens), target_token_count + 2, 12)
     for size in range(min_size, max_size + 1):
         for start in range(0, len(source_tokens) - size + 1):
             end = start + size - 1
-            candidate = evidence_text[source_tokens[start].start():source_tokens[end].end()]
+            candidate = evidence_text[
+                source_tokens[start].start() : source_tokens[end].end()
+            ]
             if len(candidate) > max(240, len(span) * 4):
                 continue
             candidate_key = fuzzy_evidence_key(candidate)
@@ -1235,7 +1327,9 @@ def fuzzy_evidence_key(text: str) -> str:
     return " ".join(TOKEN_RE.findall(translated))
 
 
-def validate_decision_against_input(decision: LLMChunkDecision, chunk_input: ChunkPostprocessInput) -> list[str]:
+def validate_decision_against_input(
+    decision: LLMChunkDecision, chunk_input: ChunkPostprocessInput
+) -> list[str]:
     errors: list[str] = []
     evidence_text = chunk_input.evidence_text()
     concept_ids = {concept.local_id for concept in decision.concepts}
@@ -1256,7 +1350,9 @@ def validate_decision_against_input(decision: LLMChunkDecision, chunk_input: Chu
             errors.append(f"concept {concept.local_id} has no evidence_spans")
         for span in concept.evidence_spans:
             if not span_supported(span, evidence_text):
-                errors.append(f"concept {concept.local_id} evidence span is not source-grounded: {span!r}")
+                errors.append(
+                    f"concept {concept.local_id} evidence span is not source-grounded: {span!r}"
+                )
 
     for relation in decision.relations:
         if (
@@ -1267,20 +1363,37 @@ def validate_decision_against_input(decision: LLMChunkDecision, chunk_input: Chu
                 f"relation {relation.canonical_predicate} is marked existing but is not in existing relation labels"
             )
         if relation.source_concept_id not in concept_ids:
-            errors.append(f"relation source_concept_id is unknown: {relation.source_concept_id}")
+            errors.append(
+                f"relation source_concept_id is unknown: {relation.source_concept_id}"
+            )
         if relation.target_concept_id not in concept_ids:
-            errors.append(f"relation target_concept_id is unknown: {relation.target_concept_id}")
+            errors.append(
+                f"relation target_concept_id is unknown: {relation.target_concept_id}"
+            )
         if chunk_input.chunk_id not in relation.evidence_chunk_ids:
-            errors.append(f"relation {relation.canonical_predicate} lacks current chunk evidence id")
+            errors.append(
+                f"relation {relation.canonical_predicate} lacks current chunk evidence id"
+            )
         if not relation.evidence_spans:
-            errors.append(f"relation {relation.canonical_predicate} has no evidence_spans")
+            errors.append(
+                f"relation {relation.canonical_predicate} has no evidence_spans"
+            )
         for span in relation.evidence_spans:
             if not span_supported(span, evidence_text):
-                errors.append(f"relation {relation.canonical_predicate} evidence span is not source-grounded: {span!r}")
-        if relation.canonical_predicate == "RELATED_TO" and specific_relation_cue_present(relation.evidence_spans):
-            errors.append("RELATED_TO is too generic for evidence with a specific relation cue")
+                errors.append(
+                    f"relation {relation.canonical_predicate} evidence span is not source-grounded: {span!r}"
+                )
+        if (
+            relation.canonical_predicate == "RELATED_TO"
+            and specific_relation_cue_present(relation.evidence_spans)
+        ):
+            errors.append(
+                "RELATED_TO is too generic for evidence with a specific relation cue"
+            )
         if relation.relation_phrase and len(relation.relation_phrase.split()) > 20:
-            errors.append(f"relation {relation.canonical_predicate} relation_phrase exceeds 20 words")
+            errors.append(
+                f"relation {relation.canonical_predicate} relation_phrase exceeds 20 words"
+            )
 
     return errors
 
@@ -1308,10 +1421,10 @@ def make_failure(
     error_type: str,
     message: str,
     *,
-    batch: Optional[ChunkPostprocessBatch] = None,
-    chunk_id: Optional[str] = None,
-    input_hash: Optional[str] = None,
-    raw_response: Optional[str] = None,
+    batch: ChunkPostprocessBatch | None = None,
+    chunk_id: str | None = None,
+    input_hash: str | None = None,
+    raw_response: str | None = None,
     model_name: str = DEFAULT_MODEL_NAME,
     prompt_version: str = DEFAULT_PROMPT_VERSION,
 ) -> PostprocessFailure:
@@ -1338,7 +1451,7 @@ def make_failure(
 
 def build_graph_projection(
     decisions: Iterable[ChunkEnrichmentDecision],
-    concept_resolution: Optional[ConceptResolution] = None,
+    concept_resolution: ConceptResolution | None = None,
 ) -> ConceptGraphProjection:
     decision_list = list(decisions)
     node_records: dict[str, dict[str, Any]] = {}
@@ -1376,7 +1489,9 @@ def build_graph_projection(
         for concept in decision.concepts:
             global_id = None
             if concept_resolution is not None:
-                mention_id = mention_id_for(decision.decision_id, decision.chunk_id, concept.local_id)
+                mention_id = mention_id_for(
+                    decision.decision_id, decision.chunk_id, concept.local_id
+                )
                 global_id = concept_resolution.mention_to_concept_id.get(mention_id)
             if global_id is None:
                 key = concept_key(concept.canonical_name, concept.type)
@@ -1396,14 +1511,22 @@ def build_graph_projection(
                     "max_salience": concept.salience,
                 },
             )
-            record["aliases"] = unique_preserving_order([*record.get("aliases", []), *concept.aliases])
+            record["aliases"] = unique_preserving_order(
+                [*record.get("aliases", []), *concept.aliases]
+            )
             if concept.description:
-                record["descriptions"] = unique_preserving_order([*record.get("descriptions", []), concept.description])
-            record["source_chunk_ids"] = unique_preserving_order([*record.get("source_chunk_ids", []), decision.chunk_id])
+                record["descriptions"] = unique_preserving_order(
+                    [*record.get("descriptions", []), concept.description]
+                )
+            record["source_chunk_ids"] = unique_preserving_order(
+                [*record.get("source_chunk_ids", []), decision.chunk_id]
+            )
             record["evidence_spans"] = unique_preserving_order(
                 [*record.get("evidence_spans", []), *concept.evidence_spans]
             )
-            record["max_salience"] = max(record.get("max_salience", 0.0), concept.salience)
+            record["max_salience"] = max(
+                record.get("max_salience", 0.0), concept.salience
+            )
             evidence_links.append(
                 {
                     "concept_id": global_id,
@@ -1415,13 +1538,19 @@ def build_graph_projection(
 
     for decision in decision_list:
         for relation in decision.relations:
-            source_id = local_to_global.get((decision.decision_id, relation.source_concept_id))
-            target_id = local_to_global.get((decision.decision_id, relation.target_concept_id))
+            source_id = local_to_global.get(
+                (decision.decision_id, relation.source_concept_id)
+            )
+            target_id = local_to_global.get(
+                (decision.decision_id, relation.target_concept_id)
+            )
             if not source_id or not target_id:
                 continue
             if source_id == target_id:
                 continue
-            relation_id = relation_id_from_parts(source_id, relation.canonical_predicate, target_id)
+            relation_id = relation_id_from_parts(
+                source_id, relation.canonical_predicate, target_id
+            )
             record = edge_records.setdefault(
                 relation_id,
                 {
@@ -1443,7 +1572,9 @@ def build_graph_projection(
                     "decision_ids": [],
                 },
             )
-            record["raw_predicates"] = unique_preserving_order([*record["raw_predicates"], relation.raw_predicate])
+            record["raw_predicates"] = unique_preserving_order(
+                [*record["raw_predicates"], relation.raw_predicate]
+            )
             record["predicate_statuses"] = unique_preserving_order(
                 [*record["predicate_statuses"], relation.predicate_status.value]
             )
@@ -1458,25 +1589,39 @@ def build_graph_projection(
             record["evidence_chunk_ids"] = unique_preserving_order(
                 [*record["evidence_chunk_ids"], *relation.evidence_chunk_ids]
             )
-            record["evidence_spans"] = unique_preserving_order([*record["evidence_spans"], *relation.evidence_spans])
-            record["max_confidence"] = max(record["max_confidence"], relation.confidence)
-            record["max_generality_score"] = max(record["max_generality_score"], relation.generality_score)
+            record["evidence_spans"] = unique_preserving_order(
+                [*record["evidence_spans"], *relation.evidence_spans]
+            )
+            record["max_confidence"] = max(
+                record["max_confidence"], relation.confidence
+            )
+            record["max_generality_score"] = max(
+                record["max_generality_score"], relation.generality_score
+            )
             record["max_retrieval_usefulness"] = max(
                 record["max_retrieval_usefulness"], relation.retrieval_usefulness
             )
             record["max_visualization_usefulness"] = max(
-                record["max_visualization_usefulness"], relation.visualization_usefulness
+                record["max_visualization_usefulness"],
+                relation.visualization_usefulness,
             )
-            record["decision_ids"] = unique_preserving_order([*record["decision_ids"], decision.decision_id])
+            record["decision_ids"] = unique_preserving_order(
+                [*record["decision_ids"], decision.decision_id]
+            )
 
     return ConceptGraphProjection(
-        nodes=sorted(node_records.values(), key=lambda item: (item["type"], item["canonical_name"])),
+        nodes=sorted(
+            node_records.values(),
+            key=lambda item: (item["type"], item["canonical_name"]),
+        ),
         edges=sorted(edge_records.values(), key=lambda item: item["id"]),
         evidence_links=evidence_links,
     )
 
 
-def build_relation_registry(decisions: Iterable[ChunkEnrichmentDecision]) -> list[dict[str, Any]]:
+def build_relation_registry(
+    decisions: Iterable[ChunkEnrichmentDecision],
+) -> list[dict[str, Any]]:
     registry: dict[str, dict[str, Any]] = {}
     for decision in decisions:
         for relation in decision.relations:
@@ -1497,7 +1642,9 @@ def build_relation_registry(decisions: Iterable[ChunkEnrichmentDecision]) -> lis
                 },
             )
             record["count"] += 1
-            record["raw_predicates"] = unique_preserving_order([*record["raw_predicates"], relation.raw_predicate])
+            record["raw_predicates"] = unique_preserving_order(
+                [*record["raw_predicates"], relation.raw_predicate]
+            )
             record["predicate_statuses"] = unique_preserving_order(
                 [*record["predicate_statuses"], relation.predicate_status.value]
             )
@@ -1512,17 +1659,23 @@ def build_relation_registry(decisions: Iterable[ChunkEnrichmentDecision]) -> lis
                 record["relation_phrases"] = unique_preserving_order(
                     [*record["relation_phrases"], relation.relation_phrase]
                 )[:5]
-            record["max_generality_score"] = max(record["max_generality_score"], relation.generality_score)
+            record["max_generality_score"] = max(
+                record["max_generality_score"], relation.generality_score
+            )
             record["max_retrieval_usefulness"] = max(
                 record["max_retrieval_usefulness"], relation.retrieval_usefulness
             )
             record["max_visualization_usefulness"] = max(
-                record["max_visualization_usefulness"], relation.visualization_usefulness
+                record["max_visualization_usefulness"],
+                relation.visualization_usefulness,
             )
             record["example_chunk_ids"] = unique_preserving_order(
                 [*record["example_chunk_ids"], *relation.evidence_chunk_ids]
             )[:5]
-    return sorted(registry.values(), key=lambda item: (-item["count"], item["canonical_predicate"]))
+    return sorted(
+        registry.values(),
+        key=lambda item: (-item["count"], item["canonical_predicate"]),
+    )
 
 
 def build_report_payload(
@@ -1531,7 +1684,7 @@ def build_report_payload(
     failures: Iterable[PostprocessFailure],
     projection: ConceptGraphProjection,
     relation_registry: list[dict[str, Any]],
-    concept_resolution: Optional[ConceptResolution] = None,
+    concept_resolution: ConceptResolution | None = None,
     *,
     cache_hits: int = 0,
     cache_misses: int = 0,
@@ -1542,22 +1695,36 @@ def build_report_payload(
     decision_list = list(decisions)
     failure_list = list(failures)
     action_counts = Counter(decision.action.value for decision in decision_list)
-    issue_counts = Counter(issue for decision in decision_list for issue in decision.issue_types)
+    issue_counts = Counter(
+        issue for decision in decision_list for issue in decision.issue_types
+    )
     mode_counts = Counter(item.processing_mode.value for item in input_list)
-    concept_type_counts = Counter(entry.type for entry in concept_resolution.registry_entries) if concept_resolution else Counter()
+    concept_type_counts = (
+        Counter(entry.type for entry in concept_resolution.registry_entries)
+        if concept_resolution
+        else Counter()
+    )
     concept_source_type_counts = (
-        Counter(source_type for entry in concept_resolution.registry_entries for source_type in entry.source_types)
+        Counter(
+            source_type
+            for entry in concept_resolution.registry_entries
+            for source_type in entry.source_types
+        )
         if concept_resolution
         else Counter()
     )
     review_clusters = concept_resolution.review_clusters if concept_resolution else []
-    adjudication_failures = concept_resolution.adjudication_failures if concept_resolution else []
+    adjudication_failures = (
+        concept_resolution.adjudication_failures if concept_resolution else []
+    )
     preflag_counts = Counter()
     for item in input_list:
         for key, value in item.preflags.model_dump(mode="json").items():
             if value:
                 preflag_counts[key] += 1
-    failed_chunk_ids = sorted({failure.chunk_id for failure in failure_list if failure.chunk_id})
+    failed_chunk_ids = sorted(
+        {failure.chunk_id for failure in failure_list if failure.chunk_id}
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "input_count": len(input_list),
@@ -1573,23 +1740,43 @@ def build_report_payload(
         "concept_node_count": len(projection.nodes),
         "relation_edge_count": len(projection.edges),
         "relation_registry_count": len(relation_registry),
-        "concept_registry_count": len(concept_resolution.registry_entries) if concept_resolution else 0,
-        "concept_review_cluster_count": len(concept_resolution.review_clusters) if concept_resolution else 0,
-        "concept_pair_score_count": len(concept_resolution.pair_scores) if concept_resolution else 0,
-        "concept_adjudication_count": len(concept_resolution.adjudications) if concept_resolution else 0,
-        "concept_adjudication_failure_count": len(concept_resolution.adjudication_failures) if concept_resolution else 0,
+        "concept_registry_count": len(concept_resolution.registry_entries)
+        if concept_resolution
+        else 0,
+        "concept_review_cluster_count": len(concept_resolution.review_clusters)
+        if concept_resolution
+        else 0,
+        "concept_pair_score_count": len(concept_resolution.pair_scores)
+        if concept_resolution
+        else 0,
+        "concept_adjudication_count": len(concept_resolution.adjudications)
+        if concept_resolution
+        else 0,
+        "concept_adjudication_failure_count": len(
+            concept_resolution.adjudication_failures
+        )
+        if concept_resolution
+        else 0,
         "concept_type_counts": dict(concept_type_counts),
         "concept_source_type_counts": dict(concept_source_type_counts),
-        "max_concept_review_cluster_mentions": max((len(cluster.mention_ids) for cluster in review_clusters), default=0),
-        "max_concept_review_cluster_pair_scores": max((len(cluster.pair_scores) for cluster in review_clusters), default=0),
+        "max_concept_review_cluster_mentions": max(
+            (len(cluster.mention_ids) for cluster in review_clusters), default=0
+        ),
+        "max_concept_review_cluster_pair_scores": max(
+            (len(cluster.pair_scores) for cluster in review_clusters), default=0
+        ),
         "skipped_over_budget_concept_cluster_count": sum(
-            1 for failure in adjudication_failures if failure.error_type == "prompt_budget_exceeded"
+            1
+            for failure in adjudication_failures
+            if failure.error_type == "prompt_budget_exceeded"
         ),
         "cache_hits": cache_hits,
         "cache_misses": cache_misses,
         "concept_cache_hits": concept_cache_hits,
         "concept_cache_misses": concept_cache_misses,
-        "failures_by_type": dict(Counter(failure.error_type for failure in failure_list)),
+        "failures_by_type": dict(
+            Counter(failure.error_type for failure in failure_list)
+        ),
     }
 
 
@@ -1640,7 +1827,7 @@ def write_sidecar_outputs(
     inputs: Iterable[ChunkPostprocessInput],
     decisions: Iterable[ChunkEnrichmentDecision],
     failures: Iterable[PostprocessFailure],
-    concept_resolution: Optional[ConceptResolution] = None,
+    concept_resolution: ConceptResolution | None = None,
     cache_hits: int = 0,
     cache_misses: int = 0,
     concept_cache_hits: int = 0,
@@ -1651,7 +1838,9 @@ def write_sidecar_outputs(
     inputs_list = list(inputs)
     decisions_list = list(decisions)
     failures_list = list(failures)
-    projection = build_graph_projection(decisions_list, concept_resolution=concept_resolution)
+    projection = build_graph_projection(
+        decisions_list, concept_resolution=concept_resolution
+    )
     relation_registry = build_relation_registry(decisions_list)
     report_payload = build_report_payload(
         inputs_list,
@@ -1666,18 +1855,33 @@ def write_sidecar_outputs(
         concept_cache_misses=concept_cache_misses,
     )
 
-    write_jsonl(output_dir / INPUTS_FILENAME, [item.model_dump(mode="json") for item in inputs_list])
-    write_jsonl(output_dir / DECISIONS_FILENAME, [item.model_dump(mode="json") for item in decisions_list])
-    write_jsonl(output_dir / FAILURES_FILENAME, [item.model_dump(mode="json") for item in failures_list])
+    write_jsonl(
+        output_dir / INPUTS_FILENAME,
+        [item.model_dump(mode="json") for item in inputs_list],
+    )
+    write_jsonl(
+        output_dir / DECISIONS_FILENAME,
+        [item.model_dump(mode="json") for item in decisions_list],
+    )
+    write_jsonl(
+        output_dir / FAILURES_FILENAME,
+        [item.model_dump(mode="json") for item in failures_list],
+    )
     write_jsonl(output_dir / RELATION_REGISTRY_FILENAME, relation_registry)
     if concept_resolution is not None:
         write_jsonl(
             output_dir / CONCEPT_REGISTRY_FILENAME,
-            [item.model_dump(mode="json") for item in concept_resolution.registry_entries],
+            [
+                item.model_dump(mode="json")
+                for item in concept_resolution.registry_entries
+            ],
         )
         write_jsonl(
             output_dir / CONCEPT_MERGE_REVIEW_FILENAME,
-            [item.model_dump(mode="json") for item in concept_resolution.review_clusters],
+            [
+                item.model_dump(mode="json")
+                for item in concept_resolution.review_clusters
+            ],
         )
         write_jsonl(
             output_dir / CONCEPT_PAIR_SCORES_FILENAME,
@@ -1689,19 +1893,30 @@ def write_sidecar_outputs(
         )
         write_jsonl(
             output_dir / CONCEPT_ADJUDICATION_FAILURES_FILENAME,
-            [item.model_dump(mode="json") for item in concept_resolution.adjudication_failures],
+            [
+                item.model_dump(mode="json")
+                for item in concept_resolution.adjudication_failures
+            ],
         )
-    write_jsonl(output_dir / GRAPH_PREVIEW_FILENAME, graph_projection_jsonl_rows(projection))
+    write_jsonl(
+        output_dir / GRAPH_PREVIEW_FILENAME, graph_projection_jsonl_rows(projection)
+    )
     write_json(output_dir / REPORT_JSON_FILENAME, report_payload)
-    (output_dir / REPORT_MD_FILENAME).write_text(build_report_markdown(report_payload), encoding="utf-8")
+    (output_dir / REPORT_MD_FILENAME).write_text(
+        build_report_markdown(report_payload), encoding="utf-8"
+    )
     return report_payload
 
 
-def graph_projection_jsonl_rows(projection: ConceptGraphProjection) -> list[dict[str, Any]]:
+def graph_projection_jsonl_rows(
+    projection: ConceptGraphProjection,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     rows.extend({"record_type": "concept_node", **node} for node in projection.nodes)
     rows.extend({"record_type": "relation_edge", **edge} for edge in projection.edges)
-    rows.extend({"record_type": "evidence_link", **link} for link in projection.evidence_links)
+    rows.extend(
+        {"record_type": "evidence_link", **link} for link in projection.evidence_links
+    )
     return rows
 
 
@@ -1785,9 +2000,13 @@ def fake_llm_response_for_batch(batch: ChunkPostprocessBatch) -> str:
 
 
 def first_supported_evidence(chunk: ChunkPostprocessInput, max_chars: int = 180) -> str:
-    text = normalize_whitespace(strip_html(chunk.text or chunk.embedding_text or chunk.source))
+    text = normalize_whitespace(
+        strip_html(chunk.text or chunk.embedding_text or chunk.source)
+    )
     if not text:
-        text = normalize_whitespace(" > ".join(chunk.heading_path or chunk.path) or chunk.source)
+        text = normalize_whitespace(
+            " > ".join(chunk.heading_path or chunk.path) or chunk.source
+        )
     sentence = re.split(r"(?<=[.!?])\s+", text)[0]
     return sentence[:max_chars].strip() or chunk.source
 
@@ -1826,18 +2045,27 @@ def read_jsonl_if_exists(path: Path) -> list[dict[str, Any]]:
 
 
 def load_postprocess_inputs(output_dir: Path) -> list[ChunkPostprocessInput]:
-    return [ChunkPostprocessInput.model_validate(row) for row in read_jsonl(Path(output_dir) / INPUTS_FILENAME)]
+    return [
+        ChunkPostprocessInput.model_validate(row)
+        for row in read_jsonl(Path(output_dir) / INPUTS_FILENAME)
+    ]
 
 
 def load_postprocess_decisions(output_dir: Path) -> list[ChunkEnrichmentDecision]:
-    return [ChunkEnrichmentDecision.model_validate(row) for row in read_jsonl(Path(output_dir) / DECISIONS_FILENAME)]
+    return [
+        ChunkEnrichmentDecision.model_validate(row)
+        for row in read_jsonl(Path(output_dir) / DECISIONS_FILENAME)
+    ]
 
 
 def load_postprocess_failures(output_dir: Path) -> list[PostprocessFailure]:
-    return [PostprocessFailure.model_validate(row) for row in read_jsonl_if_exists(Path(output_dir) / FAILURES_FILENAME)]
+    return [
+        PostprocessFailure.model_validate(row)
+        for row in read_jsonl_if_exists(Path(output_dir) / FAILURES_FILENAME)
+    ]
 
 
-def load_concept_resolution_sidecars(output_dir: Path) -> Optional[ConceptResolution]:
+def load_concept_resolution_sidecars(output_dir: Path) -> ConceptResolution | None:
     output_dir = Path(output_dir)
     registry_path = output_dir / CONCEPT_REGISTRY_FILENAME
     if not registry_path.exists():
@@ -1867,12 +2095,16 @@ def load_concept_resolution_sidecars(output_dir: Path) -> Optional[ConceptResolu
         ],
         adjudication_failures=[
             ConceptAdjudicationFailure.model_validate(row)
-            for row in read_jsonl_if_exists(output_dir / CONCEPT_ADJUDICATION_FAILURES_FILENAME)
+            for row in read_jsonl_if_exists(
+                output_dir / CONCEPT_ADJUDICATION_FAILURES_FILENAME
+            )
         ],
     )
 
 
-def _model_or_dataclass_to_dict(value: RetrievalChunk | ExternalResource | ArtifactGateDecision) -> dict[str, Any]:
+def _model_or_dataclass_to_dict(
+    value: RetrievalChunk | ExternalResource | ArtifactGateDecision,
+) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
     return dict(value.__dict__)

@@ -4,19 +4,32 @@ import json
 import os
 import re
 from itertools import chain
-from typing import Any, Optional
+from typing import Any
 
 import plotly.graph_objects as go
-from dotenv import load_dotenv, find_dotenv
-from llama_index.core import StorageContext, load_index_from_storage, VectorStoreIndex
+from dotenv import find_dotenv, load_dotenv
+from llama_index.core import StorageContext, VectorStoreIndex, load_index_from_storage
 from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.graph_stores import ChunkNode
-from llama_index.core.graph_stores.types import EntityNode, Relation, KG_NODES_KEY, KG_RELATIONS_KEY, \
-    TRIPLET_SOURCE_KEY, VECTOR_SOURCE_KEY
+from llama_index.core.graph_stores.types import (
+    KG_NODES_KEY,
+    KG_RELATIONS_KEY,
+    TRIPLET_SOURCE_KEY,
+    VECTOR_SOURCE_KEY,
+    EntityNode,
+    Relation,
+)
 from llama_index.core.indices import PropertyGraphIndex
 from llama_index.core.indices.property_graph import ImplicitPathExtractor
-from llama_index.core.indices.property_graph.sub_retrievers.vector import VectorContextRetriever
-from llama_index.core.schema import MetadataMode, RelatedNodeInfo, TextNode, NodeRelationship
+from llama_index.core.indices.property_graph.sub_retrievers.vector import (
+    VectorContextRetriever,
+)
+from llama_index.core.schema import (
+    MetadataMode,
+    NodeRelationship,
+    RelatedNodeInfo,
+    TextNode,
+)
 from llama_index.core.vector_stores.simple import SimpleVectorStore
 from llama_index.llms.ollama import Ollama
 from llama_index.vector_stores.pinecone import PineconeVectorStore
@@ -32,40 +45,52 @@ except ImportError:
     pass
 from tqdm import tqdm
 
-from backend.configs.constants import MAX_TOKEN_COUNTS_PER_CALL, TEST_SOURCES, MAX_DOCUMENTS_TO_INDEX, SPRING_LAYOUT_K, \
-    SPRING_LAYOUT_ITERATIONS
-from backend.configs.enums import KnowledgeGraphEntity, KnowledgeGraphRelation, StorageType
+from backend.configs.constants import (
+    MAX_DOCUMENTS_TO_INDEX,
+    MAX_TOKEN_COUNTS_PER_CALL,
+    SPRING_LAYOUT_ITERATIONS,
+    SPRING_LAYOUT_K,
+    TEST_SOURCES,
+)
+from backend.configs.enums import (
+    KnowledgeGraphEntity,
+    KnowledgeGraphRelation,
+    StorageType,
+)
 from backend.configs.paths import PathSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.knowledge_graph.custom_types import CustomEntityNode
-from backend.utils.helpers import clean_json_markdown, logger, make_json_serializable, require_dependency
+from backend.utils.helpers import (
+    clean_json_markdown,
+    logger,
+    make_json_serializable,
+    require_dependency,
+)
 
 load_dotenv(find_dotenv())
 
-NETWORKX_REQUIRED_ERROR = (
-    "networkx is required for legacy graph processing/visualization. Install the scripts dependency group."
-)
+NETWORKX_REQUIRED_ERROR = "networkx is required for legacy graph processing/visualization. Install the scripts dependency group."
 
 
 class KnowledgeGraphIndexer:
     """Manages knowledge graph indexing, processing, and retrieval operations.
-    
+
     This class handles the creation, processing, and querying of property graph indexes,
     including implicit graph processing, entity/relation extraction, and vector embeddings.
     """
 
     def __init__(
-            self,
-            storage_context: StorageContext,
-            path_settings: PathSettings,
-            document_storage_type: StorageType,
-            kg_search_settings: KnowledgeGraphSearchSettings,
-            embedder: Any,
-            tokenizer: Optional[Any] = None,
-            test_setup: bool = True
+        self,
+        storage_context: StorageContext,
+        path_settings: PathSettings,
+        document_storage_type: StorageType,
+        kg_search_settings: KnowledgeGraphSearchSettings,
+        embedder: Any,
+        tokenizer: Any | None = None,
+        test_setup: bool = True,
     ) -> None:
         """Initializes the KnowledgeGraphIndexer.
-        
+
         Args:
             storage_context: Storage context for managing document, vector and graph storage.
             path_settings: Path configuration settings.
@@ -90,15 +115,19 @@ class KnowledgeGraphIndexer:
         documents = self.storage_context.docstore.docs.items()
         self.node_id_to_text = {k: v.text for k, v in documents}
         # 'path' parameter contains the hierarchical path to the RemNote text block (page name, headers, sub-headers, etc.)
-        self.node_id_to_path = {k: v.metadata['path'] for k, v in documents}
-        self.node_id_to_line_number = {k: v.metadata['line_number'] for k, v in documents}
+        self.node_id_to_path = {k: v.metadata["path"] for k, v in documents}
+        self.node_id_to_line_number = {
+            k: v.metadata["line_number"] for k, v in documents
+        }
 
-    def get_document_nodes(self, node_ids: list[str] | str) -> list[TextNode] | TextNode | None:
+    def get_document_nodes(
+        self, node_ids: list[str] | str
+    ) -> list[TextNode] | TextNode | None:
         """Retrieves document nodes by their IDs.
-        
+
         Args:
             node_ids: Single node ID or list of node IDs.
-            
+
         Returns:
             List of nodes if input is a list, single node or None otherwise.
         """
@@ -108,9 +137,11 @@ class KnowledgeGraphIndexer:
 
         return next(iter(nodes), None)
 
-    def remove_document_nodes(self, nodes_to_remove_labels: list[str], node_label_to_node_id: dict[str, str]) -> None:
+    def remove_document_nodes(
+        self, nodes_to_remove_labels: list[str], node_label_to_node_id: dict[str, str]
+    ) -> None:
         """Removes document nodes and updates their parent relationships.
-        
+
         Args:
             nodes_to_remove_labels: Labels of nodes to remove.
             node_label_to_node_id: Mapping from node labels to node IDs.
@@ -135,21 +166,23 @@ class KnowledgeGraphIndexer:
         if nodes_to_remove:
             self.index.property_graph_store.delete_llama_nodes(nodes_to_remove)
         if parents_updated:
-            self.index.property_graph_store.upsert_llama_nodes(list(parents_updated.values()))
+            self.index.property_graph_store.upsert_llama_nodes(
+                list(parents_updated.values())
+            )
 
     def update_document_child_nodes(
-            self,
-            node: TextNode,
-            child_ids_to_add: Optional[list[str]] = None,
-            child_ids_to_remove: Optional[list[str]] = None
+        self,
+        node: TextNode,
+        child_ids_to_add: list[str] | None = None,
+        child_ids_to_remove: list[str] | None = None,
     ) -> TextNode:
         """Updates child node relationships for a given node.
-        
+
         Args:
             node: Parent node to update.
             child_ids_to_add: Child node IDs to add.
             child_ids_to_remove: Child node IDs to remove.
-            
+
         Returns:
             Updated node with modified child relationships.
         """
@@ -166,7 +199,11 @@ class KnowledgeGraphIndexer:
             for child_id_to_add in child_ids_to_add:
                 related_info = RelatedNodeInfo(
                     node_id=child_id_to_add,
-                    metadata={"title": self.get_document_nodes(child_id_to_add).metadata["original_text"]}
+                    metadata={
+                        "title": self.get_document_nodes(child_id_to_add).metadata[
+                            "original_text"
+                        ]
+                    },
                 )
                 child_nodes.append(related_info)
             node.relationships[NodeRelationship.CHILD] = child_nodes
@@ -174,10 +211,13 @@ class KnowledgeGraphIndexer:
         if child_ids_to_remove:
             if "child_ids" in node.metadata:
                 node.metadata["child_ids"] = [
-                    child_id for child_id in node.metadata["child_ids"] if child_id not in child_ids_to_remove
+                    child_id
+                    for child_id in node.metadata["child_ids"]
+                    if child_id not in child_ids_to_remove
                 ]
                 node.relationships[NodeRelationship.CHILD] = [
-                    child for child in node.relationships[NodeRelationship.CHILD]
+                    child
+                    for child in node.relationships[NodeRelationship.CHILD]
                     if child.node_id not in child_ids_to_remove
                 ]
 
@@ -186,27 +226,27 @@ class KnowledgeGraphIndexer:
     @staticmethod
     def get_subtree_label(node_label: str) -> str:
         """Extracts subtree identifier from node label.
-        
+
         Args:
             node_label: Node label in format 'subtree_X_leaf_Y'.
-            
+
         Returns:
             Subtree identifier.
         """
         return node_label.split("_")[1]
 
     def merge_multiple_subtrees(
-            self,
-            merge_combination: list[str],
-            first_node_id: str,
-            first_node_parent: TextNode,
-            nodes_to_remove: list[str],
-            node_labels_to_update: dict[str, str],
-            node_label_to_node_id: dict[str, str],
-            nodes_to_update: list[TextNode]
+        self,
+        merge_combination: list[str],
+        first_node_id: str,
+        first_node_parent: TextNode,
+        nodes_to_remove: list[str],
+        node_labels_to_update: dict[str, str],
+        node_label_to_node_id: dict[str, str],
+        nodes_to_update: list[TextNode],
     ) -> tuple[TextNode, list[str], dict[str, str], list[TextNode]]:
         """Merges multiple subtrees into a single node.
-        
+
         Args:
             merge_combination: List of node labels to merge.
             first_node_id: ID of the first node in the merge.
@@ -215,13 +255,17 @@ class KnowledgeGraphIndexer:
             node_labels_to_update: Mapping of old to new node IDs.
             node_label_to_node_id: Mapping from labels to node IDs.
             nodes_to_update: Accumulator for nodes to update.
-            
+
         Returns:
             Tuple of (updated parent node, nodes to remove, label updates, nodes to update).
         """
         # We merge all subtrees (both parents and childs) into one node (parent of the first leaf node)
         current_subtree_label = self.get_subtree_label(merge_combination[0])
-        merged_text = self.node_id_to_path[first_node_id][-1] + "\n" + self.node_id_to_text[first_node_id]
+        merged_text = (
+            self.node_id_to_path[first_node_id][-1]
+            + "\n"
+            + self.node_id_to_text[first_node_id]
+        )
         nodes_to_remove.append(first_node_id)
         node_labels_to_update[first_node_id] = first_node_parent.node_id
         parents_to_remove = set()
@@ -242,7 +286,9 @@ class KnowledgeGraphIndexer:
             if subtree_label == current_subtree_label:
                 merged_text += node_text
             else:
-                merged_text += " > ".join(self.node_id_to_path[node_id]) + "\n" + node_text
+                merged_text += (
+                    " > ".join(self.node_id_to_path[node_id]) + "\n" + node_text
+                )
                 current_subtree_label = subtree_label
 
         # Remove all child nodes, all their texts are already gathered in merged_text
@@ -253,7 +299,9 @@ class KnowledgeGraphIndexer:
         grand_parents_updated = {}
 
         for parent_to_remove in parents_to_remove:
-            grand_parent_id = self.get_document_nodes(parent_to_remove).parent_node.node_id
+            grand_parent_id = self.get_document_nodes(
+                parent_to_remove
+            ).parent_node.node_id
             if grand_parent_id in grand_parents_updated:
                 grand_parent = grand_parents_updated[grand_parent_id]
             else:
@@ -267,20 +315,25 @@ class KnowledgeGraphIndexer:
             node_labels_to_update[parent_to_remove] = first_node_parent.node_id
         nodes_to_update.extend(list(grand_parents_updated.values()))
 
-        return first_node_parent, nodes_to_remove, node_labels_to_update, nodes_to_update
+        return (
+            first_node_parent,
+            nodes_to_remove,
+            node_labels_to_update,
+            nodes_to_update,
+        )
 
     def merge_subtree(
-            self,
-            merge_combination: list[str],
-            first_node: TextNode,
-            first_node_parent: TextNode,
-            nodes_to_remove: list[str],
-            node_labels_to_update: dict[str, str],
-            node_label_to_node_id: dict[str, str],
-            nodes_to_update: list[TextNode]
+        self,
+        merge_combination: list[str],
+        first_node: TextNode,
+        first_node_parent: TextNode,
+        nodes_to_remove: list[str],
+        node_labels_to_update: dict[str, str],
+        node_label_to_node_id: dict[str, str],
+        nodes_to_update: list[TextNode],
     ) -> tuple[TextNode, TextNode, dict[str, str], list[TextNode]]:
         """Merges nodes within a single subtree.
-        
+
         Args:
             merge_combination: List of node labels to merge.
             first_node: First node to merge into.
@@ -289,7 +342,7 @@ class KnowledgeGraphIndexer:
             node_labels_to_update: Mapping of old to new node IDs.
             node_label_to_node_id: Mapping from labels to node IDs.
             nodes_to_update: Accumulator for nodes to update.
-            
+
         Returns:
             Tuple of (merged node, parent node, label updates, nodes to update).
         """
@@ -308,21 +361,23 @@ class KnowledgeGraphIndexer:
 
         first_node.text = merged_text
         nodes_to_update.append(first_node)
-        first_node_parent = self.update_document_child_nodes(first_node_parent, child_ids_to_remove=nodes_to_remove)
+        first_node_parent = self.update_document_child_nodes(
+            first_node_parent, child_ids_to_remove=nodes_to_remove
+        )
         nodes_to_update.append(first_node_parent)
         return first_node, first_node_parent, node_labels_to_update, nodes_to_update
 
     def merge_nodes(
-            self,
-            nodes_to_merge_labels: list[list[str]],
-            node_label_to_node_id: dict[str, str]
+        self,
+        nodes_to_merge_labels: list[list[str]],
+        node_label_to_node_id: dict[str, str],
     ) -> dict[str, str]:
         """Merges multiple node groups based on LLM recommendations.
-        
+
         Args:
             nodes_to_merge_labels: List of node label groups to merge.
             node_label_to_node_id: Mapping from labels to node IDs.
-            
+
         Returns:
             Updated node label to node ID mapping.
         """
@@ -338,14 +393,34 @@ class KnowledgeGraphIndexer:
             first_node_parent = self.get_document_nodes(first_node.parent_node.node_id)
 
             if len(unique_subtrees) > 1:
-                first_node_parent, nodes_to_remove, node_labels_to_update, nodes_to_update = self.merge_multiple_subtrees(
-                    merge_combination, first_node_id, first_node_parent, nodes_to_remove, node_labels_to_update,
-                    node_label_to_node_id, nodes_to_update
+                (
+                    first_node_parent,
+                    nodes_to_remove,
+                    node_labels_to_update,
+                    nodes_to_update,
+                ) = self.merge_multiple_subtrees(
+                    merge_combination,
+                    first_node_id,
+                    first_node_parent,
+                    nodes_to_remove,
+                    node_labels_to_update,
+                    node_label_to_node_id,
+                    nodes_to_update,
                 )
             else:
-                first_node, first_node_parent, node_labels_to_update, nodes_to_update = self.merge_subtree(
-                    merge_combination, first_node, first_node_parent, nodes_to_remove, node_labels_to_update,
-                    node_label_to_node_id, nodes_to_update
+                (
+                    first_node,
+                    first_node_parent,
+                    node_labels_to_update,
+                    nodes_to_update,
+                ) = self.merge_subtree(
+                    merge_combination,
+                    first_node,
+                    first_node_parent,
+                    nodes_to_remove,
+                    node_labels_to_update,
+                    node_label_to_node_id,
+                    nodes_to_update,
                 )
 
         if nodes_to_remove:
@@ -361,9 +436,11 @@ class KnowledgeGraphIndexer:
 
         return node_label_to_node_id
 
-    def update_relations(self, triplets: list[dict[str, Any]], node_label_to_node_id: dict[str, str]):
+    def update_relations(
+        self, triplets: list[dict[str, Any]], node_label_to_node_id: dict[str, str]
+    ):
         """Updates graph with entity and relation triplets.
-        
+
         Args:
             triplets: List of triplet dictionaries containing subject, predicate, object information.
             node_label_to_node_id: Mapping from labels to node IDs.
@@ -372,27 +449,41 @@ class KnowledgeGraphIndexer:
         entities, relations, nodes_to_update = [], [], []
 
         for triplet in triplets:
-            subject_source_id, object_source_id = triplet["subject_source_id"], triplet["object_source_id"]
+            subject_source_id, object_source_id = (
+                triplet["subject_source_id"],
+                triplet["object_source_id"],
+            )
             if subject_source_id == object_source_id:
-                subject_node = object_node = self.get_document_nodes(node_label_to_node_id[subject_source_id])
+                subject_node = object_node = self.get_document_nodes(
+                    node_label_to_node_id[subject_source_id]
+                )
             else:
                 results = self.get_document_nodes(
-                    [node_label_to_node_id[subject_source_id], node_label_to_node_id[object_source_id]]
+                    [
+                        node_label_to_node_id[subject_source_id],
+                        node_label_to_node_id[object_source_id],
+                    ]
                 )
                 if len(results) == 1:
                     subject_node = object_node = results[0]
                 elif len(results) == 2:
                     subject_node, object_node = results
                 else:
-                    raise ValueError(f"Unexpected nodes number returned from the Docstore ({len(results)})")
+                    raise ValueError(
+                        f"Unexpected nodes number returned from the Docstore ({len(results)})"
+                    )
 
             subject_key = (triplet["subject"], triplet["subject_type"])
             object_key = (triplet["object"], triplet["object_type"])
 
             if subject_key not in entity_map:
-                entity_map[subject_key] = CustomEntityNode(name=triplet["subject"], label=triplet["subject_type"])
+                entity_map[subject_key] = CustomEntityNode(
+                    name=triplet["subject"], label=triplet["subject_type"]
+                )
             if object_key not in entity_map:
-                entity_map[object_key] = CustomEntityNode(name=triplet["object"], label=triplet["object_type"])
+                entity_map[object_key] = CustomEntityNode(
+                    name=triplet["object"], label=triplet["object_type"]
+                )
 
             relation = Relation(
                 label=triplet["predicate"],
@@ -400,7 +491,9 @@ class KnowledgeGraphIndexer:
                 target_id=entity_map[object_key].id,
             )
 
-            for entity_type, entity_node in zip((subject_key, object_key), (subject_node, object_node)):
+            for entity_type, entity_node in zip(
+                (subject_key, object_key), (subject_node, object_node)
+            ):
                 # This is the set of rules that are necessary for the LLamaIndex structures, refer to the source code for more details
                 existing_nodes = entity_node.metadata.get(KG_NODES_KEY, [])
                 existing_relations = entity_node.metadata.get(KG_RELATIONS_KEY, [])
@@ -412,7 +505,9 @@ class KnowledgeGraphIndexer:
                     entity_node.metadata[KG_RELATIONS_KEY] = existing_relations
 
                 if TRIPLET_SOURCE_KEY not in entity_map[entity_type].properties:
-                    entity_map[entity_type].properties[TRIPLET_SOURCE_KEY] = entity_node.id_
+                    entity_map[entity_type].properties[TRIPLET_SOURCE_KEY] = (
+                        entity_node.id_
+                    )
                     relation.properties[TRIPLET_SOURCE_KEY] = entity_node.id_
 
                 nodes_to_update.append(entity_node)
@@ -430,12 +525,14 @@ class KnowledgeGraphIndexer:
         if nodes_to_update:
             self.index.property_graph_store.upsert_llama_nodes(nodes_to_update)
 
-    def get_prompt_input_from_subtrees(self, subgraph_tailing_subtrees: list[list[str]]) -> tuple[str, dict[str, str]]:
+    def get_prompt_input_from_subtrees(
+        self, subgraph_tailing_subtrees: list[list[str]]
+    ) -> tuple[str, dict[str, str]]:
         """Generates prompt input from subtree structures.
-        
+
         Args:
             subgraph_tailing_subtrees: List of subtrees containing leaf node IDs.
-            
+
         Returns:
             Tuple of (formatted prompt input, node label to ID mapping).
         """
@@ -451,9 +548,9 @@ class KnowledgeGraphIndexer:
                 node_label_to_node_id[f"subtree_{i}_leaf_{j}"] = leaf
 
             prefix = " > ".join(self.node_id_to_path[subtree[0]]) + " >"
-            gathered_leaves = '\n'.join(
-                f'leaf_{k}: (line {line_numbers[k]}) ' + f'"{text}"' for k, text in
-                texts[i].items()
+            gathered_leaves = "\n".join(
+                f"leaf_{k}: (line {line_numbers[k]}) " + f'"{text}"'
+                for k, text in texts[i].items()
             )
             subtree_text = f'subtree_{i}:\nprefix: "{prefix}"\n{gathered_leaves}\n'
             prompt_input += subtree_text
@@ -462,12 +559,12 @@ class KnowledgeGraphIndexer:
 
     def process_subgraph(self, subgraph: nx.DiGraph, model: Ollama, prompt: str) -> int:
         """Processes a single subgraph to extract entities and relations.
-        
+
         Args:
             subgraph: NetworkX directed graph representing document structure.
             model: LLM for processing.
             prompt: Template prompt for the LLM.
-            
+
         Returns:
             Total tokens used in processing.
         """
@@ -480,11 +577,17 @@ class KnowledgeGraphIndexer:
                 continue
 
             parents = list(subgraph.predecessors(leaf))
-            assert len(parents) == 1, f"Unexpected relation: one node has multiple parents (node {leaf})"
+            assert len(parents) == 1, (
+                f"Unexpected relation: one node has multiple parents (node {leaf})"
+            )
 
             # Find subtree that contains current leaf parent and its other leaves
             subtree = subgraph.successors(parents[0])
-            subtree = [x for x in sorted(subtree, key=lambda y: self.node_id_to_line_number[y]) if x in leaves]
+            subtree = [
+                x
+                for x in sorted(subtree, key=lambda y: self.node_id_to_line_number[y])
+                if x in leaves
+            ]
             checked_leaves.update(subtree)
             subgraph_tailing_subtrees.append(subtree)
 
@@ -492,12 +595,16 @@ class KnowledgeGraphIndexer:
             """Gets minimum line number from subtree nodes."""
             return min(self.node_id_to_line_number[node_id] for node_id in subtree)
 
-        subgraph_tailing_subtrees = sorted(subgraph_tailing_subtrees, key=get_min_line_number)
-        prompt_input, node_label_to_node_id = self.get_prompt_input_from_subtrees(subgraph_tailing_subtrees)
+        subgraph_tailing_subtrees = sorted(
+            subgraph_tailing_subtrees, key=get_min_line_number
+        )
+        prompt_input, node_label_to_node_id = self.get_prompt_input_from_subtrees(
+            subgraph_tailing_subtrees
+        )
         prompt_filled = prompt.format(
             text=prompt_input,
             allowed_entity_types=[x.value for x in KnowledgeGraphEntity],
-            allowed_relation_types=[x.value for x in KnowledgeGraphRelation]
+            allowed_relation_types=[x.value for x in KnowledgeGraphRelation],
         )
 
         if self.tokenizer is not None and self.test_setup:
@@ -506,7 +613,7 @@ class KnowledgeGraphIndexer:
                 return 0
 
         model_output = model.complete(prompt_filled)
-        usage = model_output.raw.get('usage', {})
+        usage = model_output.raw.get("usage", {})
         if not model_output:
             return 0
         try:
@@ -514,21 +621,25 @@ class KnowledgeGraphIndexer:
         except json.decoder.JSONDecodeError:
             return 0
 
-        self.remove_document_nodes(structured_output['to_remove'], node_label_to_node_id)
-        node_label_to_node_id = self.merge_nodes(
-            structured_output['to_merge'], node_label_to_node_id
+        self.remove_document_nodes(
+            structured_output["to_remove"], node_label_to_node_id
         )
-        self.update_relations(structured_output['triplets'], node_label_to_node_id)
+        node_label_to_node_id = self.merge_nodes(
+            structured_output["to_merge"], node_label_to_node_id
+        )
+        self.update_relations(structured_output["triplets"], node_label_to_node_id)
 
-        return usage.get('total_tokens', 0)
+        return usage.get("total_tokens", 0)
 
-    def generate_nx_graph_from(self, nodes: list[str], relation_triplets: list[tuple[str, str, str]]) -> nx.DiGraph:
+    def generate_nx_graph_from(
+        self, nodes: list[str], relation_triplets: list[tuple[str, str, str]]
+    ) -> nx.DiGraph:
         """Generates NetworkX graph from nodes and relation triplets.
-        
+
         Args:
             nodes: List of node IDs.
             relation_triplets: List of (source, relation, target) tuples.
-            
+
         Returns:
             NetworkX directed graph.
         """
@@ -537,8 +648,15 @@ class KnowledgeGraphIndexer:
         graph = networkx.DiGraph()
 
         nodes_to_add, edges_to_add = [], []
-        all_unique_node_ids = set((nodes + list(chain(*[(node_1, node_2) for node_1, _, node_2 in relation_triplets]))))
-        all_unique_nodes = self.index.property_graph_store.get(ids=list(all_unique_node_ids))
+        all_unique_node_ids = set(
+            nodes
+            + list(
+                chain(*[(node_1, node_2) for node_1, _, node_2 in relation_triplets])
+            )
+        )
+        all_unique_nodes = self.index.property_graph_store.get(
+            ids=list(all_unique_node_ids)
+        )
 
         def _chunk_label(text: str) -> str:
             """Extracts a readable label from a ChunkNode's raw text."""
@@ -553,23 +671,25 @@ class KnowledgeGraphIndexer:
 
         for node in all_unique_nodes:
             if isinstance(node, EntityNode):
-                name = node.properties.get('entity_name', node.name)
+                name = node.properties.get("entity_name", node.name)
                 label = node.label
                 node_id_to_text[node.id] = name
-                node_id_to_hover[node.id] = f"{name} [{label}]" if label and label.lower() != "entity" else name
+                node_id_to_hover[node.id] = (
+                    f"{name} [{label}]" if label and label.lower() != "entity" else name
+                )
             elif isinstance(node, ChunkNode):
                 text = _chunk_label(node.text)
                 node_id_to_text[node.id] = text
                 node_id_to_hover[node.id] = text
 
-        _label_suffix_re = re.compile(r'\s*\(Label:[^)]*\)\s*$')
+        _label_suffix_re = re.compile(r"\s*\(Label:[^)]*\)\s*$")
 
         for node_id in all_unique_node_ids:
             if node_id in node_id_to_text:
                 text = node_id_to_text[node_id]
                 hover = node_id_to_hover[node_id]
             else:
-                text = _label_suffix_re.sub('', str(node_id)).strip()
+                text = _label_suffix_re.sub("", str(node_id)).strip()
                 hover = text
             nodes_to_add.append((node_id, dict(text=text, hover=hover)))
 
@@ -588,9 +708,10 @@ class KnowledgeGraphIndexer:
         return text[: max_len - 1] + "…"
 
     def get_graph_visualization(
-            self, nodes: list[str],
-            relation_triplets: list[tuple[str, str, str]],
-            title: str | None = None
+        self,
+        nodes: list[str],
+        relation_triplets: list[tuple[str, str, str]],
+        title: str | None = None,
     ) -> go.Figure:
         """Generates interactive Plotly visualization of the knowledge graph.
 
@@ -605,13 +726,20 @@ class KnowledgeGraphIndexer:
         graph = self.generate_nx_graph_from(nodes, relation_triplets)
         networkx = require_dependency(nx, NETWORKX_REQUIRED_ERROR)
 
-        pos = networkx.spring_layout(graph, k=SPRING_LAYOUT_K, iterations=SPRING_LAYOUT_ITERATIONS)
+        pos = networkx.spring_layout(
+            graph, k=SPRING_LAYOUT_K, iterations=SPRING_LAYOUT_ITERATIONS
+        )
         pos = {n: (float(x), float(y)) for n, (x, y) in pos.items()}
 
-        node_id_to_full_text = {node_id: text for node_id, text in graph.nodes(data="text")}
-        node_id_to_hover_text = {node_id: hover for node_id, hover in graph.nodes(data="hover")}
+        node_id_to_full_text = {
+            node_id: text for node_id, text in graph.nodes(data="text")
+        }
+        node_id_to_hover_text = {
+            node_id: hover for node_id, hover in graph.nodes(data="hover")
+        }
         node_id_to_short_text = {
-            node_id: self._truncate_graph_label(text) for node_id, text in node_id_to_full_text.items()
+            node_id: self._truncate_graph_label(text)
+            for node_id, text in node_id_to_full_text.items()
         }
 
         degrees = dict(graph.degree())
@@ -632,38 +760,51 @@ class KnowledgeGraphIndexer:
             edge_label_y.append(mid_y)
 
             relation = data.get("relation", "RELATES_TO")
-            rel_display = {"CHILD": "HAS CHILD", "PARENT": "HAS PARENT"}.get(relation, relation)
+            rel_display = {"CHILD": "HAS CHILD", "PARENT": "HAS PARENT"}.get(
+                relation, relation
+            )
             # Hover text for edges
             edge_label_text.append(
-                node_id_to_short_text.get(u, u) + " → " + rel_display + " → " + node_id_to_short_text.get(v, v)
+                node_id_to_short_text.get(u, u)
+                + " → "
+                + rel_display
+                + " → "
+                + node_id_to_short_text.get(v, v)
             )
 
             # Arrow pointing toward target node
-            annotations.append(dict(
-                x=x1, y=y1,
-                ax=x0, ay=y0,
-                xref="x", yref="y",
-                axref="x", ayref="y",
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=1.2,
-                arrowwidth=1,
-                arrowcolor="#555",
-                opacity=0.6,
-            ))
+            annotations.append(
+                dict(
+                    x=x1,
+                    y=y1,
+                    ax=x0,
+                    ay=y0,
+                    xref="x",
+                    yref="y",
+                    axref="x",
+                    ayref="y",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1.2,
+                    arrowwidth=1,
+                    arrowcolor="#555",
+                    opacity=0.6,
+                )
+            )
 
         edge_trace = go.Scatter(
             x=edge_x,
             y=edge_y,
-            line=dict(width=0.5, color='#888'),
-            hoverinfo='none',
-            mode='lines',
+            line=dict(width=0.5, color="#888"),
+            hoverinfo="none",
+            mode="lines",
         )
         edge_hover_trace = go.Scatter(
-            x=edge_label_x, y=edge_label_y,
+            x=edge_label_x,
+            y=edge_label_y,
             mode="markers",
             marker=dict(size=8, opacity=0),
-            hoverinfo='text',
+            hoverinfo="text",
             hovertext=edge_label_text,
         )
 
@@ -673,16 +814,21 @@ class KnowledgeGraphIndexer:
             node_x.append(x)
             node_y.append(y)
             node_labels.append(node_id_to_short_text.get(node, str(node)))
-            node_hovertext.append(node_id_to_hover_text.get(node, node_id_to_short_text.get(node, str(node))))
+            node_hovertext.append(
+                node_id_to_hover_text.get(
+                    node, node_id_to_short_text.get(node, str(node))
+                )
+            )
             node_degrees.append(degrees.get(node, 1))
 
         node_trace = go.Scatter(
-            x=node_x, y=node_y,
-            mode='markers+text',
+            x=node_x,
+            y=node_y,
+            mode="markers+text",
             textposition="top center",
             text=node_labels,
             hovertext=node_hovertext,
-            hoverinfo='text',
+            hoverinfo="text",
             hoverlabel=dict(
                 bgcolor="#1f2c34",
                 bordercolor="#00a884",
@@ -690,16 +836,21 @@ class KnowledgeGraphIndexer:
             ),
             marker=dict(
                 showscale=True,
-                colorscale=[[0, "#1f2c34"], [0.25, "#0ea5e9"], [0.6, "#00a884"], [1.0, "#a855f7"]],
+                colorscale=[
+                    [0, "#1f2c34"],
+                    [0.25, "#0ea5e9"],
+                    [0.6, "#00a884"],
+                    [1.0, "#a855f7"],
+                ],
                 size=15,
                 color=node_degrees,
                 colorbar=dict(
                     thickness=12,
-                    title=dict(text='Degree', side='right', font=dict(color='#8696a0')),
-                    tickfont=dict(color='#8696a0'),
-                    xanchor='left',
+                    title=dict(text="Degree", side="right", font=dict(color="#8696a0")),
+                    tickfont=dict(color="#8696a0"),
+                    xanchor="left",
                 ),
-                line=dict(width=1.5, color='#0b141a'),
+                line=dict(width=1.5, color="#0b141a"),
             ),
         )
 
@@ -714,9 +865,11 @@ class KnowledgeGraphIndexer:
                     y=1,
                     yanchor="top",
                     pad=dict(t=10, l=26),
-                ) if title else None,
+                )
+                if title
+                else None,
                 showlegend=False,
-                hovermode='closest',
+                hovermode="closest",
                 margin=dict(b=20, l=60, r=60, t=52 if title else 40),
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
@@ -727,7 +880,7 @@ class KnowledgeGraphIndexer:
                     bordercolor="#2a3942",
                     font=dict(size=12, color="#e9edef"),
                 ),
-            )
+            ),
         )
 
         return fig
@@ -757,7 +910,8 @@ class KnowledgeGraphIndexer:
 
         nodes = list(self.index.property_graph_store.graph.nodes.keys())
         edges = [
-            (x.source_id, x.target_id) for k, x in self.index.property_graph_store.graph.relations.items()
+            (x.source_id, x.target_id)
+            for k, x in self.index.property_graph_store.graph.relations.items()
             if x.id == "CHILD"
         ]
 
@@ -767,7 +921,10 @@ class KnowledgeGraphIndexer:
         graph.remove_nodes_from(list(networkx.isolates(graph)))
 
         # Get all connected subgraphs
-        subgraphs = [graph.subgraph(c).copy() for c in networkx.weakly_connected_components(graph)]
+        subgraphs = [
+            graph.subgraph(c).copy()
+            for c in networkx.weakly_connected_components(graph)
+        ]
 
         total_tokens = 0
         pbar = tqdm(subgraphs, desc="Subgraphs processing")
@@ -780,12 +937,16 @@ class KnowledgeGraphIndexer:
                 logger.error(f"Error processing subgraph: {e}", exc_info=True)
 
         if self.document_storage_type == StorageType.local:
-            self.index.storage_context.persist(persist_dir=str(self.path_settings.local_storage_dir))
+            self.index.storage_context.persist(
+                persist_dir=str(self.path_settings.local_storage_dir)
+            )
 
     def get_embeddings(self):
         """Generates and stores embeddings for document nodes and graph entities."""
         if self.index.vector_store is None:
-            raise ValueError("index.vector_store is None. Ensure Vector Store is properly attached to the index.")
+            raise ValueError(
+                "index.vector_store is None. Ensure Vector Store is properly attached to the index."
+            )
 
         # Check if vector store already has embeddings
         if isinstance(self.index.vector_store, SimpleVectorStore):
@@ -806,26 +967,45 @@ class KnowledgeGraphIndexer:
             except Exception:
                 pass
         else:
-            raise ValueError(f"Unexpected Vector Store type: {type(self.index.vector_store)}")
+            raise ValueError(
+                f"Unexpected Vector Store type: {type(self.index.vector_store)}"
+            )
 
         self.index.vector_store.stores_text = True
         document_ids = list(self.index.storage_context.docstore.docs.keys())
         documents = self.get_document_nodes(document_ids)
         documents = [document for document in documents if document.embedding is None]
-        graph_entities = [x for x in self.index.property_graph_store.get() if isinstance(x, EntityNode)]
-        document_texts = [node.get_content(metadata_mode=MetadataMode.EMBED) for node in documents]
-        graph_entity_texts = [x.properties.get("entity_name", str(x)) for x in graph_entities]
+        graph_entities = [
+            x
+            for x in self.index.property_graph_store.get()
+            if isinstance(x, EntityNode)
+        ]
+        document_texts = [
+            node.get_content(metadata_mode=MetadataMode.EMBED) for node in documents
+        ]
+        graph_entity_texts = [
+            x.properties.get("entity_name", str(x)) for x in graph_entities
+        ]
         nodes_to_update = []
 
-        embeddings = self.embedder.get_text_embedding_batch(document_texts, show_progress=True)
-        for node, embedding in tqdm(zip(documents, embeddings), desc="Getting embeddings for llama nodes"):
+        embeddings = self.embedder.get_text_embedding_batch(
+            document_texts, show_progress=True
+        )
+        for node, embedding in tqdm(
+            zip(documents, embeddings), desc="Getting embeddings for llama nodes"
+        ):
             node.embedding = embedding
             node = make_json_serializable(node, "metadata")
             nodes_to_update.append(node)
 
-        embeddings = self.embedder.get_text_embedding_batch(graph_entity_texts, show_progress=True)
+        embeddings = self.embedder.get_text_embedding_batch(
+            graph_entity_texts, show_progress=True
+        )
 
-        for node, embedding in tqdm(zip(graph_entities, embeddings), desc="Getting embeddings for graph entities"):
+        for node, embedding in tqdm(
+            zip(graph_entities, embeddings),
+            desc="Getting embeddings for graph entities",
+        ):
             node = make_json_serializable(node, "properties")
             entity_text = node.properties.get("entity_name", str(node))
             nodes_to_update.append(
@@ -840,16 +1020,18 @@ class KnowledgeGraphIndexer:
         self.index.vector_store.add(nodes_to_update)
 
         if self.document_storage_type == StorageType.local:
-            self.index.storage_context.persist(persist_dir=str(self.path_settings.local_storage_dir))
+            self.index.storage_context.persist(
+                persist_dir=str(self.path_settings.local_storage_dir)
+            )
 
     def build_index(
-            self,
-            documents: Optional[list[TextNode]] = None,
-            llm: Optional[dict[str, Any]] = None,
-            graph_index_prompt: Optional[str] = None
+        self,
+        documents: list[TextNode] | None = None,
+        llm: dict[str, Any] | None = None,
+        graph_index_prompt: str | None = None,
     ) -> None:
         """Builds a new PropertyGraphIndex from documents.
-        
+
         Args:
             documents: List of document nodes to index. If None, uses documents from storage context.
             llm: LLM configuration parameters.
@@ -859,13 +1041,17 @@ class KnowledgeGraphIndexer:
 
         if documents is None:
             documents = list(self.storage_context.docstore.docs.values())
-            assert documents, "The documents are not provided and not found in Storage Context's docstore."
+            assert documents, (
+                "The documents are not provided and not found in Storage Context's docstore."
+            )
 
         model = Ollama(**llm, json_mode=True)
         # First path extractor that generates graph based on PARENT/CHILD relations in the documents
         implicit_extractor = ImplicitPathExtractor()
         if self.test_setup:
-            documents = [node for node in documents if node.metadata['source'] in TEST_SOURCES]
+            documents = [
+                node for node in documents if node.metadata["source"] in TEST_SOURCES
+            ]
             assert len(documents) < MAX_DOCUMENTS_TO_INDEX
 
         logger.info("Start building Property Graph Index...")
@@ -880,9 +1066,12 @@ class KnowledgeGraphIndexer:
             show_progress=True,
             embed_kg_nodes=False,
         )
-        if self.index.vector_store is None and self.storage_context.vector_store is not None:
+        if (
+            self.index.vector_store is None
+            and self.storage_context.vector_store is not None
+        ):
             # Some LlamaIndex versions expose index.vector_store only when _embed_kg_nodes is true.
-            setattr(self.index, "_embed_kg_nodes", True)
+            self.index._embed_kg_nodes = True
 
         # Here is the more intelligent processing that uses LLM on a limited number of generated graph nodes.
         self.process_implicit_graph(model, graph_index_prompt)
@@ -895,8 +1084,11 @@ class KnowledgeGraphIndexer:
         implicit_extractor = ImplicitPathExtractor()
         logger.info("Start loading Property Graph Index...")
         self.index = load_index_from_storage(
-            self.storage_context, kg_extractors=[implicit_extractor], embed_model=self.embedder, use_async=False,
-            vector_store=self.storage_context.vector_store
+            self.storage_context,
+            kg_extractors=[implicit_extractor],
+            embed_model=self.embedder,
+            use_async=False,
+            vector_store=self.storage_context.vector_store,
         )
         logger.info("Property Graph Index loaded")
         if os.environ.get("ENV") == "DEV":
@@ -928,9 +1120,15 @@ class KnowledgeGraphIndexer:
 
         if retriever_params.get("VectorIndexRetriever"):
             # Vector search only
-            nodes_with_embs = self.get_document_nodes(list(self.index.storage_context.docstore.docs.keys()))
-            vector_index = VectorStoreIndex(nodes=nodes_with_embs, embed_model=self.embedder)
-            vector_retriever = vector_index.as_retriever(**retriever_params.get("VectorIndexRetriever"))
+            nodes_with_embs = self.get_document_nodes(
+                list(self.index.storage_context.docstore.docs.keys())
+            )
+            vector_index = VectorStoreIndex(
+                nodes=nodes_with_embs, embed_model=self.embedder
+            )
+            vector_retriever = vector_index.as_retriever(
+                **retriever_params.get("VectorIndexRetriever")
+            )
             sub_retrievers.append(vector_retriever)
         if retriever_params.get("VectorContextRetriever"):
             # Vector search + Graph traversal on the results (returns only triplets)
@@ -940,18 +1138,22 @@ class KnowledgeGraphIndexer:
                 graph_store=self.index.property_graph_store,
                 vector_store=self.index.vector_store,
                 embed_model=self.embedder,
-                **retriever_params.get("VectorContextRetriever")
+                **retriever_params.get("VectorContextRetriever"),
             )
             sub_retrievers.append(context_retriever)
 
-        return self.index.as_retriever(sub_retrievers=sub_retrievers, **retriever_params)
+        return self.index.as_retriever(
+            sub_retrievers=sub_retrievers, **retriever_params
+        )
 
-    def get_query_engine(self, query_engine_params: Optional[dict[str, Any]] = None) -> Any:
+    def get_query_engine(
+        self, query_engine_params: dict[str, Any] | None = None
+    ) -> Any:
         """Gets query engine for the knowledge graph.
-        
+
         Args:
             query_engine_params: Optional parameters for query engine configuration.
-            
+
         Returns:
             Query engine instance.
         """
@@ -959,7 +1161,7 @@ class KnowledgeGraphIndexer:
         return self.index.as_query_engine(**query_engine_params)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     ...
     """
     import argparse

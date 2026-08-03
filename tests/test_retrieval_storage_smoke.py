@@ -1,6 +1,6 @@
-import unittest
-import re
 import os
+import re
+import unittest
 from pathlib import Path
 
 try:
@@ -18,12 +18,20 @@ from backend.configs.storage import LocalStorageSettings, StorageSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
 from backend.workflows.agents.analyst_retrieval import AnalystRetrievalPipeline
-from backend.workflows.agents.tools import get_subgraphs_to_visualize, search_knowledge_base
+from backend.workflows.agents.tools import (
+    get_subgraphs_to_visualize,
+    search_knowledge_base,
+)
 from backend.workflows.agents.visualizer_retrieval import VisualizerRetrievalPipeline
 
-
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RUN_ROOT = ROOT / "data" / "testing" / "final_retrieval_optimization_v7_split_prompts" / "optimized_pipeline_run"
+CURRENT_RUN_ROOT = (
+    ROOT
+    / "data"
+    / "testing"
+    / "final_retrieval_optimization_v7_split_prompts"
+    / "optimized_pipeline_run"
+)
 LEGACY_RUN_ROOT = ROOT / "data" / "testing" / "final" / "optimized_pipeline_run"
 
 
@@ -51,18 +59,24 @@ class IdentityReranker:
         return nodes
 
 
-@unittest.skipUnless(LLAMA_INDEX_AVAILABLE, "llama_index HuggingFace embeddings are not installed")
+@unittest.skipUnless(
+    LLAMA_INDEX_AVAILABLE, "llama_index HuggingFace embeddings are not installed"
+)
 class RetrievalStorageSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if not FINAL_STORAGE_DIR.exists():
-            raise unittest.SkipTest(f"final storage directory not found: {FINAL_STORAGE_DIR}")
+            raise unittest.SkipTest(
+                f"final storage directory not found: {FINAL_STORAGE_DIR}"
+            )
 
         embedder_path = Path(ModelSettings().embedder.model_path)
         if not embedder_path.exists():
             embedder_path = FALLBACK_EMBEDDER_DIR
         if not embedder_path.exists():
-            raise unittest.SkipTest(f"local embedder directory not found: {embedder_path}")
+            raise unittest.SkipTest(
+                f"local embedder directory not found: {embedder_path}"
+            )
 
         path_settings = PathSettings(
             raw_data_dir=RAW_DATA_DIR,
@@ -71,7 +85,9 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
             parsed_texts_dir=PARSED_TEXTS_DIR,
             local_storage_dir=FINAL_STORAGE_DIR,
         )
-        local_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir)
+        local_storage = LocalStorageSettings(
+            storage_path=path_settings.local_storage_dir
+        )
         storage_settings = StorageSettings(
             document_storage=local_storage,
             index_storage=local_storage,
@@ -85,7 +101,9 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
             embed_batch_size=5,
             local_files_only=True,
         )
-        kg_search_settings = KnowledgeGraphSearchSettings(analyst_reranker_mode="disabled")
+        kg_search_settings = KnowledgeGraphSearchSettings(
+            analyst_reranker_mode="disabled"
+        )
         cls.indexer = KnowledgeGraphIndexer(
             kg_storage.storage_context,
             path_settings,
@@ -98,9 +116,13 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
 
     def assert_analyst_output_invariants(self, output: str) -> None:
         self.assertNotIn("-> MENTIONS ->", output)
-        self.assertLessEqual(len(output), self.indexer.kg_search_settings.analyst_context_max_chars)
+        self.assertLessEqual(
+            len(output), self.indexer.kg_search_settings.analyst_context_max_chars
+        )
 
-        source_ids = set(re.findall(r"^\[SOURCE\] \[(S\d+)\]", output, flags=re.MULTILINE))
+        source_ids = set(
+            re.findall(r"^\[SOURCE\] \[(S\d+)\]", output, flags=re.MULTILINE)
+        )
         for line in output.splitlines():
             if line.startswith("[SOURCE PATH]"):
                 self.assertNotIn("external:", line)
@@ -121,7 +143,11 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
         labels = set()
         for node in nodes:
             properties = getattr(node, "properties", {}) or {}
-            label = properties.get("entity_name") or properties.get("display_name") or getattr(node, "name", None)
+            label = (
+                properties.get("entity_name")
+                or properties.get("display_name")
+                or getattr(node, "name", None)
+            )
             if label:
                 labels.add(str(label))
         return labels
@@ -133,16 +159,24 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
     ) -> None:
         denied = set(self.indexer.kg_search_settings.visualizer_denied_relation_labels)
         self.assertTrue(nodes or triplets)
-        self.assertLessEqual(len(nodes), self.indexer.kg_search_settings.visualizer_max_nodes)
-        self.assertLessEqual(len(triplets), self.indexer.kg_search_settings.visualizer_max_edges)
+        self.assertLessEqual(
+            len(nodes), self.indexer.kg_search_settings.visualizer_max_nodes
+        )
+        self.assertLessEqual(
+            len(triplets), self.indexer.kg_search_settings.visualizer_max_edges
+        )
         self.assertTrue(all(len(triplet) == 3 for triplet in triplets))
         self.assertFalse(any(triplet[1] in denied for triplet in triplets))
         self.assertFalse(any(str(node_id).startswith("chunk_") for node_id in nodes))
 
     def test_search_tool_runs_against_optimized_final_storage(self) -> None:
-        tool = search_knowledge_base(analyst_pipeline=AnalystRetrievalPipeline(self.indexer))
+        tool = search_knowledge_base(
+            analyst_pipeline=AnalystRetrievalPipeline(self.indexer)
+        )
 
-        output = tool.invoke({"queries": ["Text Classification", "Naive Bayes classifier"]})
+        output = tool.invoke(
+            {"queries": ["Text Classification", "Naive Bayes classifier"]}
+        )
 
         self.assertIn("RETRIEVER RESULTS", output)
         self.assertIn("[SOURCE]", output)
@@ -150,7 +184,9 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
         self.assert_analyst_output_invariants(output)
 
     def test_search_tool_prioritizes_dataset_chunk(self) -> None:
-        tool = search_knowledge_base(analyst_pipeline=AnalystRetrievalPipeline(self.indexer))
+        tool = search_knowledge_base(
+            analyst_pipeline=AnalystRetrievalPipeline(self.indexer)
+        )
 
         output = tool.invoke({"queries": ["text classification datasets"]})
 
@@ -162,17 +198,28 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
             self.assertLess(dataset_index, logistic_index)
         self.assert_analyst_output_invariants(output)
 
-    def test_search_tool_returns_clip_objective_without_text_classification_noise(self) -> None:
-        tool = search_knowledge_base(analyst_pipeline=AnalystRetrievalPipeline(self.indexer))
+    def test_search_tool_returns_clip_objective_without_text_classification_noise(
+        self,
+    ) -> None:
+        tool = search_knowledge_base(
+            analyst_pipeline=AnalystRetrievalPipeline(self.indexer)
+        )
 
         output = tool.invoke({"queries": ["CLIP training objective"]})
 
         self.assertRegex(output, r"(?i)(CLIP|Contrastive Objective)")
-        self.assertNotIn("Text Classification > How it used to be > Multi-label classification > Word Embeddings", output)
+        self.assertNotIn(
+            "Text Classification > How it used to be > Multi-label classification > Word Embeddings",
+            output,
+        )
         self.assert_analyst_output_invariants(output)
 
-    def test_search_tool_returns_naive_bayes_logistic_regression_comparison(self) -> None:
-        tool = search_knowledge_base(analyst_pipeline=AnalystRetrievalPipeline(self.indexer))
+    def test_search_tool_returns_naive_bayes_logistic_regression_comparison(
+        self,
+    ) -> None:
+        tool = search_knowledge_base(
+            analyst_pipeline=AnalystRetrievalPipeline(self.indexer)
+        )
 
         output = tool.invoke({"queries": ["Naive Bayes vs Logistic Regression"]})
 
@@ -182,7 +229,9 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
         self.assert_analyst_output_invariants(output)
 
     def test_search_tool_keeps_react_results_focused(self) -> None:
-        tool = search_knowledge_base(analyst_pipeline=AnalystRetrievalPipeline(self.indexer))
+        tool = search_knowledge_base(
+            analyst_pipeline=AnalystRetrievalPipeline(self.indexer)
+        )
 
         output = tool.invoke({"queries": ["Kaggle agents / ReAct"]})
 
@@ -194,7 +243,9 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
         self.assert_analyst_output_invariants(output)
 
     def test_visualization_tool_runs_against_optimized_final_storage(self) -> None:
-        retriever = self.indexer.get_retriever(self.indexer.kg_search_settings.visualizer_retriever_params)
+        retriever = self.indexer.get_retriever(
+            self.indexer.kg_search_settings.visualizer_retriever_params
+        )
         tool = get_subgraphs_to_visualize(retriever)
 
         nodes, triplets, queries = tool.invoke({"queries": ["Text Classification"]})
@@ -205,10 +256,16 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
         self.assertTrue(nodes or triplets)
         self.assertTrue(all(len(triplet) == 3 for triplet in triplets))
 
-    def test_visualizer_pipeline_keeps_text_classification_methods_concept_centered(self) -> None:
-        tool = get_subgraphs_to_visualize(visualizer_pipeline=VisualizerRetrievalPipeline(self.indexer))
+    def test_visualizer_pipeline_keeps_text_classification_methods_concept_centered(
+        self,
+    ) -> None:
+        tool = get_subgraphs_to_visualize(
+            visualizer_pipeline=VisualizerRetrievalPipeline(self.indexer)
+        )
 
-        nodes, triplets, queries = tool.invoke({"queries": ["Text Classification methods"]})
+        nodes, triplets, queries = tool.invoke(
+            {"queries": ["Text Classification methods"]}
+        )
 
         self.assertEqual(["Text Classification methods"], queries)
         self.assert_visualizer_output_invariants(nodes, triplets)
@@ -230,20 +287,30 @@ class RetrievalStorageSmokeTests(unittest.TestCase):
             )
         )
 
-    def test_visualizer_pipeline_returns_naive_bayes_logistic_regression_comparison(self) -> None:
-        tool = get_subgraphs_to_visualize(visualizer_pipeline=VisualizerRetrievalPipeline(self.indexer))
+    def test_visualizer_pipeline_returns_naive_bayes_logistic_regression_comparison(
+        self,
+    ) -> None:
+        tool = get_subgraphs_to_visualize(
+            visualizer_pipeline=VisualizerRetrievalPipeline(self.indexer)
+        )
 
-        nodes, triplets, queries = tool.invoke({"queries": ["Naive Bayes vs Logistic Regression"]})
+        nodes, triplets, queries = tool.invoke(
+            {"queries": ["Naive Bayes vs Logistic Regression"]}
+        )
 
         self.assertEqual(["Naive Bayes vs Logistic Regression"], queries)
         self.assert_visualizer_output_invariants(nodes, triplets)
         labels = self.graph_labels_for(nodes)
-        self.assertTrue(any("Naive Bayes" in label or "Naive Baye" in label for label in labels))
+        self.assertTrue(
+            any("Naive Bayes" in label or "Naive Baye" in label for label in labels)
+        )
         self.assertTrue(any("logistic regression" in label.lower() for label in labels))
         self.assertTrue(triplets)
 
     def test_visualizer_pipeline_keeps_clip_objective_focused(self) -> None:
-        tool = get_subgraphs_to_visualize(visualizer_pipeline=VisualizerRetrievalPipeline(self.indexer))
+        tool = get_subgraphs_to_visualize(
+            visualizer_pipeline=VisualizerRetrievalPipeline(self.indexer)
+        )
 
         nodes, triplets, queries = tool.invoke({"queries": ["CLIP training objective"]})
 

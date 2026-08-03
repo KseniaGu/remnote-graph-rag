@@ -25,7 +25,10 @@ def make_case_payload(**overrides):
         "queries": ["query"],
         "seeded_from": [],
         "expected_evidence": {
-            "source_chunk_ids": {"required_all": ["chunk_1"], "required_any": ["chunk_2"]},
+            "source_chunk_ids": {
+                "required_all": ["chunk_1"],
+                "required_any": ["chunk_2"],
+            },
             "concept_labels": {"required_any": ["CLIP"]},
             "required_answer_points": ["not scored"],
         },
@@ -55,9 +58,13 @@ class RetrievalBenchmarkTests(unittest.TestCase):
                 make_case_payload(id="analyst_case", mode="analyst"),
                 make_case_payload(id="visualizer_case", mode="visualizer"),
             ]
-            path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+            path.write_text(
+                "\n".join(json.dumps(row) for row in rows), encoding="utf-8"
+            )
 
-            cases = load_benchmark_cases(path, mode="analyst", case_ids={"analyst_case"})
+            cases = load_benchmark_cases(
+                path, mode="analyst", case_ids={"analyst_case"}
+            )
 
         self.assertEqual(["analyst_case"], [case.id for case in cases])
 
@@ -70,7 +77,9 @@ class RetrievalBenchmarkTests(unittest.TestCase):
             with self.assertRaises(BenchmarkValidationError):
                 load_benchmark_cases(path)
 
-    def test_score_case_uses_source_mrr_recall_concepts_and_forbidden_relations(self) -> None:
+    def test_score_case_uses_source_mrr_recall_concepts_and_forbidden_relations(
+        self,
+    ) -> None:
         case = load_case(
             make_case_payload(
                 expected_evidence={
@@ -89,7 +98,11 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         actual = ActualEvidence(
             source_chunk_ids_ranked=["chunk_1", "chunk_2"],
             concept_labels=["CLIP"],
-            relations=[RelationEvidence(predicate="MENTIONS", subject_label="chunk", object_label="CLIP")],
+            relations=[
+                RelationEvidence(
+                    predicate="MENTIONS", subject_label="chunk", object_label="CLIP"
+                )
+            ],
         )
 
         result = score_case(case, actual)
@@ -100,7 +113,9 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual(1, result.scores["forbidden_evidence_count"])
         self.assertIn("relations", result.forbidden_hits)
 
-    def test_relation_id_matches_runtime_relation_by_catalog_triplet_and_labels(self) -> None:
+    def test_relation_id_matches_runtime_relation_by_catalog_triplet_and_labels(
+        self,
+    ) -> None:
         case = load_case(
             make_case_payload(
                 expected_evidence={
@@ -151,7 +166,9 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertTrue(result.passed)
         self.assertEqual(1.0, result.scores["relation_recall"])
 
-    def test_visualizer_shape_thresholds_count_chunk_nodes_and_dangling_edges(self) -> None:
+    def test_visualizer_shape_thresholds_count_chunk_nodes_and_dangling_edges(
+        self,
+    ) -> None:
         case = load_case(
             make_case_payload(
                 mode="visualizer",
@@ -175,11 +192,18 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual(1, result.scores["dangling_edge_count"])
 
     def test_summary_counts_failed_cases(self) -> None:
-        passing_case = load_case(make_case_payload(expected_evidence={"required_answer_points": []}, thresholds={}))
+        passing_case = load_case(
+            make_case_payload(
+                expected_evidence={"required_answer_points": []}, thresholds={}
+            )
+        )
         failing_case = load_case(
             make_case_payload(
                 id="failing",
-                expected_evidence={"source_chunk_ids": {"required_all": ["missing"]}, "required_answer_points": []},
+                expected_evidence={
+                    "source_chunk_ids": {"required_all": ["missing"]},
+                    "required_answer_points": [],
+                },
                 thresholds={},
             )
         )
@@ -195,13 +219,24 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual(1, summary["passed_count"])
         self.assertEqual(["failing"], summary["failed_case_ids"])
 
-    def test_reference_validation_reports_stale_and_unavailable_evidence_ids(self) -> None:
+    def test_reference_validation_reports_stale_and_unavailable_evidence_ids(
+        self,
+    ) -> None:
         case = load_case(
             make_case_payload(
                 expected_evidence={
-                    "source_chunk_ids": {"required_all": ["chunk_1"], "required_any": ["chunk_2"]},
-                    "concept_ids": {"required_all": ["concept_ok"], "required_any": ["concept_missing"]},
-                    "relation_ids": {"required_all": ["rel_ok"], "required_any": ["rel_missing"]},
+                    "source_chunk_ids": {
+                        "required_all": ["chunk_1"],
+                        "required_any": ["chunk_2"],
+                    },
+                    "concept_ids": {
+                        "required_all": ["concept_ok"],
+                        "required_any": ["concept_missing"],
+                    },
+                    "relation_ids": {
+                        "required_all": ["rel_ok"],
+                        "required_any": ["rel_missing"],
+                    },
                     "relations": {
                         "required_any": [
                             {
@@ -248,7 +283,9 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual(["chunk_3"], report.quarantined_source_chunk_ids)
         self.assertEqual(["concept_missing"], report.missing_concept_ids)
         self.assertEqual(["rel_missing"], report.missing_relation_ids)
-        self.assertEqual("rel_ok", report.relation_ids_missing_graph_triplet[0]["relation_id"])
+        self.assertEqual(
+            "rel_ok", report.relation_ids_missing_graph_triplet[0]["relation_id"]
+        )
 
     def test_reference_validation_allows_cleaned_keep_actions(self) -> None:
         case = load_case(
@@ -264,7 +301,9 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         report = validate_benchmark_references(
             [case],
             EvidenceCatalog(),
-            source_metadata_by_id={"chunk_1": {"postprocess_action": "keep_with_cleaned_text"}},
+            source_metadata_by_id={
+                "chunk_1": {"postprocess_action": "keep_with_cleaned_text"}
+            },
             embedded_source_ids={"chunk_1"},
         )
 

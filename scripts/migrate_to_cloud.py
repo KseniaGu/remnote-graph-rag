@@ -1,6 +1,7 @@
 import json
+from collections.abc import Iterable
 from itertools import islice
-from typing import Any, Iterable
+from typing import Any
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from pinecone import Pinecone
@@ -10,11 +11,9 @@ from backend.configs.paths import PathSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.configs.storage import (
     LocalStorageSettings,
-    StorageSettings,
-    RedisSettings,
-    Neo4jSettings,
     MemgraphSettings,
     PineconeSettings,
+    StorageSettings,
 )
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
@@ -123,7 +122,9 @@ def migrate_vector_store_to_pinecone():
     logger.info("Starting vecstore migration...")
     path_settings = PathSettings()
 
-    data = json.loads((path_settings.local_storage_dir / "default__vector_store.json").read_text())
+    data = json.loads(
+        (path_settings.local_storage_dir / "default__vector_store.json").read_text()
+    )
     pinecone_settings = PineconeSettings()
     embeddings = data["embedding_dict"]
     metadata = data.get("metadata_dict", {})
@@ -155,7 +156,9 @@ def migrate_vector_store_to_pinecone():
 def main():
     """Migrates local data to cloud databases."""
     logger.info("Starting cloud database migration...")
-    logger.info("Make sure REDIS_* and NEO4J_* environment variables are set for cloud databases.")
+    logger.info(
+        "Make sure REDIS_* and NEO4J_* environment variables are set for cloud databases."
+    )
 
     path_settings = PathSettings()
 
@@ -179,12 +182,20 @@ def main():
     kg_storage = KnowledgeGraphStorage(path_settings, storage_settings)
 
     # Make new KG Storage with local stores for docs, index and graph, but cloud for vector store, to migrate embeddings properly
-    storage_settings.document_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir)
-    storage_settings.index_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir)
-    storage_settings.property_graph_storage = LocalStorageSettings(storage_path=path_settings.local_storage_dir)
+    storage_settings.document_storage = LocalStorageSettings(
+        storage_path=path_settings.local_storage_dir
+    )
+    storage_settings.index_storage = LocalStorageSettings(
+        storage_path=path_settings.local_storage_dir
+    )
+    storage_settings.property_graph_storage = LocalStorageSettings(
+        storage_path=path_settings.local_storage_dir
+    )
     kg_storage = KnowledgeGraphStorage(path_settings, storage_settings)
 
-    embedder = HuggingFaceEmbedding(models_settings.embedder.model_path, trust_remote_code=True, embed_batch_size=5)
+    embedder = HuggingFaceEmbedding(
+        models_settings.embedder.model_path, trust_remote_code=True, embed_batch_size=5
+    )
     # We need to initialize indexer to calculate and add embeddings as SimpleVectorStore doesn't allow to "get nodes" directly
     knowledge_graph_indexer = KnowledgeGraphIndexer(
         kg_storage.storage_context,

@@ -5,14 +5,17 @@ from pathlib import Path
 
 try:
     from llama_index.core.schema import TextNode  # noqa: F401
+
     LLAMA_INDEX_AVAILABLE = True
 except ImportError:
     LLAMA_INDEX_AVAILABLE = False
 
 from backend.configs.paths import PathSettings
 from backend.configs.storage import LocalStorageSettings, StorageSettings
-from backend.data_processing.llm_postprocess import ChunkEnrichmentDecision
-from backend.data_processing.llm_postprocess import ConceptGraphProjection
+from backend.data_processing.llm_postprocess import (
+    ChunkEnrichmentDecision,
+    ConceptGraphProjection,
+)
 from backend.data_processing.parser_optimized import (
     OptimizedParseResult,
     RemNoteBlock,
@@ -27,7 +30,9 @@ from scripts.build_postprocessed_graph_storage import (
 )
 
 
-def make_decision(chunk_id: str, action: str, *, cleaned: str | None = None) -> ChunkEnrichmentDecision:
+def make_decision(
+    chunk_id: str, action: str, *, cleaned: str | None = None
+) -> ChunkEnrichmentDecision:
     return ChunkEnrichmentDecision(
         chunk_id=chunk_id,
         action=action,
@@ -122,7 +127,9 @@ def make_result() -> OptimizedParseResult:
 
 
 class PostprocessedGraphStorageMetadataTests(unittest.TestCase):
-    def test_vector_metadata_drops_graph_objects_and_serializes_nested_values(self) -> None:
+    def test_vector_metadata_drops_graph_objects_and_serializes_nested_values(
+        self,
+    ) -> None:
         class NonSerializable:
             pass
 
@@ -131,14 +138,19 @@ class PostprocessedGraphStorageMetadataTests(unittest.TestCase):
             "aliases": ["Alias"],
             "stats": {"score": 1},
             "original_text": '<div><img src="x.jpg"></div>',
-            "postprocess_original_embedding_text": '<table><tr><td>Noisy</td></tr></table>',
+            "postprocess_original_embedding_text": "<table><tr><td>Noisy</td></tr></table>",
             "kg_nodes": [NonSerializable()],
             "kg_relations": [NonSerializable()],
         }
 
         safe = make_vector_store_metadata(
             metadata,
-            {"kg_nodes", "kg_relations", "original_text", "postprocess_original_embedding_text"},
+            {
+                "kg_nodes",
+                "kg_relations",
+                "original_text",
+                "postprocess_original_embedding_text",
+            },
         )
 
         self.assertNotIn("kg_nodes", safe)
@@ -177,7 +189,9 @@ class PostprocessedGraphStorageTests(unittest.TestCase):
             nodes, manifest = materialize_final_text_nodes(
                 make_result(),
                 [
-                    make_decision("chunk_1", "keep_with_cleaned_text", cleaned="Cleaned text"),
+                    make_decision(
+                        "chunk_1", "keep_with_cleaned_text", cleaned="Cleaned text"
+                    ),
                     make_decision("chunk_2", "exclude_from_embedding"),
                 ],
                 [],
@@ -197,10 +211,12 @@ class PostprocessedGraphStorageTests(unittest.TestCase):
 
     def test_materialization_sanitizes_markup_after_llm_decision(self) -> None:
         result = make_result()
-        result.retrieval_chunks[0].embedding_text = (
-            'Intro <div><img src="x.jpg" alt="Image"></div> Figure 4. Extensions connect Agents.'
-        )
-        result.retrieval_chunks[0].display_text = result.retrieval_chunks[0].embedding_text
+        result.retrieval_chunks[
+            0
+        ].embedding_text = 'Intro <div><img src="x.jpg" alt="Image"></div> Figure 4. Extensions connect Agents.'
+        result.retrieval_chunks[0].display_text = result.retrieval_chunks[
+            0
+        ].embedding_text
 
         with tempfile.TemporaryDirectory() as tmp:
             path_settings, storage_settings = self._storage_settings(tmp)
@@ -220,15 +236,24 @@ class PostprocessedGraphStorageTests(unittest.TestCase):
             )
 
         nodes_by_id = {node.id_: node for node in nodes}
-        self.assertEqual("Intro Figure 4. Extensions connect Agents.", nodes_by_id["chunk_1"].text)
-        self.assertEqual("Cleaned text architecture diagram", nodes_by_id["chunk_2"].text)
+        self.assertEqual(
+            "Intro Figure 4. Extensions connect Agents.", nodes_by_id["chunk_1"].text
+        )
+        self.assertEqual(
+            "Cleaned text architecture diagram", nodes_by_id["chunk_2"].text
+        )
         self.assertNotIn("<div", nodes_by_id["chunk_1"].text)
         self.assertNotIn("<img", nodes_by_id["chunk_2"].text)
         self.assertTrue(nodes_by_id["chunk_1"].metadata["retrieval_enabled"])
         self.assertTrue(nodes_by_id["chunk_1"].metadata["graph_enabled"])
         self.assertTrue(nodes_by_id["chunk_1"].metadata["markup_sanitized"])
-        self.assertEqual(1, nodes_by_id["chunk_1"].metadata["markup_removed_image_count"])
-        self.assertEqual(["architecture diagram"], nodes_by_id["chunk_2"].metadata["markup_preserved_alt_texts"])
+        self.assertEqual(
+            1, nodes_by_id["chunk_1"].metadata["markup_removed_image_count"]
+        )
+        self.assertEqual(
+            ["architecture diagram"],
+            nodes_by_id["chunk_2"].metadata["markup_preserved_alt_texts"],
+        )
         self.assertEqual(2, manifest["markup_sanitized_count"])
         self.assertEqual(2, manifest["markup_removed_image_count"])
         self.assertGreaterEqual(manifest["markup_removed_tag_count"], 5)
@@ -261,8 +286,16 @@ class PostprocessedGraphStorageTests(unittest.TestCase):
         storage_context = FakeStorageContext()
         projection = ConceptGraphProjection(
             nodes=[
-                {"id": "concept_backprop", "canonical_name": "Backpropagation", "type": "METHOD"},
-                {"id": "concept_gradient", "canonical_name": "Gradient", "type": "CONCEPT"},
+                {
+                    "id": "concept_backprop",
+                    "canonical_name": "Backpropagation",
+                    "type": "METHOD",
+                },
+                {
+                    "id": "concept_gradient",
+                    "canonical_name": "Gradient",
+                    "type": "CONCEPT",
+                },
             ],
             edges=[
                 {
@@ -287,17 +320,25 @@ class PostprocessedGraphStorageTests(unittest.TestCase):
             evidence_links=[],
         )
 
-        summary = import_projection_to_property_graph(storage_context, [FakeChunkNode("chunk_1")], projection)
+        summary = import_projection_to_property_graph(
+            storage_context, [FakeChunkNode("chunk_1")], projection
+        )
 
         semantic_relation = next(
-            relation for relation in storage_context.property_graph_store.relations
+            relation
+            for relation in storage_context.property_graph_store.relations
             if getattr(relation, "label", None) == "PRODUCES"
         )
         self.assertEqual(1, summary["semantic_relations_imported"])
-        self.assertEqual(["produces gradients for each layer"], semantic_relation.properties["relation_phrases"])
+        self.assertEqual(
+            ["produces gradients for each layer"],
+            semantic_relation.properties["relation_phrases"],
+        )
         self.assertEqual(0.82, semantic_relation.properties["max_generality_score"])
         self.assertEqual(0.88, semantic_relation.properties["max_retrieval_usefulness"])
-        self.assertEqual(0.76, semantic_relation.properties["max_visualization_usefulness"])
+        self.assertEqual(
+            0.76, semantic_relation.properties["max_visualization_usefulness"]
+        )
 
     def test_embedding_passage_nodes_preserve_parent_chunk_identity(self) -> None:
         from llama_index.core.schema import TextNode
@@ -324,7 +365,9 @@ class PostprocessedGraphStorageTests(unittest.TestCase):
         self.assertGreaterEqual(len(passage_nodes), 1)
         first = passage_nodes[0]
         self.assertTrue(first.id_.startswith("chunk_parent::passage_"))
-        self.assertEqual("postprocessed_embedding_passage", first.metadata["docstore_node_kind"])
+        self.assertEqual(
+            "postprocessed_embedding_passage", first.metadata["docstore_node_kind"]
+        )
         self.assertEqual("chunk_parent", first.metadata["parent_chunk_id"])
         self.assertEqual("chunk_parent", first.metadata["chunk_id"])
         self.assertFalse(first.metadata["graph_enabled"])

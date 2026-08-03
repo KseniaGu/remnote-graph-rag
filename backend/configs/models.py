@@ -5,7 +5,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from backend.configs.constants import ENV_PATH
-from backend.configs.enums import ModelRoleType, LLMProviderType
+from backend.configs.enums import LLMProviderType, ModelRoleType
 
 
 class BaseLLMSettings(BaseSettings):
@@ -13,12 +13,15 @@ class BaseLLMSettings(BaseSettings):
 
     Provides common configuration options for all language model services.
     """
+
     model_name: str
     role: ModelRoleType
     provider: LLMProviderType = LLMProviderType.ollama
-    temperature: float = 0.
+    temperature: float = 0.0
     prompt_version: str | dict = "v1"
-    tokenizer_model_name: str | None = None  # To use when tokenization needed before the generation
+    tokenizer_model_name: str | None = (
+        None  # To use when tokenization needed before the generation
+    )
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_PATH),
@@ -28,18 +31,27 @@ class BaseLLMSettings(BaseSettings):
 
     @classmethod
     def model_config_with_prefix(cls, prefix: str) -> SettingsConfigDict:
-        return SettingsConfigDict(**cls.model_config) | {'env_prefix': prefix}
+        return SettingsConfigDict(**cls.model_config) | {"env_prefix": prefix}
 
     def ollama_chat_params(self) -> dict[str, Any]:
         return self.model_dump(
-            include={"temperature", "top_k", "top_p", "num_predict", "base_url", "num_ctx"}
+            include={
+                "temperature",
+                "top_k",
+                "top_p",
+                "num_predict",
+                "base_url",
+                "num_ctx",
+            }
         )
 
     def vllm_chat_params(self) -> dict[str, Any]:
         return self.model_dump(include={"temperature", "top_p", "max_tokens"})
 
     def openai_chat_params(self) -> dict[str, Any]:
-        return self.model_dump(include={"temperature", "top_p", "max_tokens", "base_url"})
+        return self.model_dump(
+            include={"temperature", "top_p", "max_tokens", "base_url"}
+        )
 
     def gemini_chat_params(self) -> dict[str, Any]:
         return self.model_dump(include={"temperature"})
@@ -56,6 +68,7 @@ class OpenAISettings(BaseLLMSettings):
 
     Extends base LLM settings with OpenAI-specific configurations.
     """
+
     model_config = BaseLLMSettings.model_config_with_prefix("OPENAI_")
     api_key: SecretStr | None = None
     top_p: float = 0.5
@@ -68,6 +81,7 @@ class OllamaSettings(BaseLLMSettings):
 
     Extends base LLM settings with Ollama-specific configurations.
     """
+
     model_config = BaseLLMSettings.model_config_with_prefix("OLLAMA_")
     api_key: SecretStr | None = None
     reasoning: bool = False
@@ -82,6 +96,7 @@ class OllamaSettings(BaseLLMSettings):
 
 class CohereSettings(BaseLLMSettings):
     """Configuration for Cohere models."""
+
     model_config = BaseLLMSettings.model_config_with_prefix("COHERE_")
     api_key: SecretStr | None = None
     top_n: int
@@ -93,6 +108,7 @@ class LocalModelSettings(BaseSettings):
 
     Contains settings for models that are run locally rather than through an API.
     """
+
     role: ModelRoleType
     model_path: str = "sentence-transformers/all-MiniLM-L6-v2"
     device: str | None = None
@@ -105,7 +121,7 @@ class LocalModelSettings(BaseSettings):
 
     @classmethod
     def model_config_with_prefix(cls, prefix: str) -> SettingsConfigDict:
-        return SettingsConfigDict(**cls.model_config) | {'env_prefix': prefix}
+        return SettingsConfigDict(**cls.model_config) | {"env_prefix": prefix}
 
 
 class EmbedderSettings(LocalModelSettings):
@@ -116,6 +132,7 @@ class EmbedderSettings(LocalModelSettings):
 
 class RerankerSettings(LocalModelSettings):
     """Configuration for locally hosted reranker models."""
+
     model_config = LocalModelSettings.model_config_with_prefix("RERANKER_")
     role: ModelRoleType = ModelRoleType.reranker
     model_path: str = "models/Qwen3-Reranker-0.6B"
@@ -131,14 +148,22 @@ class RerankerSettings(LocalModelSettings):
         return {
             "model_name": self.model_path,
             **self.model_dump(
-                include={"top_n", "batch_size", "device", "local_files_only", "trust_remote_code"}
+                include={
+                    "top_n",
+                    "batch_size",
+                    "device",
+                    "local_files_only",
+                    "trust_remote_code",
+                }
             ),
         }
 
     def ollama_llm_rerank_params(self) -> dict[str, Any]:
         return {
             "model": self.model_path,
-            **self.model_dump(include={"base_url", "request_timeout", "choice_batch_size", "top_n"}),
+            **self.model_dump(
+                include={"base_url", "request_timeout", "choice_batch_size", "top_n"}
+            ),
         }
 
 
@@ -148,6 +173,7 @@ class ResearcherModelSettings(BaseSettings):
     Holds two OllamaSettings variants used in the two-phase research process:
     one for tool-calling and one for structured output synthesis.
     """
+
     # vLLM self-hosted alternative: Qwen3.5-9B (provider=vllm, base_url=VLLM_ROUTING_URL)
     with_tools: BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.researcher,
@@ -165,7 +191,7 @@ class ResearcherModelSettings(BaseSettings):
         temperature=0.0,
         num_ctx=8192,
         top_k=50,
-        top_p=1.,
+        top_p=1.0,
         num_predict=4096,
     )
     prompt_version: str = "v3"
@@ -176,16 +202,19 @@ class ModelSettings(BaseSettings):
 
     Centralized configuration for all model-related settings.
     """
-    embedder: EmbedderSettings | BaseLLMSettings = Field(default_factory=EmbedderSettings)
+
+    embedder: EmbedderSettings | BaseLLMSettings = Field(
+        default_factory=EmbedderSettings
+    )
 
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B on port 8001, provider=LLMProviderType.vllm, base_url="http://<VLLM_HOST>:8001/v1"
     orchestrator: LocalModelSettings | BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.orchestrator,
         model_name="nemotron-3-super:cloud",
         tokenizer_model_name="Qwen/Qwen3.5-9B",
-        temperature=0.,
+        temperature=0.0,
         top_k=10,
-        top_p=1.,
+        top_p=1.0,
         num_predict=2048,
         prompt_version={"graph_index": "v2", "routing": "v4"},
     )
@@ -198,7 +227,7 @@ class ModelSettings(BaseSettings):
         top_k=20,
         top_p=0.3,
         num_predict=512,
-        prompt_version="v4"
+        prompt_version="v4",
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
 
@@ -212,7 +241,7 @@ class ModelSettings(BaseSettings):
         top_p=0.9,
         num_predict=8192,
         reasoning=True,
-        prompt_version="v4"
+        prompt_version="v4",
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (same instance as analyst)
     mentor: LocalModelSettings | BaseLLMSettings = OllamaSettings(
@@ -224,10 +253,12 @@ class ModelSettings(BaseSettings):
         top_p=0.8,
         num_predict=8192,
         reasoning=True,
-        prompt_version="v4"
+        prompt_version="v4",
     )
 
-    reranker: RerankerSettings | CohereSettings | BaseLLMSettings = Field(default_factory=RerankerSettings)
+    reranker: RerankerSettings | CohereSettings | BaseLLMSettings = Field(
+        default_factory=RerankerSettings
+    )
 
 
 def _ollama_models() -> ModelSettings:
@@ -246,7 +277,7 @@ def _vllm_models() -> ModelSettings:
             provider=LLMProviderType.vllm,
             model_name=vllm_model_path,
             base_url=routing_url,
-            temperature=0.,
+            temperature=0.0,
             max_tokens=2048,
             prompt_version={"graph_index": "v2", "routing": "v4"},
         ),
@@ -255,7 +286,7 @@ def _vllm_models() -> ModelSettings:
             provider=LLMProviderType.vllm,
             model_name=vllm_model_path,
             base_url=routing_url,
-            temperature=0.,
+            temperature=0.0,
             max_tokens=512,
             prompt_version="v3",
         ),
@@ -265,7 +296,7 @@ def _vllm_models() -> ModelSettings:
                 provider=LLMProviderType.vllm,
                 model_name=vllm_model_path,
                 base_url=routing_url,
-                temperature=0.,
+                temperature=0.0,
                 max_tokens=1024,
             ),
             structured=OpenAISettings(
@@ -273,7 +304,7 @@ def _vllm_models() -> ModelSettings:
                 provider=LLMProviderType.vllm,
                 model_name=vllm_model_path,
                 base_url=routing_url,
-                temperature=0.,
+                temperature=0.0,
                 max_tokens=4096,
             ),
         ),
@@ -309,5 +340,7 @@ def get_model_settings() -> ModelSettings:
     """
     pipeline = os.environ.get("LLM_PIPELINE", "ollama")
     if pipeline not in _PIPELINES:
-        raise ValueError(f"Unknown LLM_PIPELINE '{pipeline}'. Must be one of: {list(_PIPELINES)}")
+        raise ValueError(
+            f"Unknown LLM_PIPELINE '{pipeline}'. Must be one of: {list(_PIPELINES)}"
+        )
     return _PIPELINES[pipeline]()

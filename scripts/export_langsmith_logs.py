@@ -1,6 +1,6 @@
 import argparse
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from langsmith import Client
@@ -45,7 +45,9 @@ def _run_to_document(run) -> dict:
         "inputs": run.inputs,
         "outputs": run.outputs,
         "error": run.error,
-        "latency": (run.end_time - run.start_time).total_seconds() if run.start_time and run.end_time else None,
+        "latency": (run.end_time - run.start_time).total_seconds()
+        if run.start_time and run.end_time
+        else None,
         "total_tokens": run.total_tokens,
         "prompt_tokens": run.prompt_tokens,
         "completion_tokens": run.completion_tokens,
@@ -57,13 +59,13 @@ def _run_to_document(run) -> dict:
         "tags": run.tags,
         "extra": run.extra,
         "feedback_stats": run.feedback_stats,
-        "exported_at": datetime.now(timezone.utc),
+        "exported_at": datetime.now(UTC),
     }
 
 
 def _write_json(docs: list[dict], output_path: Path) -> None:
     output_path.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     file_path = output_path / f"langsmith_traces_{timestamp}.json"
     serializable = [_serialize(doc) for doc in docs]
     with open(file_path, "w", encoding="utf-8") as f:
@@ -79,7 +81,9 @@ def _upsert_mongodb(docs: list[dict], mongo_settings: MongoDBSettings) -> None:
     collection.create_index("trace_id")
     collection.create_index("start_time")
 
-    operations = [UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True) for doc in docs]
+    operations = [
+        UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True) for doc in docs
+    ]
     result = collection.bulk_write(operations)
     logger.info(
         "MongoDB upsert complete",
@@ -89,7 +93,11 @@ def _upsert_mongodb(docs: list[dict], mongo_settings: MongoDBSettings) -> None:
     mongo_client.close()
 
 
-def export_traces(frequency: str = "daily", output: str = "mongodb", output_path: Path = Path("./exports")) -> int:
+def export_traces(
+    frequency: str = "daily",
+    output: str = "mongodb",
+    output_path: Path = Path("./exports"),
+) -> int:
     """Fetches recent LangSmith traces and exports them to MongoDB, JSON, or both.
 
     Args:
@@ -112,7 +120,7 @@ def export_traces(frequency: str = "daily", output: str = "mongodb", output_path
         return 0
 
     window = FREQUENCY_WINDOWS[frequency] + timedelta(minutes=10)
-    since = datetime.now(timezone.utc) - window
+    since = datetime.now(UTC) - window
 
     logger.info(
         "Starting LangSmith export",
@@ -127,7 +135,10 @@ def export_traces(frequency: str = "daily", output: str = "mongodb", output_path
         api_key=ls_settings.langsmith_api_key.get_secret_value(),
     )
 
-    docs = [_run_to_document(run) for run in ls_client.list_runs(project_name=project_name, start_time=since)]
+    docs = [
+        _run_to_document(run)
+        for run in ls_client.list_runs(project_name=project_name, start_time=since)
+    ]
 
     if not docs:
         logger.info("No new traces found.")
@@ -144,7 +155,9 @@ def export_traces(frequency: str = "daily", output: str = "mongodb", output_path
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Export LangSmith traces to MongoDB and/or JSON.")
+    parser = argparse.ArgumentParser(
+        description="Export LangSmith traces to MongoDB and/or JSON."
+    )
     parser.add_argument(
         "--frequency",
         choices=list(FREQUENCY_WINDOWS.keys()),
@@ -164,7 +177,9 @@ def main():
         help="Directory for JSON output (default: ./exports).",
     )
     args = parser.parse_args()
-    export_traces(frequency=args.frequency, output=args.output, output_path=args.output_path)
+    export_traces(
+        frequency=args.frequency, output=args.output, output_path=args.output_path
+    )
 
 
 if __name__ == "__main__":

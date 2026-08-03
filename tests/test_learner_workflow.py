@@ -9,7 +9,9 @@ from backend.workflows.learner import LearnerWorkflow
 
 
 class FakeNode:
-    def __init__(self, text: str, node_id: str = "node_1", metadata: dict | None = None) -> None:
+    def __init__(
+        self, text: str, node_id: str = "node_1", metadata: dict | None = None
+    ) -> None:
         self.text = text
         self.node_id = node_id
         self.metadata = metadata or {}
@@ -30,7 +32,9 @@ class FakeRetriever:
 
 
 class FakeIndexer:
-    def __init__(self, settings: KnowledgeGraphSearchSettings, retriever: FakeRetriever) -> None:
+    def __init__(
+        self, settings: KnowledgeGraphSearchSettings, retriever: FakeRetriever
+    ) -> None:
         self.kg_search_settings = settings
         self.retriever = retriever
         self.get_retriever_calls: list[dict] = []
@@ -58,7 +62,9 @@ class FakeVisualizerPipeline:
     def __init__(self, indexer) -> None:
         self.indexer = indexer
 
-    def visualize(self, queries: list[str]) -> tuple[list[str], list[tuple[str, str, str]], list[str]]:
+    def visualize(
+        self, queries: list[str]
+    ) -> tuple[list[str], list[tuple[str, str, str]], list[str]]:
         return ["optimized_node"], [("A", "REL", "B")], queries
 
 
@@ -94,11 +100,23 @@ def test_kb_results_empty_accepts_useful_scored_sources() -> None:
 
 
 def test_kb_results_empty_rejects_empty_sentinel() -> None:
-    assert LearnerWorkflow._kb_results_empty({"search_knowledge_base": "No relevant information found."}) is True
+    assert (
+        LearnerWorkflow._kb_results_empty(
+            {"search_knowledge_base": "No relevant information found."}
+        )
+        is True
+    )
 
 
-def test_kb_results_empty_preserves_empty_visualizer_result_for_terminal_handling() -> None:
-    assert LearnerWorkflow._kb_results_empty({"get_subgraphs_to_visualize": ([], [], ["BERT"])}) is False
+def test_kb_results_empty_preserves_empty_visualizer_result_for_terminal_handling() -> (
+    None
+):
+    assert (
+        LearnerWorkflow._kb_results_empty(
+            {"get_subgraphs_to_visualize": ([], [], ["BERT"])}
+        )
+        is False
+    )
 
 
 def test_deterministic_route_ends_after_empty_visualization_signal() -> None:
@@ -122,7 +140,9 @@ def test_kb_search_tool_uses_optimized_analyst_pipeline_by_default() -> None:
     indexer = FakeIndexer(settings, FakeRetriever({}))
     workflow = make_workflow(indexer)
 
-    with patch("backend.workflows.learner.AnalystRetrievalPipeline", FakeAnalystPipeline):
+    with patch(
+        "backend.workflows.learner.AnalystRetrievalPipeline", FakeAnalystPipeline
+    ):
         tool = workflow._build_kb_search_tool()
 
     assert tool.invoke({"queries": ["BERT"]}) == "optimized analyst: BERT"
@@ -130,8 +150,12 @@ def test_kb_search_tool_uses_optimized_analyst_pipeline_by_default() -> None:
 
 
 def test_kb_search_tool_can_use_legacy_vector_context_retriever() -> None:
-    settings = KnowledgeGraphSearchSettings(analyst_retrieval_mode="legacy_vector_context")
-    retriever = FakeRetriever({"BERT": [FakeNodeWithScore(FakeNode("legacy source text"), 0.91)]})
+    settings = KnowledgeGraphSearchSettings(
+        analyst_retrieval_mode="legacy_vector_context"
+    )
+    retriever = FakeRetriever(
+        {"BERT": [FakeNodeWithScore(FakeNode("legacy source text"), 0.91)]}
+    )
     indexer = FakeIndexer(settings, retriever)
     workflow = make_workflow(indexer)
 
@@ -147,16 +171,26 @@ def test_visualizer_tool_uses_optimized_visualizer_pipeline_by_default() -> None
     indexer = FakeIndexer(settings, FakeRetriever({}))
     workflow = make_workflow(indexer)
 
-    with patch("backend.workflows.learner.VisualizerRetrievalPipeline", FakeVisualizerPipeline):
+    with patch(
+        "backend.workflows.learner.VisualizerRetrievalPipeline", FakeVisualizerPipeline
+    ):
         tool = workflow._build_visualizer_tool()
 
-    assert tool.invoke({"queries": ["BERT"]}) == (["optimized_node"], [("A", "REL", "B")], ["BERT"])
+    assert tool.invoke({"queries": ["BERT"]}) == (
+        ["optimized_node"],
+        [("A", "REL", "B")],
+        ["BERT"],
+    )
     assert indexer.get_retriever_calls == []
 
 
 def test_visualizer_tool_can_use_legacy_vector_context_retriever() -> None:
-    settings = KnowledgeGraphSearchSettings(visualizer_retrieval_mode="legacy_vector_context")
-    retriever = FakeRetriever({"graph": [FakeNodeWithScore(FakeNode("A -> REL -> B"), 0.95)]})
+    settings = KnowledgeGraphSearchSettings(
+        visualizer_retrieval_mode="legacy_vector_context"
+    )
+    retriever = FakeRetriever(
+        {"graph": [FakeNodeWithScore(FakeNode("A -> REL -> B"), 0.95)]}
+    )
     indexer = FakeIndexer(settings, retriever)
     workflow = make_workflow(indexer)
 
@@ -181,10 +215,21 @@ def test_init_agents_handles_researcher_composite_model_settings() -> None:
     workflow.search_engine = object()
 
     with (
-        patch("backend.workflows.learner.AgentsFactory.get_llm_by_role", side_effect=lambda model_settings: FakeLLM()),
-        patch("backend.workflows.learner.AgentsFactory.add_retry", side_effect=lambda runnable, provider=None: runnable),
-        patch("backend.workflows.learner.AnalystRetrievalPipeline", FakeAnalystPipeline),
-        patch("backend.workflows.learner.VisualizerRetrievalPipeline", FakeVisualizerPipeline),
+        patch(
+            "backend.workflows.learner.AgentsFactory.get_llm_by_role",
+            side_effect=lambda model_settings: FakeLLM(),
+        ),
+        patch(
+            "backend.workflows.learner.AgentsFactory.add_retry",
+            side_effect=lambda runnable, provider=None: runnable,
+        ),
+        patch(
+            "backend.workflows.learner.AnalystRetrievalPipeline", FakeAnalystPipeline
+        ),
+        patch(
+            "backend.workflows.learner.VisualizerRetrievalPipeline",
+            FakeVisualizerPipeline,
+        ),
     ):
         workflow._init_agents()
 
@@ -194,14 +239,21 @@ def test_init_agents_handles_researcher_composite_model_settings() -> None:
     assert "get_subgraphs_to_visualize" in workflow.tools
 
 
-def test_kb_search_tool_passes_model_reranker_settings_to_optimized_analyst_pipeline() -> None:
+def test_kb_search_tool_passes_model_reranker_settings_to_optimized_analyst_pipeline() -> (
+    None
+):
     settings = KnowledgeGraphSearchSettings(analyst_retrieval_mode="optimized")
     indexer = FakeIndexer(settings, FakeRetriever({}))
     workflow = make_workflow(indexer)
     workflow.models_settings = ModelSettings()
 
-    with patch("backend.workflows.learner.AnalystRetrievalPipeline", FakeAnalystPipeline):
+    with patch(
+        "backend.workflows.learner.AnalystRetrievalPipeline", FakeAnalystPipeline
+    ):
         workflow._build_kb_search_tool()
 
     assert LAST_FAKE_ANALYST_PIPELINE is not None
-    assert LAST_FAKE_ANALYST_PIPELINE.reranker_settings is workflow.models_settings.reranker
+    assert (
+        LAST_FAKE_ANALYST_PIPELINE.reranker_settings
+        is workflow.models_settings.reranker
+    )

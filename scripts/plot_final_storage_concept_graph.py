@@ -13,7 +13,6 @@ from typing import Any
 import networkx as nx
 import plotly.graph_objects as go
 
-
 DEFAULT_STORAGE_DIR = Path(
     "data/testing/final_retrieval_optimization_v7_split_prompts/"
     "optimized_pipeline_run/final_storage"
@@ -72,7 +71,9 @@ def load_property_graph(storage_dir: Path) -> dict[str, Any]:
 
 def is_concept_node(node_id: str, node: dict[str, Any]) -> bool:
     properties = node.get("properties") or {}
-    return node_id.startswith("concept_") or bool(properties.get("postprocess_concept_id"))
+    return node_id.startswith("concept_") or bool(
+        properties.get("postprocess_concept_id")
+    )
 
 
 def concept_label(node_id: str, node: dict[str, Any]) -> str:
@@ -105,10 +106,16 @@ def hover_section(title: str, value: Any, *, limit: int) -> str:
     return f"<br><b>{html.escape(title)}:</b><br>{rendered}"
 
 
-def build_graph(data: dict[str, Any]) -> tuple[nx.MultiDiGraph, dict[str, dict[str, Any]], list[dict[str, Any]]]:
+def build_graph(
+    data: dict[str, Any],
+) -> tuple[nx.MultiDiGraph, dict[str, dict[str, Any]], list[dict[str, Any]]]:
     nodes = data.get("nodes") or {}
     relations = data.get("relations") or {}
-    concepts = {node_id: node for node_id, node in nodes.items() if is_concept_node(node_id, node)}
+    concepts = {
+        node_id: node
+        for node_id, node in nodes.items()
+        if is_concept_node(node_id, node)
+    }
 
     graph = nx.MultiDiGraph()
     for node_id, node in concepts.items():
@@ -163,8 +170,12 @@ def node_hover_text(
         f"<br><b>Resolution:</b> {html.escape(str(properties.get('postprocess_resolution_source', '')))}"
         f"<br><b>Merge status:</b> {html.escape(str(properties.get('postprocess_merge_status', '')))}"
         + hover_section("Aliases", properties.get("aliases"), limit=max_hover_list)
-        + hover_section("Evidence spans", properties.get("evidence_spans"), limit=max_hover_list)
-        + hover_section("Source chunk IDs", properties.get("source_chunk_ids"), limit=max_hover_list)
+        + hover_section(
+            "Evidence spans", properties.get("evidence_spans"), limit=max_hover_list
+        )
+        + hover_section(
+            "Source chunk IDs", properties.get("source_chunk_ids"), limit=max_hover_list
+        )
     )
 
 
@@ -187,9 +198,17 @@ def edge_hover_text(
         f"<br><b>Generality:</b> {html.escape(str(properties.get('max_generality_score', '')))}"
         f"<br><b>Retrieval usefulness:</b> {html.escape(str(properties.get('max_retrieval_usefulness', '')))}"
         f"<br><b>Visualization usefulness:</b> {html.escape(str(properties.get('max_visualization_usefulness', '')))}"
-        + hover_section("Relation phrases", properties.get("relation_phrases"), limit=max_hover_list)
-        + hover_section("Evidence spans", properties.get("evidence_spans"), limit=max_hover_list)
-        + hover_section("Evidence chunk IDs", properties.get("evidence_chunk_ids"), limit=max_hover_list)
+        + hover_section(
+            "Relation phrases", properties.get("relation_phrases"), limit=max_hover_list
+        )
+        + hover_section(
+            "Evidence spans", properties.get("evidence_spans"), limit=max_hover_list
+        )
+        + hover_section(
+            "Evidence chunk IDs",
+            properties.get("evidence_chunk_ids"),
+            limit=max_hover_list,
+        )
     )
 
 
@@ -237,7 +256,9 @@ def make_figure(
         edge_y.extend([y0, y1, None])
         edge_mid_x.append((x0 + x1) / 2)
         edge_mid_y.append((y0 + y1) / 2)
-        edge_hover.append(edge_hover_text(relation, labels_by_id, max_hover_list=max_hover_list))
+        edge_hover.append(
+            edge_hover_text(relation, labels_by_id, max_hover_list=max_hover_list)
+        )
         edge_label_text.append(str(relation["predicate"]))
 
     edge_trace = go.Scatter(
@@ -258,7 +279,9 @@ def make_figure(
         name="relation details",
     )
 
-    type_counts = Counter(data.get("concept_type", "CONCEPT") for _, data in graph.nodes(data=True))
+    type_counts = Counter(
+        data.get("concept_type", "CONCEPT") for _, data in graph.nodes(data=True)
+    )
     type_order = [item for item, _ in type_counts.most_common()]
     palette = [
         "#2563eb",
@@ -272,7 +295,10 @@ def make_figure(
         "#ea580c",
         "#4f46e5",
     ]
-    color_by_type = {concept_type: palette[index % len(palette)] for index, concept_type in enumerate(type_order)}
+    color_by_type = {
+        concept_type: palette[index % len(palette)]
+        for index, concept_type in enumerate(type_order)
+    }
 
     node_traces: list[go.Scatter] = []
     for concept_type in type_order:
@@ -291,7 +317,11 @@ def make_figure(
             xs.append(x)
             ys.append(y)
             texts.append(str(data["label"]))
-            hovers.append(node_hover_text(node_id, data, degree=degree, max_hover_list=max_hover_list))
+            hovers.append(
+                node_hover_text(
+                    node_id, data, degree=degree, max_hover_list=max_hover_list
+                )
+            )
             sizes.append(9 + min(24, degree * 2.5 + source_chunk_count))
         node_traces.append(
             go.Scatter(
@@ -336,7 +366,11 @@ def make_figure(
 def main() -> int:
     args = parse_args()
     storage_dir = args.storage_dir.expanduser().resolve()
-    output = (args.output or storage_dir / "concept_relation_graph.html").expanduser().resolve()
+    output = (
+        (args.output or storage_dir / "concept_relation_graph.html")
+        .expanduser()
+        .resolve()
+    )
 
     data = load_property_graph(storage_dir)
     graph, _, relations = build_graph(data)

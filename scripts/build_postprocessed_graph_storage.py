@@ -11,17 +11,21 @@ import argparse
 import json
 import shutil
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from backend.configs.models import ModelSettings
 from backend.configs.paths import PathSettings
 from backend.configs.storage import LocalStorageSettings, StorageSettings
-from backend.configs.models import ModelSettings
-from backend.data_processing.embedding_passages import build_embedding_passages, tokenizer_token_counter
+from backend.data_processing.embedding_passages import (
+    build_embedding_passages,
+    tokenizer_token_counter,
+)
 from backend.data_processing.llm_postprocess import (
     ChunkAction,
     ChunkEnrichmentDecision,
@@ -40,8 +44,8 @@ from backend.data_processing.parser_optimized import (
     ExternalResource,
     OptimizedParseResult,
     ParsedArtifact,
-    RemNoteParserOptimized,
     RemNoteBlock,
+    RemNoteParserOptimized,
     RetrievalChunk,
     SourceDocument,
 )
@@ -53,7 +57,10 @@ GRAPH_ACTIONS = {
     ChunkAction.METADATA_ONLY,
     ChunkAction.GRAPH_ONLY,
 }
-QUARANTINE_ACTIONS = {ChunkAction.NEEDS_VISUAL_REPARSE, ChunkAction.EXCLUDE_FROM_EMBEDDING}
+QUARANTINE_ACTIONS = {
+    ChunkAction.NEEDS_VISUAL_REPARSE,
+    ChunkAction.EXCLUDE_FROM_EMBEDDING,
+}
 RAW_TEXT_VECTOR_METADATA_DROP_KEYS = {
     "postprocess_original_embedding_text",
     "original_text",
@@ -65,7 +72,9 @@ POSTPROCESSED_PASSAGE_KIND = "postprocessed_embedding_passage"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build final storage from optimized IR and LLM postprocess sidecars.")
+    parser = argparse.ArgumentParser(
+        description="Build final storage from optimized IR and LLM postprocess sidecars."
+    )
     parser.add_argument("--optimized-ir-dir", required=True, type=Path)
     parser.add_argument("--postprocess-dir", required=True, type=Path)
     parser.add_argument("--final-storage-dir", required=True, type=Path)
@@ -74,7 +83,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parsed-images-dir", type=Path, default=None)
     parser.add_argument("--parsed-texts-dir", type=Path, default=None)
     parser.add_argument("--embedder-model-path", default=None)
-    parser.add_argument("--skip-embeddings", action="store_true", help="Build docstore/property graph only.")
+    parser.add_argument(
+        "--skip-embeddings",
+        action="store_true",
+        help="Build docstore/property graph only.",
+    )
     parser.add_argument("--force-rebuild-final", action="store_true")
     return parser.parse_args()
 
@@ -85,19 +98,36 @@ def load_optimized_result(ir_dir: Path) -> OptimizedParseResult:
         raise FileNotFoundError(f"Missing optimized parser summary: {summary_path}")
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     return OptimizedParseResult(
-        source_documents=[SourceDocument(**row) for row in read_jsonl(Path(ir_dir) / "source_documents.jsonl")],
-        blocks=[RemNoteBlock(**row) for row in read_jsonl(Path(ir_dir) / "blocks.jsonl")],
-        external_resources=[ExternalResource(**row) for row in read_jsonl(Path(ir_dir) / "external_resources.jsonl")],
-        parsed_artifacts=[ParsedArtifact(**row) for row in read_jsonl(Path(ir_dir) / "parsed_artifacts.jsonl")],
-        artifact_gate_decisions=[
-            ArtifactGateDecision(**row) for row in read_jsonl(Path(ir_dir) / "artifact_gate_decisions.jsonl")
+        source_documents=[
+            SourceDocument(**row)
+            for row in read_jsonl(Path(ir_dir) / "source_documents.jsonl")
         ],
-        retrieval_chunks=[RetrievalChunk(**row) for row in read_jsonl(Path(ir_dir) / "retrieval_chunks.jsonl")],
+        blocks=[
+            RemNoteBlock(**row) for row in read_jsonl(Path(ir_dir) / "blocks.jsonl")
+        ],
+        external_resources=[
+            ExternalResource(**row)
+            for row in read_jsonl(Path(ir_dir) / "external_resources.jsonl")
+        ],
+        parsed_artifacts=[
+            ParsedArtifact(**row)
+            for row in read_jsonl(Path(ir_dir) / "parsed_artifacts.jsonl")
+        ],
+        artifact_gate_decisions=[
+            ArtifactGateDecision(**row)
+            for row in read_jsonl(Path(ir_dir) / "artifact_gate_decisions.jsonl")
+        ],
+        retrieval_chunks=[
+            RetrievalChunk(**row)
+            for row in read_jsonl(Path(ir_dir) / "retrieval_chunks.jsonl")
+        ],
         summary=summary,
     )
 
 
-def make_local_settings(final_storage_dir: Path, args: argparse.Namespace) -> tuple[PathSettings, StorageSettings]:
+def make_local_settings(
+    final_storage_dir: Path, args: argparse.Namespace
+) -> tuple[PathSettings, StorageSettings]:
     defaults = PathSettings()
     path_settings = PathSettings(
         raw_data_dir=args.raw_data_dir or defaults.raw_data_dir,
@@ -115,7 +145,9 @@ def make_local_settings(final_storage_dir: Path, args: argparse.Namespace) -> tu
     )
 
 
-def decision_failures_by_chunk(failures: Iterable[PostprocessFailure]) -> dict[str, list[PostprocessFailure]]:
+def decision_failures_by_chunk(
+    failures: Iterable[PostprocessFailure],
+) -> dict[str, list[PostprocessFailure]]:
     result: dict[str, list[PostprocessFailure]] = {}
     for failure in failures:
         if failure.chunk_id:
@@ -123,8 +155,14 @@ def decision_failures_by_chunk(failures: Iterable[PostprocessFailure]) -> dict[s
     return result
 
 
-def materialized_chunk_text(base_text: str, decision: Optional[ChunkEnrichmentDecision]) -> str:
-    if decision and decision.action == ChunkAction.KEEP_WITH_CLEANED_TEXT and decision.cleaned_embedding_text:
+def materialized_chunk_text(
+    base_text: str, decision: ChunkEnrichmentDecision | None
+) -> str:
+    if (
+        decision
+        and decision.action == ChunkAction.KEEP_WITH_CLEANED_TEXT
+        and decision.cleaned_embedding_text
+    ):
         return decision.cleaned_embedding_text
     return base_text
 
@@ -168,15 +206,23 @@ def materialize_final_text_nodes(
         chunk_failures = failures_by_chunk.get(node.id_, [])
         missing_decision = decision is None
         action = decision.action if decision else None
-        should_quarantine = missing_decision or bool(chunk_failures) or action in QUARANTINE_ACTIONS
-        retrieval_enabled = bool(decision and action in RETRIEVAL_ACTIONS and not should_quarantine)
-        graph_enabled = bool(decision and action in GRAPH_ACTIONS and not should_quarantine)
+        should_quarantine = (
+            missing_decision or bool(chunk_failures) or action in QUARANTINE_ACTIONS
+        )
+        retrieval_enabled = bool(
+            decision and action in RETRIEVAL_ACTIONS and not should_quarantine
+        )
+        graph_enabled = bool(
+            decision and action in GRAPH_ACTIONS and not should_quarantine
+        )
         original_text = node.text
         materialized_text = materialized_chunk_text(original_text, decision)
         sanitization = sanitize_markup_for_embedding(materialized_text)
         node.text = sanitization.text
         if decision and decision.cleaned_display_text:
-            node.metadata["display_text"] = sanitize_markup_for_embedding(decision.cleaned_display_text).text
+            node.metadata["display_text"] = sanitize_markup_for_embedding(
+                decision.cleaned_display_text
+            ).text
         elif sanitization.changed:
             node.metadata["display_text"] = sanitization.text
 
@@ -185,13 +231,19 @@ def materialize_final_text_nodes(
                 "docstore_node_kind": "postprocessed_retrieval_chunk",
                 "postprocess_decision_id": decision.decision_id if decision else None,
                 "postprocess_action": action.value if action else "missing_decision",
-                "postprocess_prompt_version": decision.prompt_version if decision else None,
+                "postprocess_prompt_version": decision.prompt_version
+                if decision
+                else None,
                 "postprocess_model_name": decision.model_name if decision else None,
                 "postprocess_input_hash": decision.input_hash if decision else None,
-                "postprocess_issue_types": list(decision.issue_types) if decision else [],
+                "postprocess_issue_types": list(decision.issue_types)
+                if decision
+                else [],
                 "postprocess_warnings": list(decision.warnings) if decision else [],
                 "postprocess_reason": decision.reason if decision else None,
-                "postprocess_chunk_summary": decision.chunk_summary if decision else None,
+                "postprocess_chunk_summary": decision.chunk_summary
+                if decision
+                else None,
                 "postprocess_original_embedding_text": original_text,
                 "markup_sanitized": sanitization.changed,
                 "markup_removed_tag_count": sanitization.removed_tag_count,
@@ -200,7 +252,9 @@ def materialize_final_text_nodes(
                 "retrieval_enabled": retrieval_enabled,
                 "graph_enabled": graph_enabled,
                 "quarantined": should_quarantine,
-                "quarantine_reasons": quarantine_reasons(decision, chunk_failures, missing_decision),
+                "quarantine_reasons": quarantine_reasons(
+                    decision, chunk_failures, missing_decision
+                ),
             }
         )
         node.excluded_embed_metadata_keys = list(node.metadata.keys())
@@ -209,9 +263,13 @@ def materialize_final_text_nodes(
             manifest["markup_sanitized_count"] += 1
         manifest["markup_removed_tag_count"] += sanitization.removed_tag_count
         manifest["markup_removed_image_count"] += sanitization.removed_image_count
-        manifest["markup_preserved_alt_text_count"] += len(sanitization.preserved_alt_texts)
+        manifest["markup_preserved_alt_text_count"] += len(
+            sanitization.preserved_alt_texts
+        )
         if action:
-            manifest["action_counts"][action.value] = manifest["action_counts"].get(action.value, 0) + 1
+            manifest["action_counts"][action.value] = (
+                manifest["action_counts"].get(action.value, 0) + 1
+            )
         if missing_decision:
             manifest["missing_decision_count"] += 1
         if retrieval_enabled:
@@ -230,7 +288,7 @@ def materialize_final_text_nodes(
 
 
 def quarantine_reasons(
-    decision: Optional[ChunkEnrichmentDecision],
+    decision: ChunkEnrichmentDecision | None,
     failures: list[PostprocessFailure],
     missing_decision: bool,
 ) -> list[str]:
@@ -248,11 +306,19 @@ def filtered_graph_projection(
     concept_resolution: Any,
     graph_enabled_chunk_ids: set[str],
 ) -> ConceptGraphProjection:
-    graph_decisions = [decision for decision in decisions if decision.chunk_id in graph_enabled_chunk_ids]
-    return build_graph_projection(graph_decisions, concept_resolution=concept_resolution)
+    graph_decisions = [
+        decision
+        for decision in decisions
+        if decision.chunk_id in graph_enabled_chunk_ids
+    ]
+    return build_graph_projection(
+        graph_decisions, concept_resolution=concept_resolution
+    )
 
 
-def make_vector_store_metadata(metadata: dict[str, Any], drop_keys: set[str] | None = None) -> dict[str, Any]:
+def make_vector_store_metadata(
+    metadata: dict[str, Any], drop_keys: set[str] | None = None
+) -> dict[str, Any]:
     """Return flat JSON-safe metadata for vector-store records.
 
     Property-graph import stores LlamaIndex EntityNode/Relation objects in chunk
@@ -272,12 +338,20 @@ def make_vector_store_metadata(metadata: dict[str, Any], drop_keys: set[str] | N
     return safe
 
 
-def copy_node_for_vector_store(node: Any, text_node_cls: Any, drop_metadata_keys: set[str]) -> Any:
+def copy_node_for_vector_store(
+    node: Any, text_node_cls: Any, drop_metadata_keys: set[str]
+) -> Any:
     vector_node = text_node_cls(
         text=getattr(node, "text", node.get_content()),
-        metadata=make_vector_store_metadata(getattr(node, "metadata", {}), drop_metadata_keys),
-        excluded_embed_metadata_keys=list(getattr(node, "excluded_embed_metadata_keys", [])),
-        excluded_llm_metadata_keys=list(getattr(node, "excluded_llm_metadata_keys", [])),
+        metadata=make_vector_store_metadata(
+            getattr(node, "metadata", {}), drop_metadata_keys
+        ),
+        excluded_embed_metadata_keys=list(
+            getattr(node, "excluded_embed_metadata_keys", [])
+        ),
+        excluded_llm_metadata_keys=list(
+            getattr(node, "excluded_llm_metadata_keys", [])
+        ),
     )
     vector_node.id_ = node.id_
     return vector_node
@@ -294,10 +368,16 @@ def _node_source_path(node: Any) -> str:
 
 
 def _resolve_embedder_tokenizer(embedder: Any) -> Any | None:
-    for owner in (embedder, getattr(embedder, "_model", None), getattr(embedder, "model", None)):
+    for owner in (
+        embedder,
+        getattr(embedder, "_model", None),
+        getattr(embedder, "model", None),
+    ):
         if owner is None:
             continue
-        tokenizer = getattr(owner, "tokenizer", None) or getattr(owner, "_tokenizer", None)
+        tokenizer = getattr(owner, "tokenizer", None) or getattr(
+            owner, "_tokenizer", None
+        )
         if tokenizer is not None:
             return tokenizer
     return None
@@ -311,7 +391,9 @@ def _node_text(node: Any) -> str:
     return str(get_content() if callable(get_content) else "")
 
 
-def make_embedding_passage_nodes(nodes: list[Any], text_node_cls: Any, embedder: Any) -> list[Any]:
+def make_embedding_passage_nodes(
+    nodes: list[Any], text_node_cls: Any, embedder: Any
+) -> list[Any]:
     """Creates vector-search child passages while preserving parent chunk IDs.
 
     The parent retrieval chunk stays in the docstore/property graph as the
@@ -357,15 +439,24 @@ def make_embedding_passage_nodes(nodes: list[Any], text_node_cls: Any, embedder:
                 text=passage.text,
                 metadata=metadata,
                 excluded_embed_metadata_keys=list(metadata.keys()),
-                excluded_llm_metadata_keys=list(getattr(node, "excluded_llm_metadata_keys", [])),
+                excluded_llm_metadata_keys=list(
+                    getattr(node, "excluded_llm_metadata_keys", [])
+                ),
             )
             passage_node.id_ = passage.passage_id
             passage_nodes.append(passage_node)
     return passage_nodes
 
 
-def import_projection_to_property_graph(storage_context: Any, nodes: list[Any], projection: ConceptGraphProjection) -> dict[str, int]:
-    from llama_index.core.graph_stores.types import EntityNode, KG_NODES_KEY, KG_RELATIONS_KEY, Relation
+def import_projection_to_property_graph(
+    storage_context: Any, nodes: list[Any], projection: ConceptGraphProjection
+) -> dict[str, int]:
+    from llama_index.core.graph_stores.types import (
+        KG_NODES_KEY,
+        KG_RELATIONS_KEY,
+        EntityNode,
+        Relation,
+    )
 
     llama_nodes_by_id = {node.id_: node for node in nodes}
     entity_nodes: dict[str, EntityNode] = {}
@@ -376,7 +467,9 @@ def import_projection_to_property_graph(storage_context: Any, nodes: list[Any], 
             label=record.get("type") or "CONCEPT",
             properties={
                 "entity_name": record.get("canonical_name") or concept_id,
-                "display_name": record.get("display_name") or record.get("canonical_name") or concept_id,
+                "display_name": record.get("display_name")
+                or record.get("canonical_name")
+                or concept_id,
                 "aliases": record.get("aliases", []),
                 "source_chunk_ids": record.get("source_chunk_ids", []),
                 "evidence_spans": record.get("evidence_spans", []),
@@ -415,7 +508,9 @@ def import_projection_to_property_graph(storage_context: Any, nodes: list[Any], 
                 "max_confidence": record.get("max_confidence"),
                 "max_generality_score": record.get("max_generality_score"),
                 "max_retrieval_usefulness": record.get("max_retrieval_usefulness"),
-                "max_visualization_usefulness": record.get("max_visualization_usefulness"),
+                "max_visualization_usefulness": record.get(
+                    "max_visualization_usefulness"
+                ),
             },
         )
         relations.append(relation)
@@ -450,8 +545,13 @@ def import_projection_to_property_graph(storage_context: Any, nodes: list[Any], 
                 "decision_ids": [],
             },
         )
-        extend_unique(evidence_record["evidence_spans"], list(link.get("evidence_spans", [])))
-        extend_unique(evidence_record["decision_ids"], [link["decision_id"]] if link.get("decision_id") else [])
+        extend_unique(
+            evidence_record["evidence_spans"], list(link.get("evidence_spans", []))
+        )
+        extend_unique(
+            evidence_record["decision_ids"],
+            [link["decision_id"]] if link.get("decision_id") else [],
+        )
 
     evidence_relations = [
         Relation(
@@ -475,7 +575,11 @@ def import_projection_to_property_graph(storage_context: Any, nodes: list[Any], 
         graph_store.upsert_relations(relations)
     if evidence_relations:
         graph_store.upsert_relations(evidence_relations)
-    updated_llama_nodes = [node for node in nodes if node.metadata.get(KG_NODES_KEY) or node.metadata.get(KG_RELATIONS_KEY)]
+    updated_llama_nodes = [
+        node
+        for node in nodes
+        if node.metadata.get(KG_NODES_KEY) or node.metadata.get(KG_RELATIONS_KEY)
+    ]
     if updated_llama_nodes:
         graph_store.upsert_llama_nodes(updated_llama_nodes)
     return {
@@ -505,13 +609,20 @@ def build_index(storage_context: Any, embedder: Any) -> Any:
     )
 
 
-def embed_final_nodes(storage_context: Any, final_nodes: list[Any], projection: ConceptGraphProjection, embedder: Any) -> dict[str, int]:
+def embed_final_nodes(
+    storage_context: Any,
+    final_nodes: list[Any],
+    projection: ConceptGraphProjection,
+    embedder: Any,
+) -> dict[str, int]:
     from llama_index.core.graph_stores.types import KG_NODES_KEY, KG_RELATIONS_KEY
     from llama_index.core.schema import TextNode
 
     vector_store = storage_context.vector_store
     vector_store.stores_text = True
-    nodes_to_embed = [node for node in final_nodes if node.metadata.get("retrieval_enabled")]
+    nodes_to_embed = [
+        node for node in final_nodes if node.metadata.get("retrieval_enabled")
+    ]
     passage_nodes = make_embedding_passage_nodes(nodes_to_embed, TextNode, embedder)
     if passage_nodes:
         storage_context.docstore.add_documents(passage_nodes, allow_update=True)
@@ -541,7 +652,11 @@ def embed_final_nodes(storage_context: Any, final_nodes: list[Any], projection: 
             "embedded_concept_nodes": 0,
         }
     texts = [node.get_content() for node in source_nodes]
-    vector_metadata_drop_keys = {KG_NODES_KEY, KG_RELATIONS_KEY, *RAW_TEXT_VECTOR_METADATA_DROP_KEYS}
+    vector_metadata_drop_keys = {
+        KG_NODES_KEY,
+        KG_RELATIONS_KEY,
+        *RAW_TEXT_VECTOR_METADATA_DROP_KEYS,
+    }
     vector_nodes = [
         copy_node_for_vector_store(node, TextNode, vector_metadata_drop_keys)
         for node in source_nodes
@@ -576,7 +691,9 @@ def main() -> int:
     final_storage_dir = args.final_storage_dir.expanduser().resolve()
     if final_storage_dir.exists() and any(final_storage_dir.iterdir()):
         if not args.force_rebuild_final:
-            raise SystemExit(f"Final storage dir is not empty; pass --force-rebuild-final: {final_storage_dir}")
+            raise SystemExit(
+                f"Final storage dir is not empty; pass --force-rebuild-final: {final_storage_dir}"
+            )
         shutil.rmtree(final_storage_dir)
     final_storage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -593,24 +710,42 @@ def main() -> int:
         path_settings,
         storage_settings,
     )
-    graph_enabled_chunk_ids = {node.id_ for node in final_nodes if node.metadata.get("graph_enabled")}
-    projection = filtered_graph_projection(decisions, concept_resolution, graph_enabled_chunk_ids)
+    graph_enabled_chunk_ids = {
+        node.id_ for node in final_nodes if node.metadata.get("graph_enabled")
+    }
+    projection = filtered_graph_projection(
+        decisions, concept_resolution, graph_enabled_chunk_ids
+    )
 
     from backend.knowledge_graph.storage import KnowledgeGraphStorage
 
-    kg_storage = KnowledgeGraphStorage(path_settings, storage_settings, local_storage=final_storage_dir)
+    kg_storage = KnowledgeGraphStorage(
+        path_settings, storage_settings, local_storage=final_storage_dir
+    )
     embedder = None if args.skip_embeddings else build_embedder(args)
     kg_storage.storage_context.docstore.add_documents(final_nodes, allow_update=True)
     kg_storage.storage_context.property_graph_store.upsert_llama_nodes(final_nodes)
     if embedder is None:
-        index_summary = {"property_graph_index_built": False, "embeddings_skipped": True, "implicit_path_extraction_enabled": False}
+        index_summary = {
+            "property_graph_index_built": False,
+            "embeddings_skipped": True,
+            "implicit_path_extraction_enabled": False,
+        }
     else:
         build_index(kg_storage.storage_context, embedder)
-        index_summary = {"property_graph_index_built": True, "embeddings_skipped": False, "implicit_path_extraction_enabled": False}
-    graph_summary = import_projection_to_property_graph(kg_storage.storage_context, final_nodes, projection)
+        index_summary = {
+            "property_graph_index_built": True,
+            "embeddings_skipped": False,
+            "implicit_path_extraction_enabled": False,
+        }
+    graph_summary = import_projection_to_property_graph(
+        kg_storage.storage_context, final_nodes, projection
+    )
     embedding_summary = {"embedded_retrieval_chunks": 0, "embedded_concept_nodes": 0}
     if embedder is not None:
-        embedding_summary = embed_final_nodes(kg_storage.storage_context, final_nodes, projection, embedder)
+        embedding_summary = embed_final_nodes(
+            kg_storage.storage_context, final_nodes, projection, embedder
+        )
 
     kg_storage.storage_context.persist(persist_dir=str(final_storage_dir))
     manifest = {

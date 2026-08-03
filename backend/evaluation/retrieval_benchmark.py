@@ -6,7 +6,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA_VERSION = "retrieval-benchmark-v0"
 
 
@@ -24,7 +23,7 @@ class EvidenceListSpec:
         return _ordered_unique([*self.required_all, *self.required_any])
 
     @classmethod
-    def from_raw(cls, value: Any, *, field_name: str) -> "EvidenceListSpec":
+    def from_raw(cls, value: Any, *, field_name: str) -> EvidenceListSpec:
         if value is None:
             return cls()
         if not isinstance(value, dict):
@@ -46,12 +45,19 @@ class RelationSpec:
     evidence_chunk_ids: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_raw(cls, value: Any, *, field_name: str) -> "RelationSpec":
+    def from_raw(cls, value: Any, *, field_name: str) -> RelationSpec:
         if not isinstance(value, dict):
             raise BenchmarkValidationError(f"{field_name} relation must be an object")
         _reject_unknown_keys(
             value,
-            {"subject_id", "subject_label", "predicate", "object_id", "object_label", "evidence_chunk_ids"},
+            {
+                "subject_id",
+                "subject_label",
+                "predicate",
+                "object_id",
+                "object_label",
+                "evidence_chunk_ids",
+            },
             field_name,
         )
         return cls(
@@ -77,7 +83,7 @@ class RelationListSpec:
         return [*self.required_all, *self.required_any]
 
     @classmethod
-    def from_raw(cls, value: Any, *, field_name: str) -> "RelationListSpec":
+    def from_raw(cls, value: Any, *, field_name: str) -> RelationListSpec:
         if value is None:
             return cls()
         if not isinstance(value, dict):
@@ -106,7 +112,7 @@ class ExpectedEvidence:
     required_answer_points: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_raw(cls, value: Any) -> "ExpectedEvidence":
+    def from_raw(cls, value: Any) -> ExpectedEvidence:
         if not isinstance(value, dict):
             raise BenchmarkValidationError("expected_evidence must be an object")
         _reject_unknown_keys(
@@ -123,12 +129,24 @@ class ExpectedEvidence:
             "expected_evidence",
         )
         return cls(
-            source_chunk_ids=EvidenceListSpec.from_raw(value.get("source_chunk_ids"), field_name="source_chunk_ids"),
-            source_paths=EvidenceListSpec.from_raw(value.get("source_paths"), field_name="source_paths"),
-            concept_ids=EvidenceListSpec.from_raw(value.get("concept_ids"), field_name="concept_ids"),
-            concept_labels=EvidenceListSpec.from_raw(value.get("concept_labels"), field_name="concept_labels"),
-            relation_ids=EvidenceListSpec.from_raw(value.get("relation_ids"), field_name="relation_ids"),
-            relations=RelationListSpec.from_raw(value.get("relations"), field_name="relations"),
+            source_chunk_ids=EvidenceListSpec.from_raw(
+                value.get("source_chunk_ids"), field_name="source_chunk_ids"
+            ),
+            source_paths=EvidenceListSpec.from_raw(
+                value.get("source_paths"), field_name="source_paths"
+            ),
+            concept_ids=EvidenceListSpec.from_raw(
+                value.get("concept_ids"), field_name="concept_ids"
+            ),
+            concept_labels=EvidenceListSpec.from_raw(
+                value.get("concept_labels"), field_name="concept_labels"
+            ),
+            relation_ids=EvidenceListSpec.from_raw(
+                value.get("relation_ids"), field_name="relation_ids"
+            ),
+            relations=RelationListSpec.from_raw(
+                value.get("relations"), field_name="relations"
+            ),
             required_answer_points=_string_list(value.get("required_answer_points")),
         )
 
@@ -141,12 +159,16 @@ class ForbiddenEvidence:
     relations: list[RelationSpec] = field(default_factory=list)
 
     @classmethod
-    def from_raw(cls, value: Any) -> "ForbiddenEvidence":
+    def from_raw(cls, value: Any) -> ForbiddenEvidence:
         if value is None:
             return cls()
         if not isinstance(value, dict):
             raise BenchmarkValidationError("forbidden_evidence must be an object")
-        _reject_unknown_keys(value, {"source_chunk_ids", "concept_ids", "concept_labels", "relations"}, "forbidden_evidence")
+        _reject_unknown_keys(
+            value,
+            {"source_chunk_ids", "concept_ids", "concept_labels", "relations"},
+            "forbidden_evidence",
+        )
         return cls(
             source_chunk_ids=_string_list(value.get("source_chunk_ids")),
             concept_ids=_string_list(value.get("concept_ids")),
@@ -171,7 +193,7 @@ class Thresholds:
     forbidden_evidence_count: int | None = None
 
     @classmethod
-    def from_raw(cls, value: Any) -> "Thresholds":
+    def from_raw(cls, value: Any) -> Thresholds:
         if value is None:
             return cls()
         if not isinstance(value, dict):
@@ -200,7 +222,9 @@ class Thresholds:
             edge_recall=_float_or_none(value.get("edge_recall")),
             max_dangling_edges=_int_or_none(value.get("max_dangling_edges")),
             max_chunk_nodes=_int_or_none(value.get("max_chunk_nodes")),
-            forbidden_evidence_count=_int_or_none(value.get("forbidden_evidence_count")),
+            forbidden_evidence_count=_int_or_none(
+                value.get("forbidden_evidence_count")
+            ),
         )
 
 
@@ -219,7 +243,7 @@ class BenchmarkCase:
     review_notes: str | None = None
 
     @classmethod
-    def from_raw(cls, value: Any) -> "BenchmarkCase":
+    def from_raw(cls, value: Any) -> BenchmarkCase:
         if not isinstance(value, dict):
             raise BenchmarkValidationError("benchmark row must be an object")
         _reject_unknown_keys(
@@ -241,7 +265,9 @@ class BenchmarkCase:
         )
         schema_version = _required_string(value, "schema_version")
         if schema_version != SCHEMA_VERSION:
-            raise BenchmarkValidationError(f"unsupported schema_version {schema_version!r}")
+            raise BenchmarkValidationError(
+                f"unsupported schema_version {schema_version!r}"
+            )
         mode = _required_string(value, "mode")
         if mode not in {"analyst", "visualizer"}:
             raise BenchmarkValidationError(f"unsupported mode {mode!r}")
@@ -257,7 +283,9 @@ class BenchmarkCase:
             seeded_from=_string_list(value.get("seeded_from")),
             why_selected=_string_or_none(value.get("why_selected")),
             expected_evidence=ExpectedEvidence.from_raw(value.get("expected_evidence")),
-            forbidden_evidence=ForbiddenEvidence.from_raw(value.get("forbidden_evidence")),
+            forbidden_evidence=ForbiddenEvidence.from_raw(
+                value.get("forbidden_evidence")
+            ),
             thresholds=Thresholds.from_raw(value.get("thresholds")),
             review_notes=_string_or_none(value.get("review_notes")),
         )
@@ -314,7 +342,9 @@ class EvidenceCatalog:
         return self.relation_by_id.get(relation_id)
 
     @classmethod
-    def from_storage_dir(cls, storage_dir: Path, *, root_dir: Path | None = None) -> "EvidenceCatalog":
+    def from_storage_dir(
+        cls, storage_dir: Path, *, root_dir: Path | None = None
+    ) -> EvidenceCatalog:
         root = root_dir or Path.cwd()
         manifest_path = storage_dir / "postprocessed_graph_storage_manifest.json"
         if not manifest_path.exists():
@@ -353,7 +383,9 @@ class EvidenceCatalog:
             if record_type == "concept_node":
                 concept_id = _string_or_none(row.get("id"))
                 if concept_id:
-                    self.concept_labels_by_id.setdefault(concept_id, set()).update(_labels_from_row(row))
+                    self.concept_labels_by_id.setdefault(concept_id, set()).update(
+                        _labels_from_row(row)
+                    )
             elif record_type == "relation_edge":
                 relation_id = _string_or_none(row.get("id"))
                 subject_id = _string_or_none(row.get("source_concept_id"))
@@ -396,7 +428,9 @@ class ReferenceValidationReport:
     quarantined_source_chunk_ids: list[str] = field(default_factory=list)
     missing_concept_ids: list[str] = field(default_factory=list)
     missing_relation_ids: list[str] = field(default_factory=list)
-    relation_ids_missing_graph_triplet: list[dict[str, str]] = field(default_factory=list)
+    relation_ids_missing_graph_triplet: list[dict[str, str]] = field(
+        default_factory=list
+    )
 
     @property
     def passed(self) -> bool:
@@ -423,7 +457,9 @@ class ReferenceValidationReport:
         return payload
 
 
-def load_benchmark_cases(path: Path, *, mode: str = "both", case_ids: set[str] | None = None) -> list[BenchmarkCase]:
+def load_benchmark_cases(
+    path: Path, *, mode: str = "both", case_ids: set[str] | None = None
+) -> list[BenchmarkCase]:
     cases: list[BenchmarkCase] = []
     seen_ids: set[str] = set()
     errors: list[str] = []
@@ -432,7 +468,9 @@ def load_benchmark_cases(path: Path, *, mode: str = "both", case_ids: set[str] |
     if not path.exists():
         raise BenchmarkValidationError(f"Benchmark file does not exist: {path}")
 
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         try:
@@ -442,7 +480,9 @@ def load_benchmark_cases(path: Path, *, mode: str = "both", case_ids: set[str] |
             errors.append(f"line {line_number}: {exc}")
             continue
         if case.id in seen_ids:
-            errors.append(f"line {line_number}: duplicate benchmark case id {case.id!r}")
+            errors.append(
+                f"line {line_number}: duplicate benchmark case id {case.id!r}"
+            )
             continue
         seen_ids.add(case.id)
         if mode != "both" and case.mode != mode:
@@ -456,7 +496,9 @@ def load_benchmark_cases(path: Path, *, mode: str = "both", case_ids: set[str] |
     if case_ids is not None:
         missing = sorted(case_ids - seen_ids)
         if missing:
-            raise BenchmarkValidationError(f"Unknown benchmark case id(s): {', '.join(missing)}")
+            raise BenchmarkValidationError(
+                f"Unknown benchmark case id(s): {', '.join(missing)}"
+            )
     return cases
 
 
@@ -516,7 +558,11 @@ def validate_benchmark_references(
             relation = catalog.relation_for_id(relation_id)
             if relation is None:
                 continue
-            triplet = (relation.subject_id, _normalize_predicate(relation.predicate), relation.object_id)
+            triplet = (
+                relation.subject_id,
+                _normalize_predicate(relation.predicate),
+                relation.object_id,
+            )
             if triplet not in graph_triplet_set:
                 missing_triplets.append(
                     {
@@ -542,43 +588,77 @@ def validate_benchmark_references(
     )
 
 
-def score_case(case: BenchmarkCase, actual: ActualEvidence, catalog: EvidenceCatalog | None = None) -> CaseResult:
+def score_case(
+    case: BenchmarkCase, actual: ActualEvidence, catalog: EvidenceCatalog | None = None
+) -> CaseResult:
     catalog = catalog or EvidenceCatalog()
     scores: dict[str, float | int | None] = {}
     failures: list[str] = []
     missing_required: dict[str, list[Any]] = {}
 
-    source_eval = _eval_string_spec(set(actual.source_chunk_ids_ranked), case.expected_evidence.source_chunk_ids, normalize=False)
+    source_eval = _eval_string_spec(
+        set(actual.source_chunk_ids_ranked),
+        case.expected_evidence.source_chunk_ids,
+        normalize=False,
+    )
     _add_missing(missing_required, "source_chunk_ids", source_eval["missing_all"])
     scores["source_recall"] = source_eval["recall"]
-    scores["source_recall_at_6"] = _recall_at_k(actual.source_chunk_ids_ranked, case.expected_evidence.source_chunk_ids.expected, 6)
-    scores["source_mrr_at_6"] = _mrr_at_k(actual.source_chunk_ids_ranked, case.expected_evidence.source_chunk_ids.expected, 6)
+    scores["source_recall_at_6"] = _recall_at_k(
+        actual.source_chunk_ids_ranked,
+        case.expected_evidence.source_chunk_ids.expected,
+        6,
+    )
+    scores["source_mrr_at_6"] = _mrr_at_k(
+        actual.source_chunk_ids_ranked,
+        case.expected_evidence.source_chunk_ids.expected,
+        6,
+    )
 
-    path_eval = _eval_string_spec(set(actual.source_paths), case.expected_evidence.source_paths, normalize=True)
+    path_eval = _eval_string_spec(
+        set(actual.source_paths), case.expected_evidence.source_paths, normalize=True
+    )
     _add_missing(missing_required, "source_paths", path_eval["missing_all"])
     scores["source_path_recall"] = path_eval["recall"]
 
-    concept_id_eval = _eval_string_spec(set(actual.concept_ids), case.expected_evidence.concept_ids, normalize=False)
-    concept_label_eval = _eval_string_spec(set(actual.concept_labels), case.expected_evidence.concept_labels, normalize=True)
+    concept_id_eval = _eval_string_spec(
+        set(actual.concept_ids), case.expected_evidence.concept_ids, normalize=False
+    )
+    concept_label_eval = _eval_string_spec(
+        set(actual.concept_labels),
+        case.expected_evidence.concept_labels,
+        normalize=True,
+    )
     _add_missing(missing_required, "concept_ids", concept_id_eval["missing_all"])
     _add_missing(missing_required, "concept_labels", concept_label_eval["missing_all"])
     scores["concept_id_recall"] = concept_id_eval["recall"]
     scores["concept_label_recall"] = concept_label_eval["recall"]
-    scores["concept_recall"] = _best_available_score(concept_id_eval["recall"], concept_label_eval["recall"])
+    scores["concept_recall"] = _best_available_score(
+        concept_id_eval["recall"], concept_label_eval["recall"]
+    )
     scores["node_recall"] = scores["concept_recall"]
 
-    relation_id_eval = _eval_relation_ids(case.expected_evidence.relation_ids, actual, catalog)
-    relation_spec_eval = _eval_relation_specs(case.expected_evidence.relations, actual, catalog)
+    relation_id_eval = _eval_relation_ids(
+        case.expected_evidence.relation_ids, actual, catalog
+    )
+    relation_spec_eval = _eval_relation_specs(
+        case.expected_evidence.relations, actual, catalog
+    )
     _add_missing(missing_required, "relation_ids", relation_id_eval["missing_all"])
     _add_missing(missing_required, "relations", relation_spec_eval["missing_all"])
     scores["relation_id_recall"] = relation_id_eval["recall"]
     scores["relation_spec_recall"] = relation_spec_eval["recall"]
-    scores["relation_recall"] = _best_available_score(relation_id_eval["recall"], relation_spec_eval["recall"])
+    scores["relation_recall"] = _best_available_score(
+        relation_id_eval["recall"], relation_spec_eval["recall"]
+    )
     scores["edge_recall"] = scores["relation_recall"]
 
     forbidden_hits = _forbidden_hits(case.forbidden_evidence, actual, catalog)
-    scores["forbidden_evidence_count"] = sum(len(values) for values in forbidden_hits.values())
-    scores["dangling_edge_count"] = _int_metric(actual.graph_metrics, "dangling_edge_count")
+    scores["forbidden_evidence_count"] = sum(
+        len(values) for values in forbidden_hits.values()
+    )
+    scores["dangling_edge_count"] = _int_metric(
+        actual.graph_metrics, "dangling_edge_count"
+    )
     scores["chunk_node_count"] = _chunk_node_count(actual)
 
     _apply_required_all_failures(missing_required, failures)
@@ -615,7 +695,9 @@ def summarize_results(results: list[CaseResult]) -> dict[str, Any]:
     }
 
 
-def actual_evidence_from_analyst_result(result: dict[str, Any], catalog: EvidenceCatalog | None = None) -> ActualEvidence:
+def actual_evidence_from_analyst_result(
+    result: dict[str, Any], catalog: EvidenceCatalog | None = None
+) -> ActualEvidence:
     catalog = catalog or EvidenceCatalog()
     source_ids: list[str] = []
     source_paths: list[str] = []
@@ -625,7 +707,9 @@ def actual_evidence_from_analyst_result(result: dict[str, Any], catalog: Evidenc
     relation_ids: list[str] = []
 
     for source in result.get("sources", []) or []:
-        source_id = _string_or_none(getattr(getattr(source, "metadata", None), "chunk_id", None)) or _string_or_none(getattr(source, "node_id", None))
+        source_id = _string_or_none(
+            getattr(getattr(source, "metadata", None), "chunk_id", None)
+        ) or _string_or_none(getattr(source, "node_id", None))
         if source_id:
             source_ids.append(source_id)
         metadata = getattr(source, "metadata", None)
@@ -648,10 +732,21 @@ def actual_evidence_from_analyst_result(result: dict[str, Any], catalog: Evidenc
             subject_label=_string_or_none(getattr(relation, "subject", None)),
             predicate=str(getattr(relation, "predicate", "")),
             object_label=_string_or_none(getattr(relation, "object", None)),
-            evidence_chunk_ids=_string_list(getattr(relation, "evidence_chunk_ids", [])),
+            evidence_chunk_ids=_string_list(
+                getattr(relation, "evidence_chunk_ids", [])
+            ),
         )
         relations.append(actual_relation)
-        concept_labels.extend([label for label in [actual_relation.subject_label, actual_relation.object_label] if label])
+        concept_labels.extend(
+            [
+                label
+                for label in [
+                    actual_relation.subject_label,
+                    actual_relation.object_label,
+                ]
+                if label
+            ]
+        )
 
     return ActualEvidence(
         source_chunk_ids_ranked=_ordered_unique(source_ids),
@@ -688,7 +783,9 @@ def actual_evidence_from_visualizer_result(
             concept_labels.append(labels_by_node[node_id])
 
     for subject_id, predicate, object_id in triplets:
-        relation_entry = _catalog_relation_for_triplet(catalog, subject_id, predicate, object_id)
+        relation_entry = _catalog_relation_for_triplet(
+            catalog, subject_id, predicate, object_id
+        )
         if relation_entry:
             relation_ids.append(relation_entry.relation_id)
             source_chunk_ids.extend(relation_entry.evidence_chunk_ids)
@@ -700,7 +797,9 @@ def actual_evidence_from_visualizer_result(
                 predicate=predicate,
                 object_id=object_id,
                 object_label=labels_by_node.get(object_id),
-                evidence_chunk_ids=relation_entry.evidence_chunk_ids if relation_entry else [],
+                evidence_chunk_ids=relation_entry.evidence_chunk_ids
+                if relation_entry
+                else [],
             )
         )
 
@@ -734,11 +833,23 @@ def render_markdown_summary(summary: dict[str, Any], results: list[CaseResult]) 
     return "\n".join(lines)
 
 
-def _eval_string_spec(actual_values: set[str], spec: EvidenceListSpec, *, normalize: bool) -> dict[str, Any]:
+def _eval_string_spec(
+    actual_values: set[str], spec: EvidenceListSpec, *, normalize: bool
+) -> dict[str, Any]:
     if normalize:
-        actual = {_normalize_text(value) for value in actual_values if _normalize_text(value)}
-        required_all = [_normalize_text(value) for value in spec.required_all if _normalize_text(value)]
-        required_any = [_normalize_text(value) for value in spec.required_any if _normalize_text(value)]
+        actual = {
+            _normalize_text(value) for value in actual_values if _normalize_text(value)
+        }
+        required_all = [
+            _normalize_text(value)
+            for value in spec.required_all
+            if _normalize_text(value)
+        ]
+        required_any = [
+            _normalize_text(value)
+            for value in spec.required_any
+            if _normalize_text(value)
+        ]
     else:
         actual = set(actual_values)
         required_all = list(spec.required_all)
@@ -752,7 +863,9 @@ def _eval_string_spec(actual_values: set[str], spec: EvidenceListSpec, *, normal
     }
 
 
-def _eval_relation_ids(spec: EvidenceListSpec, actual: ActualEvidence, catalog: EvidenceCatalog) -> dict[str, Any]:
+def _eval_relation_ids(
+    spec: EvidenceListSpec, actual: ActualEvidence, catalog: EvidenceCatalog
+) -> dict[str, Any]:
     expected = spec.expected
     hits: list[str] = []
     for relation_id in expected:
@@ -760,52 +873,82 @@ def _eval_relation_ids(spec: EvidenceListSpec, actual: ActualEvidence, catalog: 
             hits.append(relation_id)
             continue
         relation_entry = catalog.relation_for_id(relation_id)
-        if relation_entry and any(_relation_matches_entry(item, relation_entry, catalog) for item in actual.relations):
+        if relation_entry and any(
+            _relation_matches_entry(item, relation_entry, catalog)
+            for item in actual.relations
+        ):
             hits.append(relation_id)
     return {
         "hits": hits,
-        "missing_all": [relation_id for relation_id in spec.required_all if relation_id not in hits],
-        "recall": (len(hits) / len(expected)) if expected else None,
-    }
-
-
-def _eval_relation_specs(spec: RelationListSpec, actual: ActualEvidence, catalog: EvidenceCatalog) -> dict[str, Any]:
-    expected = spec.expected
-    hits = [item for item in expected if any(_relation_matches_spec(relation, item, catalog) for relation in actual.relations)]
-    return {
-        "hits": hits,
         "missing_all": [
-            item.model_dump(exclude_none=True)
-            for item in spec.required_all
-            if not any(_relation_matches_spec(relation, item, catalog) for relation in actual.relations)
+            relation_id for relation_id in spec.required_all if relation_id not in hits
         ],
         "recall": (len(hits) / len(expected)) if expected else None,
     }
 
 
-def _forbidden_hits(forbidden: ForbiddenEvidence, actual: ActualEvidence, catalog: EvidenceCatalog) -> dict[str, list[Any]]:
+def _eval_relation_specs(
+    spec: RelationListSpec, actual: ActualEvidence, catalog: EvidenceCatalog
+) -> dict[str, Any]:
+    expected = spec.expected
+    hits = [
+        item
+        for item in expected
+        if any(
+            _relation_matches_spec(relation, item, catalog)
+            for relation in actual.relations
+        )
+    ]
+    return {
+        "hits": hits,
+        "missing_all": [
+            item.model_dump(exclude_none=True)
+            for item in spec.required_all
+            if not any(
+                _relation_matches_spec(relation, item, catalog)
+                for relation in actual.relations
+            )
+        ],
+        "recall": (len(hits) / len(expected)) if expected else None,
+    }
+
+
+def _forbidden_hits(
+    forbidden: ForbiddenEvidence, actual: ActualEvidence, catalog: EvidenceCatalog
+) -> dict[str, list[Any]]:
     hits: dict[str, list[Any]] = {}
-    source_hits = sorted(set(forbidden.source_chunk_ids).intersection(actual.source_chunk_ids_ranked))
+    source_hits = sorted(
+        set(forbidden.source_chunk_ids).intersection(actual.source_chunk_ids_ranked)
+    )
     if source_hits:
         hits["source_chunk_ids"] = source_hits
     concept_hits = sorted(set(forbidden.concept_ids).intersection(actual.concept_ids))
     if concept_hits:
         hits["concept_ids"] = concept_hits
     actual_labels = {_normalize_text(label) for label in actual.concept_labels}
-    label_hits = [label for label in forbidden.concept_labels if _normalize_text(label) in actual_labels]
+    label_hits = [
+        label
+        for label in forbidden.concept_labels
+        if _normalize_text(label) in actual_labels
+    ]
     if label_hits:
         hits["concept_labels"] = label_hits
     relation_hits = [
         spec.model_dump(exclude_none=True)
         for spec in forbidden.relations
-        if any(_relation_matches_spec(relation, spec, catalog) for relation in actual.relations)
+        if any(
+            _relation_matches_spec(relation, spec, catalog)
+            for relation in actual.relations
+        )
     ]
     if relation_hits:
         hits["relations"] = relation_hits
     return hits
 
 
-def _relation_matches_entry(relation: RelationEvidence, entry: RelationCatalogEntry, catalog: EvidenceCatalog) -> bool:
+def _relation_matches_entry(
+    relation: RelationEvidence, entry: RelationCatalogEntry, catalog: EvidenceCatalog
+) -> bool:
     return _relation_matches_spec(
         relation,
         RelationSpec(
@@ -818,8 +961,12 @@ def _relation_matches_entry(relation: RelationEvidence, entry: RelationCatalogEn
     )
 
 
-def _relation_matches_spec(relation: RelationEvidence, spec: RelationSpec, catalog: EvidenceCatalog) -> bool:
-    if spec.predicate and _normalize_predicate(relation.predicate) != _normalize_predicate(spec.predicate):
+def _relation_matches_spec(
+    relation: RelationEvidence, spec: RelationSpec, catalog: EvidenceCatalog
+) -> bool:
+    if spec.predicate and _normalize_predicate(
+        relation.predicate
+    ) != _normalize_predicate(spec.predicate):
         return False
     if spec.subject_id and not _endpoint_matches(
         actual_id=relation.subject_id,
@@ -837,9 +984,13 @@ def _relation_matches_spec(relation: RelationEvidence, spec: RelationSpec, catal
         catalog=catalog,
     ):
         return False
-    if spec.subject_label and _normalize_text(spec.subject_label) != _normalize_text(relation.subject_label or ""):
+    if spec.subject_label and _normalize_text(spec.subject_label) != _normalize_text(
+        relation.subject_label or ""
+    ):
         return False
-    if spec.object_label and _normalize_text(spec.object_label) != _normalize_text(relation.object_label or ""):
+    if spec.object_label and _normalize_text(spec.object_label) != _normalize_text(
+        relation.object_label or ""
+    ):
         return False
     if spec.evidence_chunk_ids:
         actual_chunks = set(relation.evidence_chunk_ids)
@@ -858,13 +1009,19 @@ def _endpoint_matches(
 ) -> bool:
     if actual_id == expected_id:
         return True
-    if expected_label and _normalize_text(actual_label or "") == _normalize_text(expected_label):
+    if expected_label and _normalize_text(actual_label or "") == _normalize_text(
+        expected_label
+    ):
         return True
-    expected_labels = {_normalize_text(label) for label in catalog.labels_for_concept(expected_id)}
+    expected_labels = {
+        _normalize_text(label) for label in catalog.labels_for_concept(expected_id)
+    }
     return bool(actual_label and _normalize_text(actual_label) in expected_labels)
 
 
-def _apply_thresholds(thresholds: Thresholds, scores: dict[str, float | int | None], failures: list[str]) -> None:
+def _apply_thresholds(
+    thresholds: Thresholds, scores: dict[str, float | int | None], failures: list[str]
+) -> None:
     minimum_metrics = {
         "source_recall_at_6": thresholds.source_recall_at_6,
         "source_mrr_at_6": thresholds.source_mrr_at_6,
@@ -893,19 +1050,27 @@ def _apply_thresholds(thresholds: Thresholds, scores: dict[str, float | int | No
             failures.append(f"{metric}={value} above threshold {threshold}")
 
 
-def _apply_required_all_failures(missing_required: dict[str, list[Any]], failures: list[str]) -> None:
+def _apply_required_all_failures(
+    missing_required: dict[str, list[Any]], failures: list[str]
+) -> None:
     for evidence_name, missing in missing_required.items():
         if missing:
             failures.append(f"missing required {evidence_name}: {missing}")
 
 
-def _recall_at_k(ranked_values: list[str], expected_values: list[str], k: int) -> float | None:
+def _recall_at_k(
+    ranked_values: list[str], expected_values: list[str], k: int
+) -> float | None:
     if not expected_values:
         return None
-    return len(set(ranked_values[:k]).intersection(expected_values)) / len(set(expected_values))
+    return len(set(ranked_values[:k]).intersection(expected_values)) / len(
+        set(expected_values)
+    )
 
 
-def _mrr_at_k(ranked_values: list[str], expected_values: list[str], k: int) -> float | None:
+def _mrr_at_k(
+    ranked_values: list[str], expected_values: list[str], k: int
+) -> float | None:
     expected = set(expected_values)
     if not expected:
         return None
@@ -920,7 +1085,9 @@ def _best_available_score(*values: float | int | None) -> float | None:
     return max(present) if present else None
 
 
-def _catalog_relation_for_triplet(catalog: EvidenceCatalog, subject_id: str, predicate: str, object_id: str) -> RelationCatalogEntry | None:
+def _catalog_relation_for_triplet(
+    catalog: EvidenceCatalog, subject_id: str, predicate: str, object_id: str
+) -> RelationCatalogEntry | None:
     normalized_predicate = _normalize_predicate(predicate)
     for relation in catalog.relation_by_id.values():
         if (
@@ -963,20 +1130,34 @@ def _collect_benchmark_references(cases: list[BenchmarkCase]) -> dict[str, list[
 def _source_is_disabled(metadata: dict[str, Any]) -> bool:
     if _bool_flag(metadata.get("retrieval_disabled")):
         return True
-    if metadata.get("retrieval_enabled") is not None and not _bool_flag(metadata.get("retrieval_enabled")):
+    if metadata.get("retrieval_enabled") is not None and not _bool_flag(
+        metadata.get("retrieval_enabled")
+    ):
         return True
-    action = _string_or_none(metadata.get("postprocess_action") or metadata.get("action"))
+    action = _string_or_none(
+        metadata.get("postprocess_action") or metadata.get("action")
+    )
     return bool(action and action not in {"keep", "keep_with_cleaned_text"})
 
 
 def _source_is_quarantined(metadata: dict[str, Any]) -> bool:
-    if _bool_flag(metadata.get("quarantined")) or _bool_flag(metadata.get("is_quarantined")):
+    if _bool_flag(metadata.get("quarantined")) or _bool_flag(
+        metadata.get("is_quarantined")
+    ):
         return True
-    action = _string_or_none(metadata.get("postprocess_action") or metadata.get("action"))
+    action = _string_or_none(
+        metadata.get("postprocess_action") or metadata.get("action")
+    )
     if action in {"quarantine", "quarantined", "discard", "drop"}:
         return True
-    issue_types = {_normalize_text(issue_type) for issue_type in _string_list(metadata.get("issue_types"))}
-    issue_types.update(_normalize_text(issue_type) for issue_type in _string_list(metadata.get("postprocess_issue_types")))
+    issue_types = {
+        _normalize_text(issue_type)
+        for issue_type in _string_list(metadata.get("issue_types"))
+    }
+    issue_types.update(
+        _normalize_text(issue_type)
+        for issue_type in _string_list(metadata.get("postprocess_issue_types"))
+    )
     return any("quarantine" in issue_type for issue_type in issue_types)
 
 
@@ -1021,7 +1202,11 @@ def _metadata_paths(metadata: Any) -> list[str]:
 
 
 def _node_id(node: Any) -> str | None:
-    return _string_or_none(getattr(node, "id", None) or getattr(node, "node_id", None) or getattr(node, "id_", None))
+    return _string_or_none(
+        getattr(node, "id", None)
+        or getattr(node, "node_id", None)
+        or getattr(node, "id_", None)
+    )
 
 
 def _node_label(node: Any) -> str | None:
@@ -1061,7 +1246,9 @@ def _labels_from_row(row: dict[str, Any]) -> set[str]:
     return labels
 
 
-def _add_missing(missing_required: dict[str, list[Any]], key: str, missing: list[Any]) -> None:
+def _add_missing(
+    missing_required: dict[str, list[Any]], key: str, missing: list[Any]
+) -> None:
     if missing:
         missing_required[key] = missing
 
@@ -1096,7 +1283,9 @@ def _float_or_none(value: Any) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
-        raise BenchmarkValidationError(f"expected numeric threshold, got {value!r}") from exc
+        raise BenchmarkValidationError(
+            f"expected numeric threshold, got {value!r}"
+        ) from exc
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -1105,7 +1294,9 @@ def _int_or_none(value: Any) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
-        raise BenchmarkValidationError(f"expected integer threshold, got {value!r}") from exc
+        raise BenchmarkValidationError(
+            f"expected integer threshold, got {value!r}"
+        ) from exc
 
 
 def _ordered_unique(values: list[str] | Any) -> list[str]:
@@ -1129,10 +1320,14 @@ def _normalize_predicate(value: str) -> str:
     return _normalize_text(value).replace(" ", "_")
 
 
-def _reject_unknown_keys(value: dict[str, Any], allowed: set[str], field_name: str) -> None:
+def _reject_unknown_keys(
+    value: dict[str, Any], allowed: set[str], field_name: str
+) -> None:
     unknown = sorted(set(value) - allowed)
     if unknown:
-        raise BenchmarkValidationError(f"{field_name} has unknown key(s): {', '.join(unknown)}")
+        raise BenchmarkValidationError(
+            f"{field_name} has unknown key(s): {', '.join(unknown)}"
+        )
 
 
 def _dump_dataclass(value: Any, *, exclude_none: bool) -> dict[str, Any]:
@@ -1145,9 +1340,7 @@ def _dump_dataclass(value: Any, *, exclude_none: bool) -> dict[str, Any]:
 def _drop_none(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            key: _drop_none(item)
-            for key, item in value.items()
-            if item is not None
+            key: _drop_none(item) for key, item in value.items() if item is not None
         }
     if isinstance(value, list):
         return [_drop_none(item) for item in value]

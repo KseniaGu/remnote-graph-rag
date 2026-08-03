@@ -49,7 +49,9 @@ def test_openai_style_chat_params_are_provider_specific() -> None:
     }
 
 
-def test_graph_index_ollama_params_include_model_and_indexing_generation_fields() -> None:
+def test_graph_index_ollama_params_include_model_and_indexing_generation_fields() -> (
+    None
+):
     settings = OllamaSettings(
         role=ModelRoleType.orchestrator,
         model_name="graph-model",
