@@ -1,3 +1,4 @@
+assets/external/
 *.py[cod]
 .web
 *.db
@@ -31,6 +32,7 @@ data/
 docs/
 models/
 exports/
+.reports/
 
 # Local storage
 storage/
@@ -44,3 +46,4 @@ secrets.yml
 .agents/
 .pytest_cache/
 .devcontainer/**/devcontainer-lock.json
+.codex/
