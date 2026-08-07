@@ -10,7 +10,7 @@
 > technical
 > concepts through interactive learning, research, and visualization.
 
-## [**Live Demo**](https://remnote-graph-rag-frontend-1061636002375.europe-west1.run.app/)
+## [**Live Demo**](https://remnote-graph-rag-frontend-875003222198.europe-west1.run.app/)
 
 ## Overview
 
