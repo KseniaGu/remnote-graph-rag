@@ -152,7 +152,6 @@ jobs:
             --set-env-vars "MEMGRAPH_INIT_FROM_LOCAL=false" \
             --set-secrets "OLLAMA_API_KEY=ollama-api-key:latest" \
             --set-secrets "TAVILY_API_KEY=tavily-api-key:latest" \
-            --set-secrets "COHERE_API_KEY=cohere-api-key:latest" \
             --set-secrets "LANGSMITH_API_KEY=langchain-api-key:latest" \
             --set-env-vars "LANGSMITH_TRACING=true" \
             --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \
