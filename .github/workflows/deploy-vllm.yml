@@ -14,7 +14,7 @@ env:
   VLLM_MODEL_PATH: /mnt/models/qwen-9b
   MODEL_BUCKET_NAME: ${{ vars.MODEL_BUCKET_NAME }}
   MODEL_CACHE_BUILD_DIR: .docker-build/sentence-transformers
-  RUNTIME_STORAGE_BUCKET_NAME: remnote-graph-rag-storage
+  RUNTIME_STORAGE_BUCKET_NAME: ${{ vars.STORAGE_BUCKET_NAME }}
   RUNTIME_STORAGE_BUILD_DIR: .docker-build/runtime-storage
 
 jobs:
@@ -238,7 +238,8 @@ jobs:
             --set-env-vars "LLM_PIPELINE=vllm" \
             --set-env-vars "VLLM_ROUTING_URL=${{ env.VLLM_ROUTING_URL }}" \
             --set-env-vars "VLLM_GENERATION_URL=${{ env.VLLM_GENERATION_URL }}" \
-            --set-env-vars "VLLM_MODEL_PATH=$VLLM_MODEL_PATH"
+            --set-env-vars "VLLM_MODEL_PATH=$VLLM_MODEL_PATH" \
+            --set-env-vars "ASSET_BASE_URL=https://storage.googleapis.com/$PROJECT_ID-remnote-graph-rag-assets"
 
       - name: Get backend URL
         run: |

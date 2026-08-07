@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 # BASE
@@ -12,8 +13,8 @@ DOCUMENT_PARSER_LOGGING = "Documents parsing"
 MAX_RETRIES = 3
 RECURSION_LIMIT = 15
 DEFAULT_EMBEDDING_DIM = 384
-LOGO_URL = "https://storage.googleapis.com/remnote-graph-rag-assets/book_2.png"
-FAVICON_URL = "https://storage.googleapis.com/remnote-graph-rag-assets/favicon.ico"
+LOGO_URL = f"{os.environ.get('ASSET_BASE_URL', '')}/book_2.png"
+FAVICON_URL = f"{os.environ.get('ASSET_BASE_URL', '')}/favicon.ico"
 
 # KNOWLEDGE BASE
 REMNOTE_IMAGE_HOST_MARKER = "remnote-user-data.s3.amazonaws.com"

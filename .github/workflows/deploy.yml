@@ -15,7 +15,7 @@ env:
   # LANGSMITH_EXPORT_SCHEDULER_NAME: langsmith-export-daily
   MODEL_BUCKET_NAME: ${{ vars.MODEL_BUCKET_NAME }}
   MODEL_CACHE_BUILD_DIR: .docker-build/sentence-transformers
-  RUNTIME_STORAGE_BUCKET_NAME: remnote-graph-rag-storage
+  RUNTIME_STORAGE_BUCKET_NAME: ${{ vars.STORAGE_BUCKET_NAME }}
   RUNTIME_STORAGE_BUILD_DIR: .docker-build/runtime-storage
 
 jobs:
@@ -156,7 +156,8 @@ jobs:
             --set-secrets "LANGSMITH_API_KEY=langchain-api-key:latest" \
             --set-env-vars "LANGSMITH_TRACING=true" \
             --set-env-vars "LANGSMITH_PROJECT=remnote-graph-rag" \
-            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com"
+            --set-env-vars "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com" \
+            --set-env-vars "ASSET_BASE_URL=https://storage.googleapis.com/$PROJECT_ID-remnote-graph-rag-assets"
 
       # - name: Deploy LangSmith export Cloud Run job
       #   run: |
