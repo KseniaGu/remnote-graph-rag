@@ -14,7 +14,7 @@ env:
   VLLM_MODEL_PATH: /mnt/models/qwen-9b
   MODEL_BUCKET_NAME: ${{ vars.MODEL_BUCKET_NAME }}
   MODEL_CACHE_BUILD_DIR: .docker-build/sentence-transformers
-  RUNTIME_STORAGE_BUCKET_NAME: remnote-graph-rag-storage
+  RUNTIME_STORAGE_BUCKET_NAME: ${{ vars.STORAGE_BUCKET_NAME }}
   RUNTIME_STORAGE_BUILD_DIR: .docker-build/runtime-storage
 
 jobs:
