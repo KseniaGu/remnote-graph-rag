@@ -49,3 +49,7 @@ secrets.yml
 .codex/
 .mypy_cache/
 .ruff_cache/
+
+# Local code
+scripts/local/
+tests/local/
