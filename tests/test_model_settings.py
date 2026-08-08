@@ -59,7 +59,7 @@ def test_openai_style_chat_params_are_provider_specific() -> None:
 def test_default_analyst_uses_v6_educational_cloud_configuration() -> None:
     analyst = ModelSettings().analyst
 
-    assert analyst.model_name == "nemotron-3-super:cloud"
+    assert analyst.model_name == "qwen3.5:cloud"
     assert analyst.prompt_version == "v6"
     assert analyst.num_predict == 8192
     assert analyst.num_ctx == 32768

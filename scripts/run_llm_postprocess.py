@@ -37,9 +37,11 @@ from backend.data_processing.llm_postprocess import (
     write_sidecar_outputs,
 )
 from backend.data_processing.llm_postprocess_runner import (
+    graph_worthy_inputs,
     infer_concept_resolution_model_name,
     load_excluded_chunk_ids,
     load_existing_postprocess_sidecars,
+    merge_quality_and_graph_decisions,
     resolve_concepts,
     run_postprocess_pass,
     select_run_inputs,
@@ -216,22 +218,56 @@ def main() -> int:
         print(json.dumps(report, indent=2))
         return 0
 
-    pass_result = run_postprocess_pass(
+    quality_result = run_postprocess_pass(
         args,
-        pass_name="single",
+        pass_name="quality",
         inputs=selected_inputs,
         output_dir=args.output_dir,
     )
-    concept_result = resolve_concepts(args, args.output_dir, pass_result.decisions)
+    graph_inputs = (
+        []
+        if quality_result.aborted
+        else graph_worthy_inputs(
+            selected_inputs,
+            quality_result.decisions,
+            quality_result.failures,
+        )
+    )
+    print(f"Graph pass selected {len(graph_inputs)} graph-worthy chunks.")
+
+    graph_result = None
+    if graph_inputs:
+        graph_result = run_postprocess_pass(
+            args,
+            pass_name="graph",
+            inputs=graph_inputs,
+            output_dir=args.output_dir,
+        )
+
+    decisions = (
+        merge_quality_and_graph_decisions(
+            quality_result.decisions,
+            graph_result.decisions,
+        )
+        if graph_result
+        else quality_result.decisions
+    )
+    failures = [
+        *quality_result.failures,
+        *(graph_result.failures if graph_result else []),
+    ]
+    concept_result = resolve_concepts(args, args.output_dir, decisions)
 
     report = write_sidecar_outputs(
         args.output_dir,
         inputs=selected_inputs,
-        decisions=pass_result.decisions,
-        failures=pass_result.failures,
+        decisions=decisions,
+        failures=failures,
         concept_resolution=concept_result.resolution,
-        cache_hits=pass_result.cache_hits,
-        cache_misses=pass_result.cache_misses,
+        cache_hits=quality_result.cache_hits
+        + (graph_result.cache_hits if graph_result else 0),
+        cache_misses=quality_result.cache_misses
+        + (graph_result.cache_misses if graph_result else 0),
         concept_cache_hits=concept_result.cache_hits,
         concept_cache_misses=concept_result.cache_misses,
     )
@@ -244,7 +280,8 @@ def main() -> int:
         if concept_result.resolution
         else []
     )
-    return 1 if pass_result.failures or concept_failures else 0
+    aborted = quality_result.aborted or bool(graph_result and graph_result.aborted)
+    return 1 if aborted or failures or concept_failures else 0
 
 
 def run_concept_resolution_only(args: argparse.Namespace) -> int:
