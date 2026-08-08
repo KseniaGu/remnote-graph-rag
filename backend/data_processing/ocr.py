@@ -1,11 +1,10 @@
 from pathlib import Path
 
-import pymupdf as fitz
 import paddle
+import pymupdf as fitz
 from paddleocr import PPStructureV3
 
 from backend.configs.constants import PDF_PAGES_NUM_MAX
-
 
 # Need paddlepaddle-gpu version installed
 GPU_AVAILABLE = paddle.device.is_compiled_with_cuda()
@@ -52,10 +51,10 @@ class PaddleOCRPipeline:
 
     def parse_pdf(self, input_file: str | Path) -> Path | None:
         """Parses a PDF file and converts it to Markdown format.
-        
+
         Args:
             input_file: Path to the input PDF file.
-            
+
         Returns:
             Path to the generated markdown file, or None if the PDF has too many pages.
         """
@@ -85,10 +84,10 @@ class PaddleOCRPipeline:
 
     def parse_image(self, input_file: str | Path) -> Path:
         """Parses an image file and converts it to Markdown format.
-        
+
         Args:
             input_file: Path to the input image file.
-            
+
         Returns:
             Path to the generated markdown file.
         """

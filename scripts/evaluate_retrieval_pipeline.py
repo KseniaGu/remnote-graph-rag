@@ -12,7 +12,7 @@ import json
 import re
 import sys
 from collections import Counter, deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +34,6 @@ from backend.evaluation.retrieval_benchmark import (
     summarize_results,
     validate_benchmark_references,
 )
-
 
 DEFAULT_RUN_ROOT = ROOT_DIR / "data" / "production" / "full_optimized_pipeline_run"
 DEFAULT_STORAGE_DIR = ROOT_DIR / "storage"
@@ -199,7 +198,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def timestamp_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def resolve_output_dir(output_dir: Path | None) -> Path:
@@ -217,7 +216,9 @@ def resolve_output_dir(output_dir: Path | None) -> Path:
         if not candidate.exists():
             candidate.mkdir(parents=True, exist_ok=False)
             return candidate
-    raise RuntimeError(f"Could not create a unique output directory under {DEFAULT_OUTPUT_ROOT}")
+    raise RuntimeError(
+        f"Could not create a unique output directory under {DEFAULT_OUTPUT_ROOT}"
+    )
 
 
 def resolve_embedder_path(requested_path: Path | None) -> Path:
@@ -265,7 +266,9 @@ def make_search_settings(args: argparse.Namespace) -> KnowledgeGraphSearchSettin
 
     if args.analyst_reranker_mode == "config":
         return KnowledgeGraphSearchSettings()
-    return KnowledgeGraphSearchSettings(analyst_reranker_mode=args.analyst_reranker_mode)
+    return KnowledgeGraphSearchSettings(
+        analyst_reranker_mode=args.analyst_reranker_mode
+    )
 
 
 def load_indexer(args: argparse.Namespace) -> tuple[KnowledgeGraphIndexer, Path]:
@@ -315,7 +318,9 @@ def load_indexer(args: argparse.Namespace) -> tuple[KnowledgeGraphIndexer, Path]
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
 
 
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -347,8 +352,12 @@ def load_storage_reference_data(storage_dir: Path) -> dict[str, Any]:
     return {
         "source_metadata_by_id": source_metadata_by_id,
         "source_status_by_id": source_status_by_id,
-        "embedded_source_ids": load_embedded_source_ids(storage_dir / "default__vector_store.json"),
-        "graph_triplets": load_graph_triplets(storage_dir / "property_graph_store.json"),
+        "embedded_source_ids": load_embedded_source_ids(
+            storage_dir / "default__vector_store.json"
+        ),
+        "graph_triplets": load_graph_triplets(
+            storage_dir / "property_graph_store.json"
+        ),
     }
 
 
@@ -409,7 +418,7 @@ def load_embedded_source_ids(path: Path) -> set[str] | None:
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
     embedded_ids: set[str] = set()
-    for source_id in (data.get("embedding_dict") or {}):
+    for source_id in data.get("embedding_dict") or {}:
         source_id = str(source_id)
         if source_id.startswith("chunk_") and "::passage_" not in source_id:
             embedded_ids.add(source_id)
@@ -419,7 +428,9 @@ def load_embedded_source_ids(path: Path) -> set[str] | None:
         for metadata in metadata_dict.values():
             if not isinstance(metadata, dict):
                 continue
-            parent_id = str(metadata.get("parent_chunk_id") or metadata.get("chunk_id") or "")
+            parent_id = str(
+                metadata.get("parent_chunk_id") or metadata.get("chunk_id") or ""
+            )
             if parent_id.startswith("chunk_"):
                 embedded_ids.add(parent_id)
     return embedded_ids
@@ -437,10 +448,14 @@ def load_graph_triplets(path: Path) -> set[tuple[str, str, str]] | None:
     return graph_triplets
 
 
-def load_benchmark_inputs(args: argparse.Namespace) -> tuple[list[Any], EvidenceCatalog]:
+def load_benchmark_inputs(
+    args: argparse.Namespace,
+) -> tuple[list[Any], EvidenceCatalog]:
     case_ids = set(args.case_id) if args.case_id else None
     cases = load_benchmark_cases(args.benchmark_file, mode=args.mode, case_ids=case_ids)
-    catalog = EvidenceCatalog.from_storage_dir(args.storage_dir.expanduser().resolve(), root_dir=ROOT_DIR)
+    catalog = EvidenceCatalog.from_storage_dir(
+        args.storage_dir.expanduser().resolve(), root_dir=ROOT_DIR
+    )
     return cases, catalog
 
 
@@ -451,10 +466,19 @@ def validate_benchmark_inputs(
     cases: list[Any] | None = None,
     catalog: EvidenceCatalog | None = None,
 ) -> tuple[list[Any], EvidenceCatalog, ReferenceValidationReport]:
-    loaded_cases, loaded_catalog = load_benchmark_inputs(args) if cases is None or catalog is None else (cases, catalog)
+    loaded_cases, loaded_catalog = (
+        load_benchmark_inputs(args)
+        if cases is None or catalog is None
+        else (cases, catalog)
+    )
     storage_reference_data = load_storage_reference_data(args.storage_dir)
-    report = validate_benchmark_references(loaded_cases, loaded_catalog, **storage_reference_data)
-    write_json(output_dir / "benchmark_reference_report.json", report.model_dump(exclude_none=True))
+    report = validate_benchmark_references(
+        loaded_cases, loaded_catalog, **storage_reference_data
+    )
+    write_json(
+        output_dir / "benchmark_reference_report.json",
+        report.model_dump(exclude_none=True),
+    )
     return loaded_cases, loaded_catalog, report
 
 
@@ -478,7 +502,11 @@ def summarize_reference_report(report: ReferenceValidationReport) -> str:
 
 
 def summarize_search_settings(settings: Any) -> dict[str, Any]:
-    payload = settings.model_dump(mode="json") if hasattr(settings, "model_dump") else dict(settings)
+    payload = (
+        settings.model_dump(mode="json")
+        if hasattr(settings, "model_dump")
+        else dict(settings)
+    )
     selected_fields = [
         "analyst_retrieval_mode",
         "visualizer_retrieval_mode",
@@ -573,28 +601,38 @@ def run_analyst(
     from backend.workflows.agents.analyst_retrieval import AnalystRetrievalPipeline
     from backend.workflows.agents.tools import search_knowledge_base
 
-    current_tool = search_knowledge_base(analyst_pipeline=AnalystRetrievalPipeline(indexer))
+    current_tool = search_knowledge_base(
+        analyst_pipeline=AnalystRetrievalPipeline(indexer)
+    )
     analyst_runs: list[tuple[str, Any]] = [("current", current_tool)]
 
     if include_legacy:
-        legacy_retriever = indexer.get_retriever(indexer.kg_search_settings.retriever_params)
-        analyst_runs.append(("legacy_vector_context", search_knowledge_base(legacy_retriever, None)))
+        legacy_retriever = indexer.get_retriever(
+            indexer.kg_search_settings.retriever_params
+        )
+        analyst_runs.append(
+            ("legacy_vector_context", search_knowledge_base(legacy_retriever, None))
+        )
 
     splitter = "\n" + "-" * 99 + "\n"
     for pipeline_name, tool in analyst_runs:
         for idx, query in enumerate(queries, start=1):
             output = tool.invoke({"queries": [query]})
             rows.append(summarize_analyst_output(query, output, pipeline_name))
-            blocks.append(f"{pipeline_name.upper()} {idx} EXAMPLE RESULTS:{splitter}{output}{splitter}")
+            blocks.append(
+                f"{pipeline_name.upper()} {idx} EXAMPLE RESULTS:{splitter}{output}{splitter}"
+            )
 
     (output_dir / "analyst_results.txt").write_text("\n".join(blocks), encoding="utf-8")
     write_jsonl(output_dir / "analyst_results.jsonl", rows)
     return rows
 
 
-def graph_metrics(nodes: list[str], triplets: list[tuple[str, str, str]]) -> dict[str, Any]:
+def graph_metrics(
+    nodes: list[str], triplets: list[tuple[str, str, str]]
+) -> dict[str, Any]:
     node_set = set(nodes)
-    degree: dict[str, int] = {node: 0 for node in nodes}
+    degree: dict[str, int] = dict.fromkeys(nodes, 0)
     adjacency: dict[str, set[str]] = {node: set() for node in nodes}
     dangling_edges = 0
     generic_edges = 0
@@ -698,7 +736,9 @@ def render_visualization(
         return {}
 
     title = " & ".join(queries)
-    title = (title[:TITLE_MAX_LENGTH] + "...") if len(title) > TITLE_MAX_LENGTH else title
+    title = (
+        (title[:TITLE_MAX_LENGTH] + "...") if len(title) > TITLE_MAX_LENGTH else title
+    )
     figure = indexer.get_graph_visualization(nodes, triplets, title=title.title())
     output_paths: dict[str, str] = {}
     basename = f"{pipeline_name}_{safe_slug('_'.join(queries))}"
@@ -737,14 +777,22 @@ def run_visualizer(
     rows: list[dict[str, Any]] = []
 
     from backend.workflows.agents.tools import get_subgraphs_to_visualize
-    from backend.workflows.agents.visualizer_retrieval import VisualizerRetrievalPipeline
+    from backend.workflows.agents.visualizer_retrieval import (
+        VisualizerRetrievalPipeline,
+    )
 
-    current_tool = get_subgraphs_to_visualize(visualizer_pipeline=VisualizerRetrievalPipeline(indexer))
+    current_tool = get_subgraphs_to_visualize(
+        visualizer_pipeline=VisualizerRetrievalPipeline(indexer)
+    )
     visualizer_runs: list[tuple[str, Any]] = [("current", current_tool)]
 
     if include_legacy:
-        legacy_retriever = indexer.get_retriever(indexer.kg_search_settings.visualizer_retriever_params)
-        visualizer_runs.append(("legacy_vector_context", get_subgraphs_to_visualize(legacy_retriever)))
+        legacy_retriever = indexer.get_retriever(
+            indexer.kg_search_settings.visualizer_retriever_params
+        )
+        visualizer_runs.append(
+            ("legacy_vector_context", get_subgraphs_to_visualize(legacy_retriever))
+        )
 
     for pipeline_name, tool in visualizer_runs:
         for queries in query_sets:
@@ -819,7 +867,9 @@ def run_benchmark(
     reference_report: ReferenceValidationReport | None = None,
 ) -> list[CaseResult]:
     from backend.workflows.agents.analyst_retrieval import AnalystRetrievalPipeline
-    from backend.workflows.agents.visualizer_retrieval import VisualizerRetrievalPipeline
+    from backend.workflows.agents.visualizer_retrieval import (
+        VisualizerRetrievalPipeline,
+    )
 
     if cases is None or catalog is None:
         cases, catalog = load_benchmark_inputs(args)
@@ -833,14 +883,16 @@ def run_benchmark(
         if case.mode == "analyst":
             query_actuals = [
                 actual_evidence_from_analyst_result(
-                    analyst_pipeline._search_one(query),  # noqa: SLF001 - benchmark needs structured candidates.
+                    analyst_pipeline._search_one(query),
                     catalog,
                 )
                 for query in case.queries
             ]
             actual = merge_actual_evidence(query_actuals)
         else:
-            nodes, triplets, returned_queries = visualizer_pipeline.visualize(case.queries)
+            nodes, triplets, returned_queries = visualizer_pipeline.visualize(
+                case.queries
+            )
             metrics = graph_metrics(nodes, triplets)
             node_details = describe_graph_nodes(indexer, nodes, triplets, metrics)
             actual = actual_evidence_from_visualizer_result(
@@ -865,7 +917,7 @@ def run_benchmark(
 
     summary = summarize_results(results)
     manifest = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "storage_dir": str(args.storage_dir),
         "output_dir": str(output_dir),
         "embedder_model_path": str(embedder_path),
@@ -874,17 +926,26 @@ def run_benchmark(
         "case_ids": args.case_id or [],
         "requested_analyst_reranker_mode": args.analyst_reranker_mode,
         "analyst_reranker_mode": indexer.kg_search_settings.analyst_reranker_mode,
-        "effective_search_settings": summarize_search_settings(indexer.kg_search_settings),
+        "effective_search_settings": summarize_search_settings(
+            indexer.kg_search_settings
+        ),
         "reranker_settings": summarize_reranker_settings(),
-        "benchmark_reference_report": reference_report.model_dump(exclude_none=True) if reference_report else None,
+        "benchmark_reference_report": reference_report.model_dump(exclude_none=True)
+        if reference_report
+        else None,
         "summary": summary,
     }
 
     write_json(output_dir / "manifest.json", manifest)
     write_json(output_dir / "summary.json", summary)
-    write_jsonl(output_dir / "case_results.jsonl", [result.model_dump(exclude_none=True) for result in results])
+    write_jsonl(
+        output_dir / "case_results.jsonl",
+        [result.model_dump(exclude_none=True) for result in results],
+    )
     write_jsonl(output_dir / "actual_evidence.jsonl", actual_rows)
-    (output_dir / "summary.md").write_text(render_markdown_summary(summary, results), encoding="utf-8")
+    (output_dir / "summary.md").write_text(
+        render_markdown_summary(summary, results), encoding="utf-8"
+    )
     return results
 
 
@@ -901,7 +962,7 @@ def build_manifest(
     reranker_settings: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "storage_dir": str(args.storage_dir),
         "output_dir": str(output_dir),
         "embedder_model_path": str(embedder_path),
@@ -957,12 +1018,19 @@ def main() -> int:
         benchmark_catalog: EvidenceCatalog | None = None
         reference_report: ReferenceValidationReport | None = None
         if not args.debug_default_queries:
-            benchmark_cases, benchmark_catalog, reference_report = validate_benchmark_inputs(args, output_dir)
+            benchmark_cases, benchmark_catalog, reference_report = (
+                validate_benchmark_inputs(args, output_dir)
+            )
             print(summarize_reference_report(reference_report))
-            print(f"- Reference report: {output_dir / 'benchmark_reference_report.json'}")
+            print(
+                f"- Reference report: {output_dir / 'benchmark_reference_report.json'}"
+            )
             if args.validate_references_only:
                 return 0 if reference_report.passed else 2
-            if not reference_report.passed and not args.allow_invalid_benchmark_references:
+            if (
+                not reference_report.passed
+                and not args.allow_invalid_benchmark_references
+            ):
                 print(
                     "Benchmark references are invalid. "
                     "Fix the benchmark file or pass --allow-invalid-benchmark-references to continue.",
@@ -1025,7 +1093,9 @@ def main() -> int:
             visualizer_query_sets,
             analyst_rows,
             visualizer_rows,
-            effective_search_settings=summarize_search_settings(indexer.kg_search_settings),
+            effective_search_settings=summarize_search_settings(
+                indexer.kg_search_settings
+            ),
             reranker_settings=summarize_reranker_settings(),
         )
         write_json(output_dir / "manifest.json", manifest)

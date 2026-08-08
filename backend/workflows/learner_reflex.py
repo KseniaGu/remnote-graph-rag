@@ -1,21 +1,25 @@
 import threading
 import uuid
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import AsyncGenerator
 
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.errors import GraphRecursionError
 
-from backend.configs.constants import RECURSION_LIMIT
-from backend.configs.constants import VISUALIZATION_EMPTY_CONTEXT
+from backend.configs.constants import RECURSION_LIMIT, VISUALIZATION_EMPTY_CONTEXT
 from backend.configs.enums import WorkflowEventType
-from backend.configs.messages import FALLBACK_ALL_SOURCES_EXHAUSTED, FALLBACK_VISUALIZATION_FAILED, \
-    FALLBACK_NO_RESULTS, FALLBACK_DEFAULT, ERROR_RECURSION_LIMIT
+from backend.configs.messages import (
+    ERROR_RECURSION_LIMIT,
+    FALLBACK_ALL_SOURCES_EXHAUSTED,
+    FALLBACK_DEFAULT,
+    FALLBACK_NO_RESULTS,
+    FALLBACK_VISUALIZATION_FAILED,
+)
 from backend.configs.models import get_model_settings
 from backend.configs.observability import LangSmithSettings
 from backend.configs.paths import PathSettings
-from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
+from backend.configs.search import KnowledgeGraphSearchSettings, TavilySettings
 from backend.configs.storage import StorageSettings
 from backend.utils.helpers import logger
 from backend.workflows.learner import LearnerWorkflow
@@ -24,6 +28,7 @@ from backend.workflows.learner import LearnerWorkflow
 @dataclass
 class WorkflowEvent:
     """Event emitted during workflow execution."""
+
     type: WorkflowEventType
     data: dict
 
@@ -58,14 +63,14 @@ class ReflexLearnerWorkflow:
                     path_settings,
                     storage_settings,
                     tavily_settings,
-                    kg_search_settings
+                    kg_search_settings,
                 )
                 self._graph = self._workflow.run()
                 logger.info("ReflexLearnerWorkflow initialized successfully")
 
             except Exception as e:
                 logger.error(f"Failed to initialize ReflexLearnerWorkflow: {e}")
-                raise RuntimeError(f"Workflow initialization failed: {str(e)}")
+                raise RuntimeError(f"Workflow initialization failed: {e!s}")
 
     @staticmethod
     def _get_fallback_message(context: str) -> str:
@@ -92,23 +97,23 @@ class ReflexLearnerWorkflow:
         return langchain_messages
 
     async def process_message(
-            self,
-            user_message: str,
-            message_history: list[dict],
-            recursion_limit: int = RECURSION_LIMIT,
-            session_id: str = "",
-            session_summary: str = "",
+        self,
+        user_message: str,
+        message_history: list[dict],
+        recursion_limit: int = RECURSION_LIMIT,
+        session_id: str = "",
+        session_summary: str = "",
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """
         Processes a user message through the workflow and yield events.
-        
+
         Args:
             user_message: The user's message
             message_history: Previous messages in the conversation
             recursion_limit: Maximum recursion depth for the graph
             session_id: Session ID.
             session_summary: Session's conversation history summary.
-            
+
         Yields:
             WorkflowEvent: Events during workflow execution
         """
@@ -136,8 +141,7 @@ class ReflexLearnerWorkflow:
                 context = result.get("context", "")
                 if context:
                     yield WorkflowEvent(
-                        type=WorkflowEventType.CONTEXT_UPDATE,
-                        data={"context": context}
+                        type=WorkflowEventType.CONTEXT_UPDATE, data={"context": context}
                     )
 
                 # Extract and yield visualization
@@ -146,22 +150,25 @@ class ReflexLearnerWorkflow:
                 if visual_artifacts:
                     yield WorkflowEvent(
                         type=WorkflowEventType.VISUALIZATION,
-                        data={"artifacts": visual_artifacts}
+                        data={"artifacts": visual_artifacts},
                     )
 
                 # Extract and yield agent responses
                 result_messages = result.get("messages", [])
                 for msg in result_messages:
-                    if hasattr(msg, 'content') and hasattr(msg, 'type') and msg.type == 'ai':
-                        agent_name = msg.additional_kwargs.get('agent', '').strip('[]').lower()
-                        if agent_name in ('analyst', 'mentor') and msg.content:
+                    if (
+                        hasattr(msg, "content")
+                        and hasattr(msg, "type")
+                        and msg.type == "ai"
+                    ):
+                        agent_name = (
+                            msg.additional_kwargs.get("agent", "").strip("[]").lower()
+                        )
+                        if agent_name in ("analyst", "mentor") and msg.content:
                             response_emitted = True
                             yield WorkflowEvent(
                                 type=WorkflowEventType.RESPONSE,
-                                data={
-                                    "content": msg.content,
-                                    "agent": agent_name
-                                }
+                                data={"content": msg.content, "agent": agent_name},
                             )
 
                 if not response_emitted:
@@ -169,38 +176,34 @@ class ReflexLearnerWorkflow:
                     fallback = self._get_fallback_message(context)
                     yield WorkflowEvent(
                         type=WorkflowEventType.RESPONSE,
-                        data={"content": fallback, "agent": "system"}
+                        data={"content": fallback, "agent": "system"},
                     )
 
                 yield WorkflowEvent(
                     type=WorkflowEventType.COMPLETE,
-                    data={"next_step": result.get("next_step", "__end__")}
+                    data={"next_step": result.get("next_step", "__end__")},
                 )
 
         except GraphRecursionError as e:
             logger.error(f"Workflow exceeded recursion limit: {e}")
             yield WorkflowEvent(
-                type=WorkflowEventType.ERROR,
-                data={"message": ERROR_RECURSION_LIMIT}
+                type=WorkflowEventType.ERROR, data={"message": ERROR_RECURSION_LIMIT}
             )
 
         except Exception as e:
             logger.error(f"Workflow error: {e}")
-            yield WorkflowEvent(
-                type=WorkflowEventType.ERROR,
-                data={"message": str(e)}
-            )
+            yield WorkflowEvent(type=WorkflowEventType.ERROR, data={"message": str(e)})
 
     async def stream_with_status(
-            self,
-            user_message: str,
-            message_history: list[dict],
-            recursion_limit: int = RECURSION_LIMIT,
-            session_id: str = "",
-            session_summary: str = "",
+        self,
+        user_message: str,
+        message_history: list[dict],
+        recursion_limit: int = RECURSION_LIMIT,
+        session_id: str = "",
+        session_summary: str = "",
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """Streams workflow execution with detailed status updates.
-        
+
         This method uses the graph's stream mode to provide real-time
         updates about which agent is currently active.
         """
@@ -223,8 +226,7 @@ class ReflexLearnerWorkflow:
                 # Each event is a dict with node name as key
                 for node_name, node_output in event.items():
                     yield WorkflowEvent(
-                        type=WorkflowEventType.AGENT_START,
-                        data={"agent": node_name}
+                        type=WorkflowEventType.AGENT_START, data={"agent": node_name}
                     )
 
                     # Update final state with node output
@@ -232,8 +234,7 @@ class ReflexLearnerWorkflow:
                         final_state.update(node_output)
 
                     yield WorkflowEvent(
-                        type=WorkflowEventType.AGENT_END,
-                        data={"agent": node_name}
+                        type=WorkflowEventType.AGENT_END, data={"agent": node_name}
                     )
 
             # Yield final results
@@ -241,8 +242,7 @@ class ReflexLearnerWorkflow:
                 context = final_state.get("context", "")
                 if context:
                     yield WorkflowEvent(
-                        type=WorkflowEventType.CONTEXT_UPDATE,
-                        data={"context": context}
+                        type=WorkflowEventType.CONTEXT_UPDATE, data={"context": context}
                     )
 
                 visual_artifacts = final_state.get("visual_artifacts", [])
@@ -250,22 +250,27 @@ class ReflexLearnerWorkflow:
                 if visual_artifacts:
                     yield WorkflowEvent(
                         type=WorkflowEventType.VISUALIZATION,
-                        data={"artifacts": visual_artifacts}
+                        data={"artifacts": visual_artifacts},
                     )
 
                 result_messages = final_state.get("messages", [])
                 if isinstance(result_messages, list):
                     for msg in result_messages:
-                        if hasattr(msg, 'content') and hasattr(msg, 'type') and msg.type == 'ai':
-                            agent_name = msg.additional_kwargs.get('agent', '').strip('[]').lower()
-                            if agent_name in ('analyst', 'mentor') and msg.content:
+                        if (
+                            hasattr(msg, "content")
+                            and hasattr(msg, "type")
+                            and msg.type == "ai"
+                        ):
+                            agent_name = (
+                                msg.additional_kwargs.get("agent", "")
+                                .strip("[]")
+                                .lower()
+                            )
+                            if agent_name in ("analyst", "mentor") and msg.content:
                                 response_emitted = True
                                 yield WorkflowEvent(
                                     type=WorkflowEventType.RESPONSE,
-                                    data={
-                                        "content": msg.content,
-                                        "agent": agent_name
-                                    }
+                                    data={"content": msg.content, "agent": agent_name},
                                 )
 
                 if not response_emitted:
@@ -273,35 +278,30 @@ class ReflexLearnerWorkflow:
                     fallback = self._get_fallback_message(context)
                     yield WorkflowEvent(
                         type=WorkflowEventType.RESPONSE,
-                        data={"content": fallback, "agent": "system"}
+                        data={"content": fallback, "agent": "system"},
                     )
 
             yield WorkflowEvent(
-                type=WorkflowEventType.COMPLETE,
-                data={"status": "success"}
+                type=WorkflowEventType.COMPLETE, data={"status": "success"}
             )
 
         except GraphRecursionError as e:
             logger.error(f"Workflow exceeded recursion limit: {e}")
             yield WorkflowEvent(
-                type=WorkflowEventType.ERROR,
-                data={"message": ERROR_RECURSION_LIMIT}
+                type=WorkflowEventType.ERROR, data={"message": ERROR_RECURSION_LIMIT}
             )
 
         except Exception as e:
             logger.error(f"Workflow stream error: {e}")
-            yield WorkflowEvent(
-                type=WorkflowEventType.ERROR,
-                data={"message": str(e)}
-            )
+            yield WorkflowEvent(type=WorkflowEventType.ERROR, data={"message": str(e)})
 
     async def stream_with_tokens(
-            self,
-            user_message: str,
-            message_history: list[dict],
-            recursion_limit: int = RECURSION_LIMIT,
-            session_id: str = "",
-            session_summary: str = "",
+        self,
+        user_message: str,
+        message_history: list[dict],
+        recursion_limit: int = RECURSION_LIMIT,
+        session_id: str = "",
+        session_summary: str = "",
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """Streams workflow execution with per-token updates for analyst/mentor responses.
 
@@ -322,29 +322,44 @@ class ReflexLearnerWorkflow:
         config = {"recursion_limit": recursion_limit, "configurable": configurable}
         initial_state = {"messages": messages, "session_summary": session_summary}
 
-        _AGENT_NODES = {"orchestrator", "retriever", "researcher", "analyst", "mentor", "visualizer"}
+        _AGENT_NODES = {
+            "orchestrator",
+            "retriever",
+            "researcher",
+            "analyst",
+            "mentor",
+            "visualizer",
+        }
         _STREAMING_NODES = {"analyst", "mentor"}
 
         accumulated: dict[str, str] = {}
         final_state: dict = {}
 
         try:
-            async for event in self._graph.astream_events(initial_state, config=config, version="v2"):
+            async for event in self._graph.astream_events(
+                initial_state, config=config, version="v2"
+            ):
                 event_type = event.get("event", "")
                 name = event.get("name", "")
                 metadata = event.get("metadata", {})
                 node = metadata.get("langgraph_node", "")
 
-                if event_type == "on_chain_start" and name in _AGENT_NODES and name == node:
+                if (
+                    event_type == "on_chain_start"
+                    and name in _AGENT_NODES
+                    and name == node
+                ):
                     yield WorkflowEvent(
-                        type=WorkflowEventType.AGENT_START,
-                        data={"agent": node}
+                        type=WorkflowEventType.AGENT_START, data={"agent": node}
                     )
 
-                elif event_type == "on_chain_end" and name in _AGENT_NODES and name == node:
+                elif (
+                    event_type == "on_chain_end"
+                    and name in _AGENT_NODES
+                    and name == node
+                ):
                     yield WorkflowEvent(
-                        type=WorkflowEventType.AGENT_END,
-                        data={"agent": node}
+                        type=WorkflowEventType.AGENT_END, data={"agent": node}
                     )
 
                 elif event_type == "on_chat_model_stream" and node in _STREAMING_NODES:
@@ -355,7 +370,7 @@ class ReflexLearnerWorkflow:
                             accumulated[node] = accumulated.get(node, "") + content
                             yield WorkflowEvent(
                                 type=WorkflowEventType.TOKEN,
-                                data={"chunk": content, "agent": node}
+                                data={"chunk": content, "agent": node},
                             )
 
                 elif event_type == "on_chain_end" and name == "LangGraph":
@@ -367,8 +382,7 @@ class ReflexLearnerWorkflow:
             context = final_state.get("context", "")
             if context:
                 yield WorkflowEvent(
-                    type=WorkflowEventType.CONTEXT_UPDATE,
-                    data={"context": context}
+                    type=WorkflowEventType.CONTEXT_UPDATE, data={"context": context}
                 )
 
             visual_artifacts = final_state.get("visual_artifacts", [])
@@ -376,7 +390,7 @@ class ReflexLearnerWorkflow:
             if visual_artifacts:
                 yield WorkflowEvent(
                     type=WorkflowEventType.VISUALIZATION,
-                    data={"artifacts": visual_artifacts}
+                    data={"artifacts": visual_artifacts},
                 )
 
             if accumulated:
@@ -385,46 +399,49 @@ class ReflexLearnerWorkflow:
                         response_emitted = True
                         yield WorkflowEvent(
                             type=WorkflowEventType.RESPONSE,
-                            data={"content": content, "agent": agent_name}
+                            data={"content": content, "agent": agent_name},
                         )
             else:
                 result_messages = final_state.get("messages", [])
                 if isinstance(result_messages, list):
                     for msg in result_messages:
-                        if hasattr(msg, "content") and hasattr(msg, "type") and msg.type == "ai":
-                            agent_name = msg.additional_kwargs.get("agent", "").strip("[]").lower()
+                        if (
+                            hasattr(msg, "content")
+                            and hasattr(msg, "type")
+                            and msg.type == "ai"
+                        ):
+                            agent_name = (
+                                msg.additional_kwargs.get("agent", "")
+                                .strip("[]")
+                                .lower()
+                            )
                             if agent_name in _STREAMING_NODES and msg.content:
                                 response_emitted = True
                                 yield WorkflowEvent(
                                     type=WorkflowEventType.RESPONSE,
-                                    data={"content": msg.content, "agent": agent_name}
+                                    data={"content": msg.content, "agent": agent_name},
                                 )
 
             if not response_emitted:
                 fallback = self._get_fallback_message(context)
                 yield WorkflowEvent(
                     type=WorkflowEventType.RESPONSE,
-                    data={"content": fallback, "agent": "system"}
+                    data={"content": fallback, "agent": "system"},
                 )
 
             yield WorkflowEvent(
-                type=WorkflowEventType.COMPLETE,
-                data={"status": "success"}
+                type=WorkflowEventType.COMPLETE, data={"status": "success"}
             )
 
         except GraphRecursionError as e:
             logger.error(f"Workflow exceeded recursion limit: {e}")
             yield WorkflowEvent(
-                type=WorkflowEventType.ERROR,
-                data={"message": ERROR_RECURSION_LIMIT}
+                type=WorkflowEventType.ERROR, data={"message": ERROR_RECURSION_LIMIT}
             )
 
         except Exception as e:
             logger.error(f"Workflow token stream error: {e}")
-            yield WorkflowEvent(
-                type=WorkflowEventType.ERROR,
-                data={"message": str(e)}
-            )
+            yield WorkflowEvent(type=WorkflowEventType.ERROR, data={"message": str(e)})
 
 
 @lru_cache(maxsize=1)

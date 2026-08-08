@@ -23,7 +23,9 @@ class EmbeddingPassageTests(unittest.TestCase):
         self.assertNotIn("Gradient computation algorithm.", passages[0].text)
         self.assertIn("chain rule", passages[0].text)
 
-    def test_embedding_text_preserves_markdown_anchor_text_but_strips_urls(self) -> None:
+    def test_embedding_text_preserves_markdown_anchor_text_but_strips_urls(
+        self,
+    ) -> None:
         passages = build_embedding_passages(
             parent_chunk_id="chunk_links",
             text="Read [AG News](https://example.com/ag-news) and https://example.com/raw for datasets.",
@@ -54,8 +56,12 @@ class EmbeddingPassageTests(unittest.TestCase):
 
         self.assertGreater(len(passages), 1)
         combined_bodies = "\n".join(passage.text for passage in passages)
-        self.assertIn("Sentence 1 explains optimizer behavior carefully.", combined_bodies)
-        self.assertIn("Sentence 25 explains optimizer behavior carefully.", combined_bodies)
+        self.assertIn(
+            "Sentence 1 explains optimizer behavior carefully.", combined_bodies
+        )
+        self.assertIn(
+            "Sentence 25 explains optimizer behavior carefully.", combined_bodies
+        )
         self.assertTrue(all("Sentence" in passage.text for passage in passages))
 
     def test_oversized_sentence_uses_hard_token_fallback(self) -> None:
@@ -70,8 +76,14 @@ class EmbeddingPassageTests(unittest.TestCase):
         )
 
         self.assertGreater(len(passages), 1)
-        self.assertTrue(any(passage.split_strategy == "hard_token_fallback" for passage in passages))
-        self.assertTrue(all(passage.parent_chunk_id == "chunk_long_sentence" for passage in passages))
+        self.assertTrue(
+            any(passage.split_strategy == "hard_token_fallback" for passage in passages)
+        )
+        self.assertTrue(
+            all(
+                passage.parent_chunk_id == "chunk_long_sentence" for passage in passages
+            )
+        )
 
 
 if __name__ == "__main__":

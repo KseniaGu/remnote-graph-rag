@@ -6,7 +6,11 @@ from typing import Any
 
 from llama_index.core.schema import NodeWithScore, TextNode
 
-from backend.configs.constants import MAX_SOURCE_CHARS, MIN_RELEVANCE_SCORE, WORKFLOW_LOGGING
+from backend.configs.constants import (
+    MAX_SOURCE_CHARS,
+    MIN_RELEVANCE_SCORE,
+    WORKFLOW_LOGGING,
+)
 from backend.configs.models import RerankerSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.utils.helpers import get_logger
@@ -15,8 +19,10 @@ from backend.workflows.agents.retrieval_access import (
     POSTPROCESSED_PASSAGE_KIND,
     RetrievalStoreAccess,
 )
-from backend.workflows.agents.retrieval_evidence import NormalizedMetadata, normalize_metadata
-
+from backend.workflows.agents.retrieval_evidence import (
+    NormalizedMetadata,
+    normalize_metadata,
+)
 
 logger = get_logger(WORKFLOW_LOGGING)
 
@@ -83,7 +89,9 @@ class SentenceTransformerReranker:
             trust_remote_code=trust_remote_code,
         )
 
-    def postprocess_nodes(self, nodes: list[NodeWithScore], query_str: str) -> list[NodeWithScore]:
+    def postprocess_nodes(
+        self, nodes: list[NodeWithScore], query_str: str
+    ) -> list[NodeWithScore]:
         if not nodes:
             return []
 
@@ -115,7 +123,9 @@ class AnalystRetrievalPipeline:
         self.storage_context = self.access.storage_context
         self.vector_store = self.access.vector_store
         self.graph_store = self.access.graph_store
-        self.reranker = reranker if reranker is not None else self._create_configured_reranker()
+        self.reranker = (
+            reranker if reranker is not None else self._create_configured_reranker()
+        )
         self._reranker_failure_logged = False
 
     @property
@@ -124,16 +134,22 @@ class AnalystRetrievalPipeline:
 
     def search(self, queries: list[str]) -> str:
         formatted_blocks: list[str] = []
-        remaining_chars = max(0, self.settings.analyst_context_max_chars - len("RETRIEVER RESULTS:\n\n"))
+        remaining_chars = max(
+            0, self.settings.analyst_context_max_chars - len("RETRIEVER RESULTS:\n\n")
+        )
         results = [self._search_one(query) for query in queries]
-        results = [result for result in results if result["sources"] or result["relations"]]
+        results = [
+            result for result in results if result["sources"] or result["relations"]
+        ]
         source_id_by_chunk: dict[str, str] = {}
         emitted_source_ids: set[str] = set()
 
         for idx, result in enumerate(results):
             for source in result["sources"]:
                 if source.node_id not in source_id_by_chunk:
-                    source_id_by_chunk[source.node_id] = f"S{len(source_id_by_chunk) + 1}"
+                    source_id_by_chunk[source.node_id] = (
+                        f"S{len(source_id_by_chunk) + 1}"
+                    )
             remaining_results = max(1, len(results) - idx)
             block_budget = max(0, remaining_chars // remaining_results)
             block = self._format_query_result(
@@ -147,7 +163,9 @@ class AnalystRetrievalPipeline:
             )
             if block:
                 formatted_blocks.append(block)
-                emitted_source_ids.update(source.node_id for source in result["sources"])
+                emitted_source_ids.update(
+                    source.node_id for source in result["sources"]
+                )
                 remaining_chars -= len(block) + 2
             if remaining_chars <= 0:
                 break
@@ -163,18 +181,24 @@ class AnalystRetrievalPipeline:
         source_candidates = self._rerank_sources(query, source_candidates)
         self._attach_mentioned_concepts(source_candidates)
         if self.reranker is None:
-            source_candidates = self._rescore_sources_with_graph_support(query, source_candidates)
+            source_candidates = self._rescore_sources_with_graph_support(
+                query, source_candidates
+            )
         source_candidates = self._sort_sources(source_candidates)
 
         final_sources = self._select_final_sources(source_candidates)
-        relation_sources = self._select_relation_seed_sources(final_sources, source_candidates)
+        relation_sources = self._select_relation_seed_sources(
+            final_sources, source_candidates
+        )
         relation_candidates = self._expand_semantic_relations(
             query,
             relation_sources,
             displayed_source_ids={source.node_id for source in final_sources},
         )
         relation_candidates = self._dedupe_relations(relation_candidates)
-        relation_candidates = self._rerank_relations(query, relation_sources, relation_candidates)
+        relation_candidates = self._rerank_relations(
+            query, relation_sources, relation_candidates
+        )
         final_relations = self._select_final_relations(relation_candidates)
 
         return {
@@ -191,13 +215,19 @@ class AnalystRetrievalPipeline:
                 "Analyst retrieval has no vector store; returning no source candidates.",
                 component="analyst",
             )
-            logger.warning("Analyst retrieval has no vector store; returning no source candidates.")
+            logger.warning(
+                "Analyst retrieval has no vector store; returning no source candidates."
+            )
             return []
 
         query_embedding = self.embedder.get_query_embedding(query)
-        query_result = self._query_vector_store(query_embedding, node_kind=POSTPROCESSED_PASSAGE_KIND)
+        query_result = self._query_vector_store(
+            query_embedding, node_kind=POSTPROCESSED_PASSAGE_KIND
+        )
         if not query_result.ids:
-            query_result = self._query_vector_store(query_embedding, node_kind=POSTPROCESSED_CHUNK_KIND)
+            query_result = self._query_vector_store(
+                query_embedding, node_kind=POSTPROCESSED_CHUNK_KIND
+            )
         if not query_result.ids:
             query_result = self._query_vector_store(query_embedding, node_kind=None)
 
@@ -205,14 +235,18 @@ class AnalystRetrievalPipeline:
         similarities = list(query_result.similarities or [0.0] * len(ids))
         candidates: list[SourceCandidate] = []
 
-        for rank, (node_id, similarity) in enumerate(zip(ids, similarities, strict=False), start=1):
+        for rank, (node_id, similarity) in enumerate(
+            zip(ids, similarities, strict=False), start=1
+        ):
             resolved = self._resolve_source_hit(node_id)
             if resolved is None:
                 continue
             parent_id, node, metadata, text, matched_text = resolved
 
             base_score = self._clip_score(similarity)
-            score = self._score_source(query, matched_text or text, metadata, base_score)
+            score = self._score_source(
+                query, matched_text or text, metadata, base_score
+            )
             if score < MIN_RELEVANCE_SCORE:
                 continue
 
@@ -233,7 +267,9 @@ class AnalystRetrievalPipeline:
 
         return candidates
 
-    def _query_vector_store(self, query_embedding: list[float], *, node_kind: str | None) -> Any:
+    def _query_vector_store(
+        self, query_embedding: list[float], *, node_kind: str | None
+    ) -> Any:
         return self.access.query_vector(
             query_embedding,
             top_k=self.settings.analyst_source_candidate_k,
@@ -242,7 +278,9 @@ class AnalystRetrievalPipeline:
             fallback_message="Analyst vector query with metadata filters failed; retrying unfiltered.",
         )
 
-    def _rerank_sources(self, query: str, candidates: list[SourceCandidate]) -> list[SourceCandidate]:
+    def _rerank_sources(
+        self, query: str, candidates: list[SourceCandidate]
+    ) -> list[SourceCandidate]:
         if not candidates or self.reranker is None:
             return candidates
 
@@ -252,10 +290,15 @@ class AnalystRetrievalPipeline:
         if not rerank_candidates:
             return ordered_candidates
 
-        candidate_by_id = {candidate.node_id: candidate for candidate in ordered_candidates}
+        candidate_by_id = {
+            candidate.node_id: candidate for candidate in ordered_candidates
+        }
         nodes = [
             NodeWithScore(
-                node=TextNode(id_=candidate.node_id, text=self._rerank_text(candidate, query=query)),
+                node=TextNode(
+                    id_=candidate.node_id,
+                    text=self._rerank_text(candidate, query=query),
+                ),
                 score=candidate.score,
             )
             for candidate in rerank_candidates
@@ -278,10 +321,18 @@ class AnalystRetrievalPipeline:
             reranked_ids.append(candidate.node_id)
 
         ordered = self._sort_sources(
-            [candidate_by_id[node_id] for node_id in reranked_ids if node_id in candidate_by_id],
+            [
+                candidate_by_id[node_id]
+                for node_id in reranked_ids
+                if node_id in candidate_by_id
+            ],
         )
         reranked_id_set = set(reranked_ids)
-        ordered.extend(candidate for candidate in ordered_candidates if candidate.node_id not in reranked_id_set)
+        ordered.extend(
+            candidate
+            for candidate in ordered_candidates
+            if candidate.node_id not in reranked_id_set
+        )
         return ordered
 
     def _attach_mentioned_concepts(self, candidates: list[SourceCandidate]) -> None:
@@ -296,7 +347,9 @@ class AnalystRetrievalPipeline:
             return
 
         candidate_by_id = {candidate.node_id: candidate for candidate in candidates}
-        for source_node, relation, target_node in self._get_triplets(ids=list(candidate_by_id), relation_names=["MENTIONS"]):
+        for source_node, relation, target_node in self._get_triplets(
+            ids=list(candidate_by_id), relation_names=["MENTIONS"]
+        ):
             if self._relation_label(relation) != "MENTIONS":
                 continue
             source_id = getattr(source_node, "id", None)
@@ -311,10 +364,17 @@ class AnalystRetrievalPipeline:
     ) -> list[SourceCandidate]:
         query_terms = self._query_terms(query)
         for candidate in candidates:
-            concept_labels = [self._node_label(concept) for concept in candidate.mentioned_concepts]
-            if any(self._has_term_overlap(query_terms, label) for label in concept_labels):
+            concept_labels = [
+                self._node_label(concept) for concept in candidate.mentioned_concepts
+            ]
+            if any(
+                self._has_term_overlap(query_terms, label) for label in concept_labels
+            ):
                 candidate.score = self._clip_score(candidate.score + 0.05)
-            if concept_labels and self._semantic_relation_count(candidate.mentioned_concepts) > 0:
+            if (
+                concept_labels
+                and self._semantic_relation_count(candidate.mentioned_concepts) > 0
+            ):
                 candidate.score = self._clip_score(candidate.score + 0.03)
             candidate.rank_score = candidate.score
         return candidates
@@ -336,20 +396,24 @@ class AnalystRetrievalPipeline:
         if not seed_sources:
             return []
 
-        source_score_by_chunk = {source.node_id: source.score for source in seed_sources}
+        source_score_by_chunk = {
+            source.node_id: source.score for source in seed_sources
+        }
         allowed_source_chunks = set(source_score_by_chunk)
         concepts = self._ordered_unique(
-            concept
-            for source in seed_sources
-            for concept in source.mentioned_concepts
+            concept for source in seed_sources for concept in source.mentioned_concepts
         )
         if not concepts:
             return []
 
         displayed_source_ids = displayed_source_ids or set()
-        source_grounded_triplets = self._source_grounded_relation_triplets(concepts, allowed_source_chunks)
+        source_grounded_triplets = self._source_grounded_relation_triplets(
+            concepts, allowed_source_chunks
+        )
         relation_map_triplets = self._get_relation_map(concepts)
-        triplets = self._dedupe_relation_triplets([*source_grounded_triplets, *relation_map_triplets])
+        triplets = self._dedupe_relation_triplets(
+            [*source_grounded_triplets, *relation_map_triplets]
+        )
 
         relation_candidates: list[RelationCandidate] = []
         for rank, (subject_node, relation, object_node) in enumerate(triplets, start=1):
@@ -374,7 +438,9 @@ class AnalystRetrievalPipeline:
         concepts: list[Any],
         allowed_source_chunks: set[str],
     ) -> list[tuple[Any, Any, Any]]:
-        concept_ids = [node_id for concept in concepts if (node_id := self._node_id(concept))]
+        concept_ids = [
+            node_id for concept in concepts if (node_id := self._node_id(concept))
+        ]
         if not concept_ids:
             return []
 
@@ -409,17 +475,33 @@ class AnalystRetrievalPipeline:
         relation_properties = getattr(relation, "properties", {}) or {}
         evidence_chunk_ids = self._relation_evidence_chunk_ids(relation)
         grounded_evidence_chunk_ids = [
-            chunk_id for chunk_id in evidence_chunk_ids if chunk_id in allowed_source_chunks
+            chunk_id
+            for chunk_id in evidence_chunk_ids
+            if chunk_id in allowed_source_chunks
         ]
-        if self.settings.analyst_relation_require_source_evidence and not grounded_evidence_chunk_ids:
+        if (
+            self.settings.analyst_relation_require_source_evidence
+            and not grounded_evidence_chunk_ids
+        ):
             return None
 
         evidence_spans = self._string_list(relation_properties.get("evidence_spans"))
-        confidence = self._float_or_none(relation_properties.get("max_confidence") or relation_properties.get("confidence"))
-        predicate_family = self._string_or_none(relation_properties.get("predicate_family"))
-        relation_phrases = self._string_list(relation_properties.get("relation_phrases"))
-        generality_score = self._float_or_none(relation_properties.get("max_generality_score"))
-        retrieval_usefulness = self._float_or_none(relation_properties.get("max_retrieval_usefulness"))
+        confidence = self._float_or_none(
+            relation_properties.get("max_confidence")
+            or relation_properties.get("confidence")
+        )
+        predicate_family = self._string_or_none(
+            relation_properties.get("predicate_family")
+        )
+        relation_phrases = self._string_list(
+            relation_properties.get("relation_phrases")
+        )
+        generality_score = self._float_or_none(
+            relation_properties.get("max_generality_score")
+        )
+        retrieval_usefulness = self._float_or_none(
+            relation_properties.get("max_retrieval_usefulness")
+        )
 
         subject_label = self._node_label(subject_node)
         object_label = self._node_label(object_node)
@@ -433,21 +515,44 @@ class AnalystRetrievalPipeline:
                 " ".join(evidence_spans),
             ]
         )
-        evidence_score = max((source_score_by_chunk.get(chunk_id, 0.0) for chunk_id in grounded_evidence_chunk_ids), default=0.0)
-        query_boost = 0.08 if self._has_term_overlap(self._query_terms(query), relation_text) else 0.0
+        evidence_score = max(
+            (
+                source_score_by_chunk.get(chunk_id, 0.0)
+                for chunk_id in grounded_evidence_chunk_ids
+            ),
+            default=0.0,
+        )
+        query_boost = (
+            0.08
+            if self._has_term_overlap(self._query_terms(query), relation_text)
+            else 0.0
+        )
         confidence_boost = (confidence or 0.0) * 0.04
         usefulness_boost = (retrieval_usefulness or 0.0) * 0.08
-        displayed_source_boost = 0.04 if set(grounded_evidence_chunk_ids).intersection(displayed_source_ids) else 0.0
-        generic_penalty = 0.04 if predicate in {"RELATED_TO"} or predicate_family == "other" else 0.0
+        displayed_source_boost = (
+            0.04
+            if set(grounded_evidence_chunk_ids).intersection(displayed_source_ids)
+            else 0.0
+        )
+        generic_penalty = (
+            0.04 if predicate in {"RELATED_TO"} or predicate_family == "other" else 0.0
+        )
         score = self._clip_score(
-            evidence_score + query_boost + confidence_boost + usefulness_boost + displayed_source_boost - generic_penalty
+            evidence_score
+            + query_boost
+            + confidence_boost
+            + usefulness_boost
+            + displayed_source_boost
+            - generic_penalty
         )
 
         if score < MIN_RELEVANCE_SCORE:
             return None
 
         return RelationCandidate(
-            relation_id=self._stable_relation_id(relation, fallback_rank=rank, relation_text=relation_text),
+            relation_id=self._stable_relation_id(
+                relation, fallback_rank=rank, relation_text=relation_text
+            ),
             subject=subject_label,
             predicate=predicate,
             object=object_label,
@@ -485,7 +590,9 @@ class AnalystRetrievalPipeline:
             source.node_id: self._source_excerpt(
                 query,
                 source.matched_text or source.text,
-                max_chars=max(120, self.settings.analyst_relation_rerank_max_chars // 2),
+                max_chars=max(
+                    120, self.settings.analyst_relation_rerank_max_chars // 2
+                ),
             )
             for source in sources
         }
@@ -493,7 +600,9 @@ class AnalystRetrievalPipeline:
             NodeWithScore(
                 node=TextNode(
                     id_=relation.relation_id,
-                    text=self._relation_rerank_text(relation, source_text_by_chunk, query=query),
+                    text=self._relation_rerank_text(
+                        relation, source_text_by_chunk, query=query
+                    ),
                 ),
                 score=relation.score,
             )
@@ -504,7 +613,9 @@ class AnalystRetrievalPipeline:
             reranked_nodes = self.reranker.postprocess_nodes(nodes, query_str=query)
         except Exception:
             self._log_reranker_failure()
-            return sorted(relations, key=lambda item: (item.score, -item.rank), reverse=True)
+            return sorted(
+                relations, key=lambda item: (item.score, -item.rank), reverse=True
+            )
 
         reranked_ids: set[str] = set()
         ordered: list[RelationCandidate] = []
@@ -520,11 +631,19 @@ class AnalystRetrievalPipeline:
 
         ordered = self._sort_relations(ordered)
         ordered.extend(
-            self._sort_relations([relation for relation in ordered_relations if relation.relation_id not in reranked_ids])
+            self._sort_relations(
+                [
+                    relation
+                    for relation in ordered_relations
+                    if relation.relation_id not in reranked_ids
+                ]
+            )
         )
         return ordered
 
-    def _select_final_sources(self, candidates: list[SourceCandidate]) -> list[SourceCandidate]:
+    def _select_final_sources(
+        self, candidates: list[SourceCandidate]
+    ) -> list[SourceCandidate]:
         if not candidates:
             return []
 
@@ -538,8 +657,12 @@ class AnalystRetrievalPipeline:
 
         selected: list[SourceCandidate] = []
         path_counts: dict[str, int] = {}
-        top_rank_score = self._ranking_score(reranked_candidates[0]) if reranked_candidates else 0.0
-        bounded_reranker_scores = self._has_bounded_scores([self._ranking_score(candidate) for candidate in reranked_candidates])
+        top_rank_score = (
+            self._ranking_score(reranked_candidates[0]) if reranked_candidates else 0.0
+        )
+        bounded_reranker_scores = self._has_bounded_scores(
+            [self._ranking_score(candidate) for candidate in reranked_candidates]
+        )
         min_keep = min(
             max(0, self.settings.analyst_source_min_keep),
             max(0, self.settings.analyst_source_final_k),
@@ -568,7 +691,8 @@ class AnalystRetrievalPipeline:
                     )
                     and (
                         len(selected) >= min_keep
-                        or candidate.score < self.settings.analyst_source_min_relative_score
+                        or candidate.score
+                        < self.settings.analyst_source_min_relative_score
                     )
                 ):
                     continue
@@ -622,7 +746,8 @@ class AnalystRetrievalPipeline:
 
         selected_ids = {candidate.node_id for candidate in selected}
         top_score = max(
-            [candidate.score for candidate in selected] or [ordered[0].score if ordered else 0.0]
+            [candidate.score for candidate in selected]
+            or [ordered[0].score if ordered else 0.0]
         )
         min_fill_score = max(
             self.settings.analyst_source_fill_min_score,
@@ -635,7 +760,10 @@ class AnalystRetrievalPipeline:
 
         def add_candidates(mode: str) -> None:
             for candidate in ordered:
-                if len(selected) >= min_keep or len(selected) >= self.settings.analyst_source_final_k:
+                if (
+                    len(selected) >= min_keep
+                    or len(selected) >= self.settings.analyst_source_final_k
+                ):
                     break
                 if candidate.node_id in selected_ids:
                     continue
@@ -658,7 +786,9 @@ class AnalystRetrievalPipeline:
 
         return selected
 
-    def _select_final_relations(self, relations: list[RelationCandidate]) -> list[RelationCandidate]:
+    def _select_final_relations(
+        self, relations: list[RelationCandidate]
+    ) -> list[RelationCandidate]:
         if not relations:
             return []
 
@@ -672,7 +802,9 @@ class AnalystRetrievalPipeline:
             raw_margin=self.settings.analyst_relation_min_raw_margin,
         )
         top_rank_score = self._ranking_score(reranked_relations[0])
-        bounded_reranker_scores = self._has_bounded_scores([self._ranking_score(relation) for relation in reranked_relations])
+        bounded_reranker_scores = self._has_bounded_scores(
+            [self._ranking_score(relation) for relation in reranked_relations]
+        )
 
         selected: list[RelationCandidate] = []
         for relation in ordered:
@@ -705,8 +837,13 @@ class AnalystRetrievalPipeline:
         if rank_score == top_rank_score:
             return True
         if bounded_reranker_scores:
-            return item.score >= min_relative_score or rank_score >= top_rank_score * min_relative_score
-        return (top_rank_score - rank_score) <= raw_margin and item.score >= min_relative_score
+            return (
+                item.score >= min_relative_score
+                or rank_score >= top_rank_score * min_relative_score
+            )
+        return (
+            top_rank_score - rank_score
+        ) <= raw_margin and item.score >= min_relative_score
 
     def _calibrate_display_scores(
         self,
@@ -717,7 +854,11 @@ class AnalystRetrievalPipeline:
         if not items:
             return
 
-        ordered = sorted(items, key=lambda item: (self._ranking_score(item), -item.rank), reverse=True)
+        ordered = sorted(
+            items,
+            key=lambda item: (self._ranking_score(item), -item.rank),
+            reverse=True,
+        )
         scores = [self._ranking_score(item) for item in ordered]
         top_score = scores[0]
         bottom_score = scores[-1]
@@ -745,7 +886,9 @@ class AnalystRetrievalPipeline:
             reverse=True,
         )
 
-    def _sort_relations(self, relations: list[RelationCandidate]) -> list[RelationCandidate]:
+    def _sort_relations(
+        self, relations: list[RelationCandidate]
+    ) -> list[RelationCandidate]:
         return sorted(
             relations,
             key=lambda item: (item.reranked, self._ranking_score(item), -item.rank),
@@ -767,11 +910,12 @@ class AnalystRetrievalPipeline:
             return ""
 
         if source_id_by_chunk is None:
-            source_id_by_chunk = {source.node_id: f"S{idx}" for idx, source in enumerate(sources, start=1)}
+            source_id_by_chunk = {
+                source.node_id: f"S{idx}" for idx, source in enumerate(sources, start=1)
+            }
         emitted_source_ids = emitted_source_ids or set()
         relation_source_by_chunk = {
-            source.node_id: source
-            for source in (relation_sources or sources)
+            source.node_id: source for source in (relation_sources or sources)
         }
         lines = [f"QUERY: {query}"]
 
@@ -781,7 +925,9 @@ class AnalystRetrievalPipeline:
             source_id = source_id_by_chunk[source.node_id]
             display_text = self._display_source_text(source)
             source_text = self._format_source_payload(source, display_text)
-            source_label = f"; Source: {source.metadata.source}" if source.metadata.source else ""
+            source_label = (
+                f"; Source: {source.metadata.source}" if source.metadata.source else ""
+            )
             lines.append(
                 f"[SOURCE] [{source_id}] (Score: {source.score:.2f}; Chunk: {source.node_id}{source_label}) "
                 f"{self._clean(source_text)}"
@@ -814,7 +960,9 @@ class AnalystRetrievalPipeline:
                 evidence_display = "Evidence: unavailable"
 
             confidence_display = (
-                f"; Confidence: {relation.confidence:.2f}" if relation.confidence is not None else ""
+                f"; Confidence: {relation.confidence:.2f}"
+                if relation.confidence is not None
+                else ""
             )
             lines.append(
                 f"[RELATION] [R{idx}] {self._clean(relation.subject)} -> {relation.predicate} -> "
@@ -828,7 +976,9 @@ class AnalystRetrievalPipeline:
         source_text = self._truncate(display_text, MAX_SOURCE_CHARS)
         summary = self._source_summary(source)
         if truncated and summary:
-            return f"Summary: {self._truncate_to_length(summary, 240)} Text: {source_text}"
+            return (
+                f"Summary: {self._truncate_to_length(summary, 240)} Text: {source_text}"
+            )
         return source_text
 
     def _format_hidden_evidence_display(
@@ -855,7 +1005,9 @@ class AnalystRetrievalPipeline:
 
         if self.settings.analyst_reranker_mode == "sentence_transformers":
             try:
-                reranker = SentenceTransformerReranker(**self.reranker_settings.sentence_transformer_params())
+                reranker = SentenceTransformerReranker(
+                    **self.reranker_settings.sentence_transformer_params()
+                )
             except Exception as exc:
                 logger.warning(
                     f"Sentence-transformers Analyst reranker initialization failed; deterministic ranking will be used. Error: {exc}"
@@ -864,12 +1016,17 @@ class AnalystRetrievalPipeline:
                     "analyst_reranker_init_failed",
                     "Sentence-transformers Analyst reranker initialization failed; deterministic ranking will be used.",
                     component="analyst",
-                    details={"mode": self.settings.analyst_reranker_mode, "error": str(exc)},
+                    details={
+                        "mode": self.settings.analyst_reranker_mode,
+                        "error": str(exc),
+                    },
                 )
                 return None
 
             if not self._reranker_health_check(reranker):
-                logger.warning("Sentence-transformers Analyst reranker health check failed; deterministic ranking will be used.")
+                logger.warning(
+                    "Sentence-transformers Analyst reranker health check failed; deterministic ranking will be used."
+                )
                 self.health_report.record(
                     "analyst_reranker_health_check_failed",
                     "Sentence-transformers Analyst reranker health check failed; deterministic ranking will be used.",
@@ -884,7 +1041,10 @@ class AnalystRetrievalPipeline:
                 from llama_index.core.postprocessor import LLMRerank
                 from llama_index.llms.ollama import Ollama
             except Exception:
-                logger.warning("LLMRerank/Ollama imports failed; Analyst reranker disabled.", exc_info=True)
+                logger.warning(
+                    "LLMRerank/Ollama imports failed; Analyst reranker disabled.",
+                    exc_info=True,
+                )
                 self.health_report.record(
                     "analyst_reranker_import_failed",
                     "LLMRerank/Ollama imports failed; Analyst reranker disabled.",
@@ -907,7 +1067,9 @@ class AnalystRetrievalPipeline:
             )
 
             if not self._reranker_health_check(reranker):
-                logger.warning("Analyst LLM reranker health check failed; deterministic ranking will be used.")
+                logger.warning(
+                    "Analyst LLM reranker health check failed; deterministic ranking will be used."
+                )
                 self.health_report.record(
                     "analyst_reranker_health_check_failed",
                     "Analyst LLM reranker health check failed; deterministic ranking will be used.",
@@ -917,7 +1079,10 @@ class AnalystRetrievalPipeline:
                 return None
             return reranker
 
-        logger.warning("Unknown Analyst reranker mode %r; deterministic ranking will be used.", self.settings.analyst_reranker_mode)
+        logger.warning(
+            "Unknown Analyst reranker mode %r; deterministic ranking will be used.",
+            self.settings.analyst_reranker_mode,
+        )
         self.health_report.record(
             "analyst_reranker_unknown_mode",
             "Unknown Analyst reranker mode; deterministic ranking will be used.",
@@ -928,13 +1093,25 @@ class AnalystRetrievalPipeline:
 
     def _reranker_health_check(self, reranker: Any) -> bool:
         nodes = [
-            NodeWithScore(node=TextNode(text="Graph retrieval expands concepts into evidence-backed relations."), score=0.1),
-            NodeWithScore(node=TextNode(text="A cooking recipe lists ingredients and oven temperature."), score=0.1),
+            NodeWithScore(
+                node=TextNode(
+                    text="Graph retrieval expands concepts into evidence-backed relations."
+                ),
+                score=0.1,
+            ),
+            NodeWithScore(
+                node=TextNode(
+                    text="A cooking recipe lists ingredients and oven temperature."
+                ),
+                score=0.1,
+            ),
         ]
         try:
             ranked = reranker.postprocess_nodes(nodes, query_str="graph retrieval")
         except Exception as exc:
-            logger.warning(f"Analyst reranker health check raised an exception; deterministic ranking will be used. Error: {exc}")
+            logger.warning(
+                f"Analyst reranker health check raised an exception; deterministic ranking will be used. Error: {exc}"
+            )
             self.health_report.record(
                 "analyst_reranker_health_check_exception",
                 "Analyst reranker health check raised an exception; deterministic ranking will be used.",
@@ -942,12 +1119,16 @@ class AnalystRetrievalPipeline:
                 details={"error": str(exc)},
             )
             return False
-        return bool(ranked) and "graph retrieval" in ranked[0].node.get_content().lower()
+        return (
+            bool(ranked) and "graph retrieval" in ranked[0].node.get_content().lower()
+        )
 
     def _get_docstore_node(self, node_id: str) -> Any | None:
         return self.access.docstore_node(node_id)
 
-    def _resolve_source_hit(self, node_id: str) -> tuple[str, Any, NormalizedMetadata, str, str | None] | None:
+    def _resolve_source_hit(
+        self, node_id: str
+    ) -> tuple[str, Any, NormalizedMetadata, str, str | None] | None:
         hit_node = self._get_docstore_node(node_id)
         if hit_node is None:
             return None
@@ -955,7 +1136,11 @@ class AnalystRetrievalPipeline:
         hit_metadata = normalize_metadata(hit_node)
         hit_kind = hit_metadata.raw.get("docstore_node_kind")
         if hit_kind == POSTPROCESSED_PASSAGE_KIND:
-            parent_id = str(hit_metadata.raw.get("parent_chunk_id") or hit_metadata.raw.get("chunk_id") or "")
+            parent_id = str(
+                hit_metadata.raw.get("parent_chunk_id")
+                or hit_metadata.raw.get("chunk_id")
+                or ""
+            )
             if not parent_id:
                 return None
             parent_node = self._get_docstore_node(parent_id)
@@ -965,7 +1150,13 @@ class AnalystRetrievalPipeline:
             parent_text = self._node_text(parent_node)
             if not self._is_usable_source(parent_metadata, parent_text):
                 return None
-            return parent_id, parent_node, parent_metadata, parent_text, self._node_text(hit_node)
+            return (
+                parent_id,
+                parent_node,
+                parent_metadata,
+                parent_text,
+                self._node_text(hit_node),
+            )
 
         parent_metadata = normalize_metadata(hit_node)
         parent_text = self._node_text(hit_node)
@@ -977,7 +1168,10 @@ class AnalystRetrievalPipeline:
     def _is_usable_source(self, metadata: NormalizedMetadata, text: str) -> bool:
         if not text.strip():
             return False
-        if metadata.raw.get("docstore_node_kind") not in {None, POSTPROCESSED_CHUNK_KIND}:
+        if metadata.raw.get("docstore_node_kind") not in {
+            None,
+            POSTPROCESSED_CHUNK_KIND,
+        }:
             return False
         if metadata.retrieval_enabled is not True:
             return False
@@ -1004,9 +1198,13 @@ class AnalystRetrievalPipeline:
             score += 0.06
         if self._has_exact_topic_match(query, text_lower):
             score += 0.04
-        if self._has_exact_topic_match(query, self._topic_match_text(metadata, summary)):
+        if self._has_exact_topic_match(
+            query, self._topic_match_text(metadata, summary)
+        ):
             score += self.settings.analyst_source_exact_topic_boost
-        if "dataset" in query_terms and ("dataset" in path_text or "dataset" in summary or "dataset" in text_lower):
+        if "dataset" in query_terms and (
+            "dataset" in path_text or "dataset" in summary or "dataset" in text_lower
+        ):
             score += 0.08
         if self._has_term_overlap(query_terms, path_text):
             score += 0.02
@@ -1039,8 +1237,17 @@ class AnalystRetrievalPipeline:
     ) -> bool:
         text_lower = text.lower()
         summary = str(metadata.raw.get("postprocess_chunk_summary") or "").lower()
-        broad_markers = ("course", "guide", "lectures", "what's inside", "seminars", "homeworks")
-        if len(text) < 3000 or not any(marker in text_lower for marker in broad_markers):
+        broad_markers = (
+            "course",
+            "guide",
+            "lectures",
+            "what's inside",
+            "seminars",
+            "homeworks",
+        )
+        if len(text) < 3000 or not any(
+            marker in text_lower for marker in broad_markers
+        ):
             return False
         focused_metadata = " ".join([*metadata.path, *metadata.heading_path, summary])
         return not self._has_term_overlap(query_terms, focused_metadata)
@@ -1048,7 +1255,9 @@ class AnalystRetrievalPipeline:
     def _semantic_relation_count(self, concepts: list[Any]) -> int:
         return len(self._get_relation_map(concepts[:3], limit=5))
 
-    def _get_relation_map(self, concepts: list[Any], limit: int | None = None) -> list[tuple[Any, Any, Any]]:
+    def _get_relation_map(
+        self, concepts: list[Any], limit: int | None = None
+    ) -> list[tuple[Any, Any, Any]]:
         return self.access.relation_map(
             concepts,
             depth=self.settings.analyst_graph_depth,
@@ -1064,9 +1273,13 @@ class AnalystRetrievalPipeline:
         ids: list[str] | None = None,
         relation_names: list[str] | None = None,
     ) -> list[tuple[Any, Any, Any]]:
-        return self.access.triplets(ids=ids, relation_names=relation_names, component="analyst")
+        return self.access.triplets(
+            ids=ids, relation_names=relation_names, component="analyst"
+        )
 
-    def _dedupe_relation_triplets(self, triplets: list[tuple[Any, Any, Any]]) -> list[tuple[Any, Any, Any]]:
+    def _dedupe_relation_triplets(
+        self, triplets: list[tuple[Any, Any, Any]]
+    ) -> list[tuple[Any, Any, Any]]:
         seen: set[tuple[Any, ...]] = set()
         deduped: list[tuple[Any, Any, Any]] = []
         for subject, relation, object_ in triplets:
@@ -1077,8 +1290,12 @@ class AnalystRetrievalPipeline:
             deduped.append((subject, relation, object_))
         return deduped
 
-    def _relation_triplet_key(self, subject: Any, relation: Any, object_: Any) -> tuple[Any, ...]:
-        stable_id = self._stable_relation_id(relation, fallback_rank=0, relation_text="")
+    def _relation_triplet_key(
+        self, subject: Any, relation: Any, object_: Any
+    ) -> tuple[Any, ...]:
+        stable_id = self._stable_relation_id(
+            relation, fallback_rank=0, relation_text=""
+        )
         if stable_id and not stable_id.startswith("0:"):
             return ("id", stable_id)
         return (
@@ -1089,7 +1306,9 @@ class AnalystRetrievalPipeline:
             tuple(self._relation_evidence_chunk_ids(relation)),
         )
 
-    def _stable_relation_id(self, relation: Any, *, fallback_rank: int, relation_text: str) -> str:
+    def _stable_relation_id(
+        self, relation: Any, *, fallback_rank: int, relation_text: str
+    ) -> str:
         properties = getattr(relation, "properties", {}) or {}
         for key in ("postprocess_relation_id", "relation_id", "id"):
             value = self._string_or_none(properties.get(key))
@@ -1099,9 +1318,13 @@ class AnalystRetrievalPipeline:
 
     def _relation_evidence_chunk_ids(self, relation: Any) -> list[str]:
         properties = getattr(relation, "properties", {}) or {}
-        return self._string_list(properties.get("evidence_chunk_ids") or properties.get("source_chunk_ids"))
+        return self._string_list(
+            properties.get("evidence_chunk_ids") or properties.get("source_chunk_ids")
+        )
 
-    def _dedupe_sources(self, candidates: list[SourceCandidate]) -> list[SourceCandidate]:
+    def _dedupe_sources(
+        self, candidates: list[SourceCandidate]
+    ) -> list[SourceCandidate]:
         seen_chunks: set[str] = set()
         deduped: list[SourceCandidate] = []
         for candidate in self._sort_sources(candidates):
@@ -1111,7 +1334,9 @@ class AnalystRetrievalPipeline:
             deduped.append(candidate)
         return deduped
 
-    def _dedupe_relations(self, relations: list[RelationCandidate]) -> list[RelationCandidate]:
+    def _dedupe_relations(
+        self, relations: list[RelationCandidate]
+    ) -> list[RelationCandidate]:
         seen: set[tuple[str, str, str]] = set()
         deduped: list[RelationCandidate] = []
         for relation in relations:
@@ -1144,7 +1369,11 @@ class AnalystRetrievalPipeline:
         parts = [
             self._display_metadata_path(candidate.metadata),
             str(candidate.metadata.raw.get("postprocess_chunk_summary") or ""),
-            self._source_excerpt(query, evidence_text, max_chars=self.settings.analyst_source_rerank_max_chars),
+            self._source_excerpt(
+                query,
+                evidence_text,
+                max_chars=self.settings.analyst_source_rerank_max_chars,
+            ),
         ]
         return self._truncate_to_length(
             "\n".join(part for part in parts if part),
@@ -1165,13 +1394,17 @@ class AnalystRetrievalPipeline:
         parts = [
             f"{relation.subject} {relation.predicate} {relation.object}",
             f"Family: {relation.predicate_family}" if relation.predicate_family else "",
-            "Relation phrase: " + "; ".join(relation.relation_phrases) if relation.relation_phrases else "",
+            "Relation phrase: " + "; ".join(relation.relation_phrases)
+            if relation.relation_phrases
+            else "",
             " ".join(relation.evidence_spans),
             source_evidence,
         ]
         text = "\n".join(part for part in parts if part)
         if query:
-            return self._truncate_to_length(text, max(120, self.settings.analyst_relation_rerank_max_chars))
+            return self._truncate_to_length(
+                text, max(120, self.settings.analyst_relation_rerank_max_chars)
+            )
         return text
 
     def _source_excerpt(self, query: str, text: str, *, max_chars: int) -> str:
@@ -1225,14 +1458,18 @@ class AnalystRetrievalPipeline:
         return stripped or text
 
     def _source_summary(self, source: SourceCandidate) -> str:
-        return " ".join(str(source.metadata.raw.get("postprocess_chunk_summary") or "").split())
+        return " ".join(
+            str(source.metadata.raw.get("postprocess_chunk_summary") or "").split()
+        )
 
-    def _strip_redundant_source_prefix(self, text: str, metadata: NormalizedMetadata) -> str:
+    def _strip_redundant_source_prefix(
+        self, text: str, metadata: NormalizedMetadata
+    ) -> str:
         for prefix in self._metadata_prefix_candidates(metadata):
             if not self._prefix_matches(text, prefix):
                 continue
 
-            remainder = text[len(prefix):].lstrip()
+            remainder = text[len(prefix) :].lstrip()
             if remainder.startswith(">"):
                 remainder = remainder[1:].lstrip()
             if remainder:
@@ -1243,7 +1480,11 @@ class AnalystRetrievalPipeline:
     def _metadata_prefix_candidates(self, metadata: NormalizedMetadata) -> list[str]:
         candidates: list[str] = []
         for path in (metadata.path, metadata.heading_path):
-            cleaned_parts = [self._clean_path_part(part) for part in path if self._clean_path_part(part)]
+            cleaned_parts = [
+                self._clean_path_part(part)
+                for part in path
+                if self._clean_path_part(part)
+            ]
             for idx in range(len(cleaned_parts), 0, -1):
                 candidates.append(" > ".join(cleaned_parts[:idx]))
 
@@ -1267,7 +1508,11 @@ class AnalystRetrievalPipeline:
         return " > ".join(cleaned_parts)
 
     def _source_path_key(self, candidate: SourceCandidate) -> str:
-        return self._display_metadata_path(candidate.metadata) or self._metadata_path(candidate.metadata) or candidate.node_id
+        return (
+            self._display_metadata_path(candidate.metadata)
+            or self._metadata_path(candidate.metadata)
+            or candidate.node_id
+        )
 
     def _node_text(self, node: Any) -> str:
         return self.access.node_text(node)
@@ -1294,14 +1539,19 @@ class AnalystRetrievalPipeline:
 
     @staticmethod
     def _query_terms(query: str) -> set[str]:
-        return {term for term in query.lower().replace("/", " ").split() if len(term) > 2}
+        return {
+            term for term in query.lower().replace("/", " ").split() if len(term) > 2
+        }
 
     @staticmethod
     def _has_term_overlap(query_terms: set[str], text: str) -> bool:
         if not query_terms or not text:
             return False
         lowered = text.lower()
-        return any(AnalystRetrievalPipeline._term_matches_text(term, lowered) for term in query_terms)
+        return any(
+            AnalystRetrievalPipeline._term_matches_text(term, lowered)
+            for term in query_terms
+        )
 
     @staticmethod
     def _term_matches_text(term: str, text: str) -> bool:

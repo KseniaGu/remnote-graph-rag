@@ -77,13 +77,13 @@ def section_header(title: str, icon_name: str | None = None, **props) -> rx.Comp
 
 
 def icon_text_button(
-        icon_name: str,
-        label: str,
-        on_click,
-        style: dict,
-        icon_color: str | None = None,
-        icon_size: int = 16,
-        text_size: str = "0.875rem",
+    icon_name: str,
+    label: str,
+    on_click,
+    style: dict,
+    icon_color: str | None = None,
+    icon_size: int = 16,
+    text_size: str = "0.875rem",
 ) -> rx.Component:
     """Button primitive for icon + text actions."""
     return rx.button(
@@ -125,7 +125,9 @@ def agent_label(name, color: str, animated: bool = False) -> rx.Component:
     )
 
 
-def artifact_header(label, timestamp, color: str, animated: bool = False) -> rx.Component:
+def artifact_header(
+    label, timestamp, color: str, animated: bool = False
+) -> rx.Component:
     """Metadata row for assistant study artifacts."""
     return rx.hstack(
         agent_label(label, color, animated=animated),
@@ -238,11 +240,11 @@ def workflow_status_label():
 
 
 def state_notice(
-        icon_name: str,
-        title,
-        detail,
-        color: str = COLORS["accent_blue"],
-        animated: bool = False,
+    icon_name: str,
+    title,
+    detail,
+    color: str = COLORS["accent_blue"],
+    animated: bool = False,
 ) -> rx.Component:
     """Compact empty/loading/error state block."""
     icon_props = {"class_name": "animate-spin"} if animated else {}
@@ -266,7 +268,9 @@ def submission_error_notice() -> rx.Component:
                 rx.icon("circle-alert", size=16, color=COLORS["accent_red"]),
                 rx.vstack(
                     rx.text("Submission failed", class_name="submission-error-title"),
-                    rx.text(AppState.error_message, class_name="submission-error-detail"),
+                    rx.text(
+                        AppState.error_message, class_name="submission-error-detail"
+                    ),
                     spacing="0",
                     align="start",
                     min_width="0",
@@ -445,7 +449,10 @@ def empty_session_intro() -> rx.Component:
 def starter_prompt_row() -> rx.Component:
     """Starter prompts attached to the empty-state composer."""
     return rx.hstack(
-        *[quick_action_button(icon, label, action) for icon, label, action in QUICK_ACTIONS],
+        *[
+            quick_action_button(icon, label, action)
+            for icon, label, action in QUICK_ACTIONS
+        ],
         class_name="starter-prompts",
         spacing="2",
         wrap="wrap",
@@ -465,14 +472,18 @@ def workspace_tab(icon_name: str, label: str, view: str, on_click) -> rx.Compone
             align="center",
         ),
         on_click=on_click,
-        class_name=rx.cond(is_active, "workspace-tab workspace-tab-active", "workspace-tab"),
+        class_name=rx.cond(
+            is_active, "workspace-tab workspace-tab-active", "workspace-tab"
+        ),
     )
 
 
 def workspace_tabs() -> rx.Component:
     """Top-level workspace navigation."""
     return rx.vstack(
-        workspace_tab("message-square-text", WORKSPACE_STUDY_LABEL, "chat", AppState.open_chat),
+        workspace_tab(
+            "message-square-text", WORKSPACE_STUDY_LABEL, "chat", AppState.open_chat
+        ),
         workspace_tab("network", WORKSPACE_GRAPH_LABEL, "graph", AppState.open_graph),
         spacing="2",
         width="100%",
@@ -677,7 +688,11 @@ def message_bubble(message: Message) -> rx.Component:
                     color=COLORS["text_muted"],
                     align_self="flex-end",
                     margin_top="0.25rem",
-                    display=rx.cond((message.role == "user") | (message.agent == ""), "block", "none"),
+                    display=rx.cond(
+                        (message.role == "user") | (message.agent == ""),
+                        "block",
+                        "none",
+                    ),
                 ),
                 class_name=message_class_name(message),
                 style=message_style(message),
@@ -710,9 +725,11 @@ def streaming_bubble() -> rx.Component:
                         COLORS["accent_blue"],
                         animated=True,
                     ),
-                    rx.markdown(
+                    rx.text(
                         AppState.streaming_content + " ▍",
-                        class_name="markdown-content",
+                        white_space="pre-wrap",
+                        overflow_wrap="anywhere",
+                        class_name="streaming-content",
                     ),
                     class_name=rx.cond(
                         AppState.streaming_agent == "analyst",
@@ -760,7 +777,12 @@ def processing_indicator() -> rx.Component:
         AppState.is_processing,
         rx.hstack(
             rx.hstack(
-                rx.icon("loader-circle", size=16, class_name="animate-spin", color=COLORS["accent_blue"]),
+                rx.icon(
+                    "loader-circle",
+                    size=16,
+                    class_name="animate-spin",
+                    color=COLORS["accent_blue"],
+                ),
                 rx.text(
                     CHAT_PROCESSING_LABEL,
                     font_size="0.875rem",
@@ -792,7 +814,8 @@ def processing_indicator() -> rx.Component:
 def bottom_status_area() -> rx.Component:
     """Predictable notices and workflow status region above the composer."""
     return rx.cond(
-        AppState.is_processing | (AppState.show_graph_updated_notice & ~AppState.is_processing),
+        AppState.is_processing
+        | (AppState.show_graph_updated_notice & ~AppState.is_processing),
         rx.box(
             rx.vstack(
                 graph_updated_notice(),
@@ -999,7 +1022,9 @@ def chat_input() -> rx.Component:
 })();
 """),
         rx.box(
-            AppState.scroll_request_nonce.to_string() + ":" + AppState.scroll_target_message_dom_id,
+            AppState.scroll_request_nonce.to_string()
+            + ":"
+            + AppState.scroll_target_message_dom_id,
             id="chat-scroll-command",
             display="none",
         ),
@@ -1015,8 +1040,12 @@ def chat_input() -> rx.Component:
         spacing="3",
         width="100%",
         background=rx.cond(~AppState.has_messages, "transparent", COLORS["bg_card"]),
-        border_top=rx.cond(~AppState.has_messages, "none", f"1px solid {COLORS['border']}"),
-        class_name=rx.cond(~AppState.has_messages, "empty-session-composer", "chat-composer"),
+        border_top=rx.cond(
+            ~AppState.has_messages, "none", f"1px solid {COLORS['border']}"
+        ),
+        class_name=rx.cond(
+            ~AppState.has_messages, "empty-session-composer", "chat-composer"
+        ),
     )
 
 
@@ -1027,7 +1056,11 @@ def graph_panel_body() -> rx.Component:
             AppState.has_visualization,
             rx.plotly(
                 data=AppState.plotly_figure,
-                config={"displayModeBar": "hover", "scrollZoom": True, "responsive": True},
+                config={
+                    "displayModeBar": "hover",
+                    "scrollZoom": True,
+                    "responsive": True,
+                },
                 class_name="graph-plot",
             ),
             rx.cond(
@@ -1039,8 +1072,10 @@ def graph_panel_body() -> rx.Component:
                     COLORS["accent_red"],
                 ),
                 rx.cond(
-                    AppState.is_processing & (
-                            (AppState.active_agent == "retriever") | (AppState.active_agent == "visualizer")
+                    AppState.is_processing
+                    & (
+                        (AppState.active_agent == "retriever")
+                        | (AppState.active_agent == "visualizer")
                     ),
                     state_notice(
                         "loader-circle",

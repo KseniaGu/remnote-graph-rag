@@ -11,10 +11,7 @@
   "shutdownAction": "stopCompose",
   "forwardPorts": [
     3000,
-    8000,
-    6379,
-    7687,
-    27017
+    8000
   ],
   "customizations": {
     "vscode": {
@@ -33,18 +30,6 @@
     "8000": {
       "label": "Reflex backend",
       "onAutoForward": "notify"
-    },
-    "6379": {
-      "label": "Redis",
-      "onAutoForward": "silent"
-    },
-    "7687": {
-      "label": "Memgraph Bolt",
-      "onAutoForward": "silent"
-    },
-    "27017": {
-      "label": "MongoDB",
-      "onAutoForward": "silent"
     }
   },
   "otherPortsAttributes": {

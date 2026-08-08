@@ -5,7 +5,10 @@ from unittest.mock import patch
 from llama_index.core.vector_stores import VectorStoreQueryResult
 
 from backend.configs.search import KnowledgeGraphSearchSettings
-from backend.workflows.agents.analyst_retrieval import AnalystRetrievalPipeline, RelationCandidate
+from backend.workflows.agents.analyst_retrieval import (
+    AnalystRetrievalPipeline,
+    RelationCandidate,
+)
 
 
 class FakeEmbedder:
@@ -62,21 +65,31 @@ class FakeGraphStore:
         self.mention_triplets = mention_triplets or []
         self.relation_triplets = relation_triplets or []
 
-    def get_triplets(self, entity_names=None, relation_names=None, properties=None, ids=None):
+    def get_triplets(
+        self, entity_names=None, relation_names=None, properties=None, ids=None
+    ):
         triplets = [*self.mention_triplets, *self.relation_triplets]
         if relation_names:
-            triplets = [triplet for triplet in triplets if triplet[1].id in relation_names]
+            triplets = [
+                triplet for triplet in triplets if triplet[1].id in relation_names
+            ]
         if ids:
             id_set = set(ids)
-            triplets = [triplet for triplet in triplets if triplet[0].id in id_set or triplet[2].id in id_set]
+            triplets = [
+                triplet
+                for triplet in triplets
+                if triplet[0].id in id_set or triplet[2].id in id_set
+            ]
         return triplets
 
     def get_rel_map(self, graph_nodes, depth=1, limit=30, ignore_rels=None):
         ids = {node.id for node in graph_nodes}
         ignore_rels = set(ignore_rels or [])
         triplets = [
-            triplet for triplet in self.relation_triplets
-            if triplet[1].id not in ignore_rels and (triplet[0].id in ids or triplet[2].id in ids)
+            triplet
+            for triplet in self.relation_triplets
+            if triplet[1].id not in ignore_rels
+            and (triplet[0].id in ids or triplet[2].id in ids)
         ]
         return triplets[:limit]
 
@@ -92,7 +105,9 @@ class EmptyHealthCheckReranker:
 
 
 class OrderedScoreReranker:
-    def __init__(self, scores_by_id: dict[str, float], top_n: int | None = None) -> None:
+    def __init__(
+        self, scores_by_id: dict[str, float], top_n: int | None = None
+    ) -> None:
         self.scores_by_id = scores_by_id
         self.top_n = top_n
 
@@ -137,18 +152,25 @@ def make_metadata(**overrides):
 
 
 def make_indexer(vector_store, docs, graph_store=None, settings=None):
-    storage_context = SimpleNamespace(docstore=SimpleNamespace(docs=docs), vector_store=vector_store)
-    index = SimpleNamespace(vector_store=vector_store, property_graph_store=graph_store or FakeGraphStore())
+    storage_context = SimpleNamespace(
+        docstore=SimpleNamespace(docs=docs), vector_store=vector_store
+    )
+    index = SimpleNamespace(
+        vector_store=vector_store, property_graph_store=graph_store or FakeGraphStore()
+    )
     return SimpleNamespace(
         index=index,
         storage_context=storage_context,
         embedder=FakeEmbedder(),
-        kg_search_settings=settings or KnowledgeGraphSearchSettings(analyst_reranker_mode="disabled"),
+        kg_search_settings=settings
+        or KnowledgeGraphSearchSettings(analyst_reranker_mode="disabled"),
     )
 
 
 class AnalystRetrievalPipelineTests(unittest.TestCase):
-    def test_source_filtering_excludes_disabled_quarantined_empty_and_non_docstore_nodes(self) -> None:
+    def test_source_filtering_excludes_disabled_quarantined_empty_and_non_docstore_nodes(
+        self,
+    ) -> None:
         docs = {
             "chunk_good": FakeTextNode(
                 "chunk_good",
@@ -172,7 +194,13 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             ),
         }
         vector_store = FakeVectorStore(
-            ["chunk_good", "chunk_disabled", "chunk_quarantined", "chunk_empty", "concept_clip"],
+            [
+                "chunk_good",
+                "chunk_disabled",
+                "chunk_quarantined",
+                "chunk_empty",
+                "concept_clip",
+            ],
             [0.8, 0.95, 0.96, 0.97, 0.99],
         )
         pipeline = AnalystRetrievalPipeline(make_indexer(vector_store, docs))
@@ -209,7 +237,9 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
                 ),
             ),
         }
-        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_parent::passage_000"], [0.91]), docs))
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(FakeVectorStore(["chunk_parent::passage_000"], [0.91]), docs)
+        )
 
         output = pipeline.search(["AdamW optimizer"])
 
@@ -245,7 +275,10 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         }
         pipeline = AnalystRetrievalPipeline(
             make_indexer(
-                FakeVectorStore(["chunk_parent::passage_000", "chunk_parent::passage_001"], [0.92, 0.91]),
+                FakeVectorStore(
+                    ["chunk_parent::passage_000", "chunk_parent::passage_001"],
+                    [0.92, 0.91],
+                ),
                 docs,
             )
         )
@@ -328,11 +361,15 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         self.assertIn("Evidence: S1", output)
         self.assertNotIn("-> MENTIONS ->", output)
 
-    def test_source_grounded_relations_are_collected_before_relation_map_limit(self) -> None:
+    def test_source_grounded_relations_are_collected_before_relation_map_limit(
+        self,
+    ) -> None:
         naive_bayes = FakeGraphNode("concept_nb", "Naive Bayes")
         logistic = FakeGraphNode("concept_lr", "Logistic Regression")
         source = FakeGraphNode("chunk_compare", "Comparison source")
-        noise_nodes = [FakeGraphNode(f"concept_noise_{idx}", f"Noise {idx}") for idx in range(35)]
+        noise_nodes = [
+            FakeGraphNode(f"concept_noise_{idx}", f"Noise {idx}") for idx in range(35)
+        ]
         noise_relations = [
             (
                 naive_bayes,
@@ -373,7 +410,12 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             analyst_graph_relation_limit=1,
         )
         pipeline = AnalystRetrievalPipeline(
-            make_indexer(FakeVectorStore(["chunk_compare"], [0.72]), docs, graph_store, settings=settings),
+            make_indexer(
+                FakeVectorStore(["chunk_compare"], [0.72]),
+                docs,
+                graph_store,
+                settings=settings,
+            ),
             settings=settings,
         )
 
@@ -383,10 +425,15 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         self.assertIn("rel_compare", relation_ids)
         self.assertIn(
             ("Naive Bayes", "COMPARES_TO", "Logistic Regression"),
-            [(relation.subject, relation.predicate, relation.object) for relation in result["relations"]],
+            [
+                (relation.subject, relation.predicate, relation.object)
+                for relation in result["relations"]
+            ],
         )
 
-    def test_source_text_strips_redundant_path_prefix_but_keeps_source_path(self) -> None:
+    def test_source_text_strips_redundant_path_prefix_but_keeps_source_path(
+        self,
+    ) -> None:
         docs = {
             "chunk_dataset": FakeTextNode(
                 "chunk_dataset",
@@ -398,14 +445,20 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
                 ),
             )
         }
-        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_dataset"], [0.9]), docs))
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(FakeVectorStore(["chunk_dataset"], [0.9]), docs)
+        )
 
         output = pipeline.search(["text classification datasets"])
-        source_line = next(line for line in output.splitlines() if line.startswith("[SOURCE] [S1]"))
+        source_line = next(
+            line for line in output.splitlines() if line.startswith("[SOURCE] [S1]")
+        )
 
         self.assertIn("1. AG News", source_line)
         self.assertNotIn("Text Classification > Common datasets", source_line)
-        self.assertIn("[SOURCE PATH] [S1] Text Classification > Common datasets", output)
+        self.assertIn(
+            "[SOURCE PATH] [S1] Text Classification > Common datasets", output
+        )
 
     def test_source_path_display_removes_external_fragments(self) -> None:
         docs = {
@@ -419,7 +472,9 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
                 ),
             )
         }
-        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_external"], [0.9]), docs))
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(FakeVectorStore(["chunk_external"], [0.9]), docs)
+        )
 
         output = pipeline.search(["source"])
 
@@ -431,41 +486,67 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             "chunk_bad": FakeTextNode(
                 "chunk_bad",
                 "Broad background source.",
-                make_metadata(chunk_id="chunk_bad", path=["Root", "Broad"], heading_path=["Root", "Broad"]),
+                make_metadata(
+                    chunk_id="chunk_bad",
+                    path=["Root", "Broad"],
+                    heading_path=["Root", "Broad"],
+                ),
             ),
             "chunk_good": FakeTextNode(
                 "chunk_good",
                 "Exact answer source.",
-                make_metadata(chunk_id="chunk_good", path=["Root", "Exact"], heading_path=["Root", "Exact"]),
+                make_metadata(
+                    chunk_id="chunk_good",
+                    path=["Root", "Exact"],
+                    heading_path=["Root", "Exact"],
+                ),
             ),
         }
         pipeline = AnalystRetrievalPipeline(
-            make_indexer(FakeVectorStore(["chunk_bad", "chunk_good"], [0.99, 0.40]), docs),
+            make_indexer(
+                FakeVectorStore(["chunk_bad", "chunk_good"], [0.99, 0.40]), docs
+            ),
             reranker=OrderedScoreReranker({"chunk_bad": 0.2, "chunk_good": 0.8}),
         )
 
         output = pipeline.search(["exact answer"])
-        first_source = next(line for line in output.splitlines() if line.startswith("[SOURCE] [S1]"))
+        first_source = next(
+            line for line in output.splitlines() if line.startswith("[SOURCE] [S1]")
+        )
 
         self.assertIn("chunk_good", first_source)
         self.assertIn("Score: 0.80", first_source)
 
-    def test_unbounded_reranker_scores_are_calibrated_without_sigmoid_saturation(self) -> None:
+    def test_unbounded_reranker_scores_are_calibrated_without_sigmoid_saturation(
+        self,
+    ) -> None:
         docs = {
             "chunk_top": FakeTextNode(
                 "chunk_top",
                 "Best source for exact answer.",
-                make_metadata(chunk_id="chunk_top", path=["Root", "Top"], heading_path=["Root", "Top"]),
+                make_metadata(
+                    chunk_id="chunk_top",
+                    path=["Root", "Top"],
+                    heading_path=["Root", "Top"],
+                ),
             ),
             "chunk_close": FakeTextNode(
                 "chunk_close",
                 "Close supporting source for exact answer.",
-                make_metadata(chunk_id="chunk_close", path=["Root", "Close"], heading_path=["Root", "Close"]),
+                make_metadata(
+                    chunk_id="chunk_close",
+                    path=["Root", "Close"],
+                    heading_path=["Root", "Close"],
+                ),
             ),
             "chunk_tail": FakeTextNode(
                 "chunk_tail",
                 "Weak tail source.",
-                make_metadata(chunk_id="chunk_tail", path=["Root", "Tail"], heading_path=["Root", "Tail"]),
+                make_metadata(
+                    chunk_id="chunk_tail",
+                    path=["Root", "Tail"],
+                    heading_path=["Root", "Tail"],
+                ),
             ),
         }
         settings = KnowledgeGraphSearchSettings(
@@ -474,12 +555,16 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         )
         pipeline = AnalystRetrievalPipeline(
             make_indexer(
-                FakeVectorStore(["chunk_tail", "chunk_close", "chunk_top"], [0.95, 0.9, 0.85]),
+                FakeVectorStore(
+                    ["chunk_tail", "chunk_close", "chunk_top"], [0.95, 0.9, 0.85]
+                ),
                 docs,
                 settings=settings,
             ),
             settings=settings,
-            reranker=OrderedScoreReranker({"chunk_top": 10.0, "chunk_close": 8.0, "chunk_tail": 0.0}),
+            reranker=OrderedScoreReranker(
+                {"chunk_top": 10.0, "chunk_close": 8.0, "chunk_tail": 0.0}
+            ),
         )
 
         output = pipeline.search(["exact answer"])
@@ -495,12 +580,20 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             "chunk_top": FakeTextNode(
                 "chunk_top",
                 "Focused answer source.",
-                make_metadata(chunk_id="chunk_top", path=["Root", "Top"], heading_path=["Root", "Top"]),
+                make_metadata(
+                    chunk_id="chunk_top",
+                    path=["Root", "Top"],
+                    heading_path=["Root", "Top"],
+                ),
             ),
             "chunk_tail": FakeTextNode(
                 "chunk_tail",
                 "Off-topic tail source.",
-                make_metadata(chunk_id="chunk_tail", path=["Root", "Tail"], heading_path=["Root", "Tail"]),
+                make_metadata(
+                    chunk_id="chunk_tail",
+                    path=["Root", "Tail"],
+                    heading_path=["Root", "Tail"],
+                ),
             ),
         }
         settings = KnowledgeGraphSearchSettings(
@@ -509,7 +602,11 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             analyst_source_min_raw_margin=2.0,
         )
         pipeline = AnalystRetrievalPipeline(
-            make_indexer(FakeVectorStore(["chunk_tail", "chunk_top"], [0.99, 0.50]), docs, settings=settings),
+            make_indexer(
+                FakeVectorStore(["chunk_tail", "chunk_top"], [0.99, 0.50]),
+                docs,
+                settings=settings,
+            ),
             settings=settings,
             reranker=OrderedScoreReranker({"chunk_top": 9.0, "chunk_tail": 3.0}),
         )
@@ -524,22 +621,38 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             "chunk_top": FakeTextNode(
                 "chunk_top",
                 "Best reranked source.",
-                make_metadata(chunk_id="chunk_top", path=["Root", "Same"], heading_path=["Root", "Same"]),
+                make_metadata(
+                    chunk_id="chunk_top",
+                    path=["Root", "Same"],
+                    heading_path=["Root", "Same"],
+                ),
             ),
             "chunk_same": FakeTextNode(
                 "chunk_same",
                 "Same path fallback source.",
-                make_metadata(chunk_id="chunk_same", path=["Root", "Same"], heading_path=["Root", "Same"]),
+                make_metadata(
+                    chunk_id="chunk_same",
+                    path=["Root", "Same"],
+                    heading_path=["Root", "Same"],
+                ),
             ),
             "chunk_other_a": FakeTextNode(
                 "chunk_other_a",
                 "First diverse fallback source.",
-                make_metadata(chunk_id="chunk_other_a", path=["Root", "Other A"], heading_path=["Root", "Other A"]),
+                make_metadata(
+                    chunk_id="chunk_other_a",
+                    path=["Root", "Other A"],
+                    heading_path=["Root", "Other A"],
+                ),
             ),
             "chunk_other_b": FakeTextNode(
                 "chunk_other_b",
                 "Second diverse fallback source.",
-                make_metadata(chunk_id="chunk_other_b", path=["Root", "Other B"], heading_path=["Root", "Other B"]),
+                make_metadata(
+                    chunk_id="chunk_other_b",
+                    path=["Root", "Other B"],
+                    heading_path=["Root", "Other B"],
+                ),
             ),
         }
         settings = KnowledgeGraphSearchSettings(
@@ -572,17 +685,29 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             "chunk_top": FakeTextNode(
                 "chunk_top",
                 "Strong focused source.",
-                make_metadata(chunk_id="chunk_top", path=["Root", "Top"], heading_path=["Root", "Top"]),
+                make_metadata(
+                    chunk_id="chunk_top",
+                    path=["Root", "Top"],
+                    heading_path=["Root", "Top"],
+                ),
             ),
             "chunk_weak_a": FakeTextNode(
                 "chunk_weak_a",
                 "Weak diverse fallback A.",
-                make_metadata(chunk_id="chunk_weak_a", path=["Root", "Weak A"], heading_path=["Root", "Weak A"]),
+                make_metadata(
+                    chunk_id="chunk_weak_a",
+                    path=["Root", "Weak A"],
+                    heading_path=["Root", "Weak A"],
+                ),
             ),
             "chunk_weak_b": FakeTextNode(
                 "chunk_weak_b",
                 "Weak diverse fallback B.",
-                make_metadata(chunk_id="chunk_weak_b", path=["Root", "Weak B"], heading_path=["Root", "Weak B"]),
+                make_metadata(
+                    chunk_id="chunk_weak_b",
+                    path=["Root", "Weak B"],
+                    heading_path=["Root", "Weak B"],
+                ),
             ),
         }
         settings = KnowledgeGraphSearchSettings(
@@ -592,7 +717,9 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         )
         pipeline = AnalystRetrievalPipeline(
             make_indexer(
-                FakeVectorStore(["chunk_top", "chunk_weak_a", "chunk_weak_b"], [0.99, 0.35, 0.34]),
+                FakeVectorStore(
+                    ["chunk_top", "chunk_weak_a", "chunk_weak_b"], [0.99, 0.35, 0.34]
+                ),
                 docs,
                 settings=settings,
             ),
@@ -609,25 +736,41 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
     def test_exact_topic_match_uses_phrase_boundaries(self) -> None:
         pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore([]), {}))
 
-        self.assertTrue(pipeline._has_exact_topic_match("Fast Text", "Models > Fast Text > Notes"))
+        self.assertTrue(
+            pipeline._has_exact_topic_match("Fast Text", "Models > Fast Text > Notes")
+        )
         self.assertTrue(pipeline._has_exact_topic_match("BERT", "BERT architecture"))
-        self.assertFalse(pipeline._has_exact_topic_match("BERT", "ModernBERT architecture"))
-        self.assertFalse(pipeline._has_exact_topic_match("CLIP", "image clipping utilities"))
+        self.assertFalse(
+            pipeline._has_exact_topic_match("BERT", "ModernBERT architecture")
+        )
+        self.assertFalse(
+            pipeline._has_exact_topic_match("CLIP", "image clipping utilities")
+        )
 
     def test_short_query_terms_use_phrase_boundaries(self) -> None:
         pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore([]), {}))
 
         self.assertTrue(pipeline._has_term_overlap({"bert"}, "BERT architecture"))
-        self.assertFalse(pipeline._has_term_overlap({"bert"}, "ModernBERT architecture"))
-        self.assertFalse(pipeline._has_term_overlap({"clip"}, "image clipping utilities"))
-        self.assertTrue(pipeline._has_term_overlap({"diffusion"}, "diffusions and score models"))
+        self.assertFalse(
+            pipeline._has_term_overlap({"bert"}, "ModernBERT architecture")
+        )
+        self.assertFalse(
+            pipeline._has_term_overlap({"clip"}, "image clipping utilities")
+        )
+        self.assertTrue(
+            pipeline._has_term_overlap({"diffusion"}, "diffusions and score models")
+        )
 
     def test_source_reranker_uses_limited_candidate_pool(self) -> None:
         docs = {
             f"chunk_{idx}": FakeTextNode(
                 f"chunk_{idx}",
                 f"Candidate source {idx}.",
-                make_metadata(chunk_id=f"chunk_{idx}", path=["Root", f"Chunk {idx}"], heading_path=["Root", f"Chunk {idx}"]),
+                make_metadata(
+                    chunk_id=f"chunk_{idx}",
+                    path=["Root", f"Chunk {idx}"],
+                    heading_path=["Root", f"Chunk {idx}"],
+                ),
             )
             for idx in range(12)
         }
@@ -639,7 +782,10 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         reranker = RecordingReranker()
         pipeline = AnalystRetrievalPipeline(
             make_indexer(
-                FakeVectorStore([f"chunk_{idx}" for idx in range(12)], [0.99 - (idx * 0.01) for idx in range(12)]),
+                FakeVectorStore(
+                    [f"chunk_{idx}" for idx in range(12)],
+                    [0.99 - (idx * 0.01) for idx in range(12)],
+                ),
                 docs,
                 settings=settings,
             ),
@@ -647,13 +793,18 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             reranker=reranker,
         )
 
-        candidates = pipeline._dedupe_sources(pipeline._retrieve_source_candidates("candidate source"))
+        candidates = pipeline._dedupe_sources(
+            pipeline._retrieve_source_candidates("candidate source")
+        )
         reranked = pipeline._rerank_sources("candidate source", candidates)
 
         self.assertEqual(1, len(reranker.calls))
         self.assertEqual(3, len(reranker.calls[0][1]))
         self.assertEqual(12, len(reranked))
-        self.assertEqual(["chunk_0", "chunk_1", "chunk_2"], [node.node.id_ for node in reranker.calls[0][1]])
+        self.assertEqual(
+            ["chunk_0", "chunk_1", "chunk_2"],
+            [node.node.id_ for node in reranker.calls[0][1]],
+        )
 
     def test_source_rerank_text_uses_query_focused_capped_excerpt(self) -> None:
         long_prefix = "Irrelevant background sentence. " * 50
@@ -674,7 +825,12 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             analyst_reranker_mode="disabled",
             analyst_source_rerank_max_chars=220,
         )
-        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_long"], [0.9]), docs, settings=settings), settings)
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(
+                FakeVectorStore(["chunk_long"], [0.9]), docs, settings=settings
+            ),
+            settings,
+        )
         candidate = pipeline._retrieve_source_candidates("FastText subword")[0]
 
         text = pipeline._rerank_text(candidate, query="FastText subword")
@@ -682,18 +838,26 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         self.assertLessEqual(len(text), 220)
         self.assertIn("FastText", text)
         self.assertIn("subword", text)
-        self.assertNotIn("Trailing unrelated sentence. Trailing unrelated sentence.", text)
+        self.assertNotIn(
+            "Trailing unrelated sentence. Trailing unrelated sentence.", text
+        )
 
     def test_duplicate_chunks_and_paths_are_collapsed_deterministically(self) -> None:
         docs = {
             f"chunk_{idx}": FakeTextNode(
                 f"chunk_{idx}",
                 f"Duplicate path source {idx}.",
-                make_metadata(chunk_id=f"chunk_{idx}", path=["Root", "Same"], heading_path=["Root", "Same"]),
+                make_metadata(
+                    chunk_id=f"chunk_{idx}",
+                    path=["Root", "Same"],
+                    heading_path=["Root", "Same"],
+                ),
             )
             for idx in range(3)
         }
-        vector_store = FakeVectorStore(["chunk_0", "chunk_0", "chunk_1", "chunk_2"], [0.9, 0.89, 0.88, 0.87])
+        vector_store = FakeVectorStore(
+            ["chunk_0", "chunk_0", "chunk_1", "chunk_2"], [0.9, 0.89, 0.88, 0.87]
+        )
         pipeline = AnalystRetrievalPipeline(make_indexer(vector_store, docs))
 
         output = pipeline.search(["duplicate"])
@@ -707,17 +871,29 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             "chunk_0": FakeTextNode(
                 "chunk_0",
                 "Same path weakest source.",
-                make_metadata(chunk_id="chunk_0", path=["Root", "Same"], heading_path=["Root", "Same"]),
+                make_metadata(
+                    chunk_id="chunk_0",
+                    path=["Root", "Same"],
+                    heading_path=["Root", "Same"],
+                ),
             ),
             "chunk_1": FakeTextNode(
                 "chunk_1",
                 "Same path strongest source.",
-                make_metadata(chunk_id="chunk_1", path=["Root", "Same"], heading_path=["Root", "Same"]),
+                make_metadata(
+                    chunk_id="chunk_1",
+                    path=["Root", "Same"],
+                    heading_path=["Root", "Same"],
+                ),
             ),
             "chunk_2": FakeTextNode(
                 "chunk_2",
                 "Same path second strongest source.",
-                make_metadata(chunk_id="chunk_2", path=["Root", "Same"], heading_path=["Root", "Same"]),
+                make_metadata(
+                    chunk_id="chunk_2",
+                    path=["Root", "Same"],
+                    heading_path=["Root", "Same"],
+                ),
             ),
         }
         settings = KnowledgeGraphSearchSettings(
@@ -731,7 +907,9 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
                 settings=settings,
             ),
             settings=settings,
-            reranker=OrderedScoreReranker({"chunk_0": 1.0, "chunk_1": 10.0, "chunk_2": 9.0}),
+            reranker=OrderedScoreReranker(
+                {"chunk_0": 1.0, "chunk_1": 10.0, "chunk_2": 9.0}
+            ),
         )
 
         output = pipeline.search(["same path"])
@@ -748,8 +926,12 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
                 make_metadata(chunk_id="chunk_long"),
             )
         }
-        settings = KnowledgeGraphSearchSettings(analyst_context_max_chars=350, analyst_reranker_mode="disabled")
-        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_long"], [0.9]), docs), settings)
+        settings = KnowledgeGraphSearchSettings(
+            analyst_context_max_chars=350, analyst_reranker_mode="disabled"
+        )
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(FakeVectorStore(["chunk_long"], [0.9]), docs), settings
+        )
 
         output = pipeline.search(["long source"])
 
@@ -767,13 +949,24 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
                 ),
             )
         }
-        settings = KnowledgeGraphSearchSettings(analyst_context_max_chars=8000, analyst_reranker_mode="disabled")
-        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_long"], [0.9]), docs, settings=settings), settings)
+        settings = KnowledgeGraphSearchSettings(
+            analyst_context_max_chars=8000, analyst_reranker_mode="disabled"
+        )
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(
+                FakeVectorStore(["chunk_long"], [0.9]), docs, settings=settings
+            ),
+            settings,
+        )
 
         output = pipeline.search(["optimizer"])
 
-        source_line = next(line for line in output.splitlines() if line.startswith("[SOURCE] [S1]"))
-        self.assertIn("Summary: Concise optimizer summary covering SGD and Adam.", source_line)
+        source_line = next(
+            line for line in output.splitlines() if line.startswith("[SOURCE] [S1]")
+        )
+        self.assertIn(
+            "Summary: Concise optimizer summary covering SGD and Adam.", source_line
+        )
         self.assertIn("...[truncated]", source_line)
 
     def test_hidden_relation_seed_source_can_supply_summary_evidence(self) -> None:
@@ -806,7 +999,11 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             "chunk_top": FakeTextNode(
                 "chunk_top",
                 "General optimization overview.",
-                make_metadata(chunk_id="chunk_top", path=["Optimization"], heading_path=["Optimization"]),
+                make_metadata(
+                    chunk_id="chunk_top",
+                    path=["Optimization"],
+                    heading_path=["Optimization"],
+                ),
             ),
             "chunk_hidden": FakeTextNode(
                 "chunk_hidden",
@@ -827,7 +1024,12 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             analyst_relation_seed_min_score=0.50,
         )
         pipeline = AnalystRetrievalPipeline(
-            make_indexer(FakeVectorStore(["chunk_top", "chunk_hidden"], [0.95, 0.93]), docs, graph_store, settings=settings),
+            make_indexer(
+                FakeVectorStore(["chunk_top", "chunk_hidden"], [0.95, 0.93]),
+                docs,
+                graph_store,
+                settings=settings,
+            ),
             settings,
         )
 
@@ -899,19 +1101,27 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
     def test_relation_reranker_orders_grounded_relations(self) -> None:
         clip = FakeGraphNode("concept_clip", "CLIP")
         objective = FakeGraphNode("concept_objective", "Contrastive Objective")
-        supervision = FakeGraphNode("concept_supervision", "Natural Language Supervision")
+        supervision = FakeGraphNode(
+            "concept_supervision", "Natural Language Supervision"
+        )
         source = FakeGraphNode("chunk_clip", "CLIP source")
         graph_store = FakeGraphStore(
             mention_triplets=[(source, FakeRelation("MENTIONS"), clip)],
             relation_triplets=[
                 (
                     clip,
-                    FakeRelation("USES", {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9}),
+                    FakeRelation(
+                        "USES",
+                        {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9},
+                    ),
                     supervision,
                 ),
                 (
                     clip,
-                    FakeRelation("TRAINS", {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9}),
+                    FakeRelation(
+                        "TRAINS",
+                        {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9},
+                    ),
                     objective,
                 ),
             ],
@@ -928,7 +1138,12 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             analyst_relation_reranker_enabled=True,
         )
         pipeline = AnalystRetrievalPipeline(
-            make_indexer(FakeVectorStore(["chunk_clip"], [0.72]), docs, graph_store, settings=settings),
+            make_indexer(
+                FakeVectorStore(["chunk_clip"], [0.72]),
+                docs,
+                graph_store,
+                settings=settings,
+            ),
             settings=settings,
             reranker=OrderedScoreReranker(
                 {
@@ -943,7 +1158,9 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
 
         self.assertLess(output.find("CLIP -> TRAINS"), output.find("CLIP -> USES"))
 
-    def test_relation_rerank_text_includes_family_phrase_and_source_evidence(self) -> None:
+    def test_relation_rerank_text_includes_family_phrase_and_source_evidence(
+        self,
+    ) -> None:
         pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore([]), {}))
         relation = RelationCandidate(
             relation_id="rel_1",
@@ -958,7 +1175,9 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             evidence_spans=["Backpropagation produces gradients"],
         )
 
-        text = pipeline._relation_rerank_text(relation, {"chunk_1": "Source text about training gradients."})
+        text = pipeline._relation_rerank_text(
+            relation, {"chunk_1": "Source text about training gradients."}
+        )
 
         self.assertIn("Backpropagation PRODUCES Gradient", text)
         self.assertIn("Family: computation", text)
@@ -974,7 +1193,10 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             relation_triplets=[
                 (
                     clip,
-                    FakeRelation("TRAINS", {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9}),
+                    FakeRelation(
+                        "TRAINS",
+                        {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9},
+                    ),
                     objective,
                 )
             ],
@@ -997,7 +1219,9 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         self.assertIn("CLIP -> TRAINS -> Contrastive Objective", output)
         self.assertEqual(1, len(reranker.calls))
 
-    def test_relation_reranker_uses_limited_capped_candidates_when_enabled(self) -> None:
+    def test_relation_reranker_uses_limited_capped_candidates_when_enabled(
+        self,
+    ) -> None:
         clip = FakeGraphNode("concept_clip", "CLIP")
         source = FakeGraphNode("chunk_clip", "CLIP source")
         relation_triplets = [
@@ -1034,7 +1258,12 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         )
         reranker = RecordingReranker()
         pipeline = AnalystRetrievalPipeline(
-            make_indexer(FakeVectorStore(["chunk_clip"], [0.72]), docs, graph_store, settings=settings),
+            make_indexer(
+                FakeVectorStore(["chunk_clip"], [0.72]),
+                docs,
+                graph_store,
+                settings=settings,
+            ),
             settings=settings,
             reranker=reranker,
         )
@@ -1044,9 +1273,13 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         self.assertEqual(2, len(reranker.calls))
         relation_nodes = reranker.calls[1][1]
         self.assertEqual(2, len(relation_nodes))
-        self.assertTrue(all(len(node.node.get_content()) <= 180 for node in relation_nodes))
+        self.assertTrue(
+            all(len(node.node.get_content()) <= 180 for node in relation_nodes)
+        )
 
-    def test_retrieval_usefulness_affects_relation_order_without_bypassing_grounding(self) -> None:
+    def test_retrieval_usefulness_affects_relation_order_without_bypassing_grounding(
+        self,
+    ) -> None:
         clip = FakeGraphNode("concept_clip", "CLIP")
         useful = FakeGraphNode("concept_useful", "Contrastive Objective")
         generic = FakeGraphNode("concept_generic", "Natural Language Supervision")
@@ -1060,7 +1293,9 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
                         "RELATED_TO",
                         {
                             "predicate_family": "other",
-                            "relation_phrases": ["is broadly associated with supervision"],
+                            "relation_phrases": [
+                                "is broadly associated with supervision"
+                            ],
                             "evidence_chunk_ids": ["chunk_clip"],
                             "max_confidence": 0.9,
                             "max_retrieval_usefulness": 0.1,
@@ -1091,11 +1326,15 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
                 make_metadata(chunk_id="chunk_clip", source="CLIP paper"),
             )
         }
-        pipeline = AnalystRetrievalPipeline(make_indexer(FakeVectorStore(["chunk_clip"], [0.72]), docs, graph_store))
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(FakeVectorStore(["chunk_clip"], [0.72]), docs, graph_store)
+        )
 
         output = pipeline.search(["CLIP training objective"])
 
-        self.assertLess(output.find("CLIP -> TRAINS"), output.find("CLIP -> RELATED_TO"))
+        self.assertLess(
+            output.find("CLIP -> TRAINS"), output.find("CLIP -> RELATED_TO")
+        )
 
     def test_relation_reranker_drops_low_relative_relation(self) -> None:
         clip = FakeGraphNode("concept_clip", "CLIP")
@@ -1107,12 +1346,18 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             relation_triplets=[
                 (
                     clip,
-                    FakeRelation("TRAINS", {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9}),
+                    FakeRelation(
+                        "TRAINS",
+                        {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9},
+                    ),
                     objective,
                 ),
                 (
                     clip,
-                    FakeRelation("USES", {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9}),
+                    FakeRelation(
+                        "USES",
+                        {"evidence_chunk_ids": ["chunk_clip"], "max_confidence": 0.9},
+                    ),
                     unrelated,
                 ),
             ],
@@ -1129,7 +1374,12 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
             analyst_relation_reranker_enabled=True,
         )
         pipeline = AnalystRetrievalPipeline(
-            make_indexer(FakeVectorStore(["chunk_clip"], [0.72]), docs, graph_store, settings=settings),
+            make_indexer(
+                FakeVectorStore(["chunk_clip"], [0.72]),
+                docs,
+                graph_store,
+                settings=settings,
+            ),
             settings=settings,
             reranker=OrderedScoreReranker(
                 {
@@ -1161,25 +1411,39 @@ class AnalystRetrievalPipelineTests(unittest.TestCase):
         output = pipeline.search(["fallback"])
 
         self.assertIn("Reranker fallback source", output)
-        self.assertTrue(pipeline.health_report.has_code("analyst_reranker_runtime_failed"))
+        self.assertTrue(
+            pipeline.health_report.has_code("analyst_reranker_runtime_failed")
+        )
 
     def test_failed_ollama_reranker_health_check_disables_reranker(self) -> None:
-        settings = KnowledgeGraphSearchSettings(analyst_reranker_mode="ollama_llm_rerank")
+        settings = KnowledgeGraphSearchSettings(
+            analyst_reranker_mode="ollama_llm_rerank"
+        )
         indexer = make_indexer(FakeVectorStore([]), {})
 
         with (
             patch("llama_index.llms.ollama.Ollama", return_value=object()),
-            patch("llama_index.core.postprocessor.LLMRerank", return_value=EmptyHealthCheckReranker()),
+            patch(
+                "llama_index.core.postprocessor.LLMRerank",
+                return_value=EmptyHealthCheckReranker(),
+            ),
         ):
             pipeline = AnalystRetrievalPipeline(indexer, settings)
 
         self.assertIsNone(pipeline.reranker)
 
-    def test_failed_sentence_transformer_reranker_initialization_disables_reranker(self) -> None:
-        settings = KnowledgeGraphSearchSettings(analyst_reranker_mode="sentence_transformers")
+    def test_failed_sentence_transformer_reranker_initialization_disables_reranker(
+        self,
+    ) -> None:
+        settings = KnowledgeGraphSearchSettings(
+            analyst_reranker_mode="sentence_transformers"
+        )
         indexer = make_indexer(FakeVectorStore([]), {}, settings=settings)
 
-        with patch("sentence_transformers.CrossEncoder", side_effect=RuntimeError("missing model")):
+        with patch(
+            "sentence_transformers.CrossEncoder",
+            side_effect=RuntimeError("missing model"),
+        ):
             pipeline = AnalystRetrievalPipeline(indexer, settings)
 
         self.assertIsNone(pipeline.reranker)

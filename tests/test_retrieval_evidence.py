@@ -10,11 +10,16 @@ from backend.workflows.agents.retrieval_evidence import (
     format_search_results,
     format_visualization_results,
 )
-from backend.workflows.agents.tools import get_subgraphs_to_visualize, search_knowledge_base
+from backend.workflows.agents.tools import (
+    get_subgraphs_to_visualize,
+    search_knowledge_base,
+)
 
 
 class FakeNode:
-    def __init__(self, text: str, node_id: str = "node_1", metadata: dict | None = None) -> None:
+    def __init__(
+        self, text: str, node_id: str = "node_1", metadata: dict | None = None
+    ) -> None:
         self.text = text
         self.node_id = node_id
         self.metadata = metadata or {}
@@ -50,14 +55,20 @@ class RetrievalEvidenceTests(unittest.TestCase):
             "Text classification assigns labels to text examples.",
             metadata={"path": '["Text Classification", "Overview"]'},
         )
-        items = evidence_from_retrieved_node(FakeNodeWithScore(node, 0.81), query="text classification", rank=1)
+        items = evidence_from_retrieved_node(
+            FakeNodeWithScore(node, 0.81), query="text classification", rank=1
+        )
 
         self.assertEqual(1, len(items))
         self.assertIsInstance(items[0], SourceEvidence)
-        output = format_search_results([QueryEvidenceResult(query="text classification", items=items)])
+        output = format_search_results(
+            [QueryEvidenceResult(query="text classification", items=items)]
+        )
 
         self.assertIn("RETRIEVER RESULTS", output)
-        self.assertIn("[SOURCE] (Score: 0.81) Text classification assigns labels", output)
+        self.assertIn(
+            "[SOURCE] (Score: 0.81) Text classification assigns labels", output
+        )
         self.assertIn("[SOURCE PATH] Text Classification > Overview", output)
 
     def test_metadata_json_strings_are_normalized(self) -> None:
@@ -75,7 +86,9 @@ class RetrievalEvidenceTests(unittest.TestCase):
                 "postprocess_decision_id": "decision_1",
             },
         )
-        item = evidence_from_retrieved_node(FakeNodeWithScore(node), query="q", rank=1)[0]
+        item = evidence_from_retrieved_node(FakeNodeWithScore(node), query="q", rank=1)[
+            0
+        ]
 
         self.assertEqual(["Root", "Child"], item.metadata.path)
         self.assertEqual(["Root"], item.metadata.heading_path)
@@ -88,7 +101,9 @@ class RetrievalEvidenceTests(unittest.TestCase):
 
     def test_simple_relation_becomes_relation_evidence(self) -> None:
         node = FakeNode("Naive Bayes -> IS_A -> Classifier")
-        items = evidence_from_retrieved_node(FakeNodeWithScore(node, 0.77), query="naive bayes", rank=1)
+        items = evidence_from_retrieved_node(
+            FakeNodeWithScore(node, 0.77), query="naive bayes", rank=1
+        )
 
         self.assertEqual(1, len(items))
         relation = items[0]
@@ -105,7 +120,9 @@ class RetrievalEvidenceTests(unittest.TestCase):
         text = f"{FACT_BLOCK_HEADER}\n\n{relation_line}\n\nNaive Bayes is a probabilistic classifier."
         node = FakeNode(text, metadata={"path": ["Text Classification", "Naive Bayes"]})
 
-        items = evidence_from_retrieved_node(FakeNodeWithScore(node, 0.93), query="naive bayes", rank=1)
+        items = evidence_from_retrieved_node(
+            FakeNodeWithScore(node, 0.93), query="naive bayes", rank=1
+        )
         relations = [item for item in items if isinstance(item, RelationEvidence)]
         sources = [item for item in items if isinstance(item, SourceEvidence)]
 
@@ -115,30 +132,48 @@ class RetrievalEvidenceTests(unittest.TestCase):
         self.assertEqual(1, len(sources))
         self.assertTrue(sources[0].derived_from_relation_node)
 
-        output = format_search_results([QueryEvidenceResult(query="naive bayes", items=items)])
-        self.assertIn("[RELATION] Naive Bayes -> IS_A -> Classifier (Score: 0.93)", output)
+        output = format_search_results(
+            [QueryEvidenceResult(query="naive bayes", items=items)]
+        )
+        self.assertIn(
+            "[RELATION] Naive Bayes -> IS_A -> Classifier (Score: 0.93)", output
+        )
         self.assertIn("[SOURCE] Naive Bayes is a probabilistic classifier.", output)
         self.assertIn("[SOURCE PATH] Text Classification > Naive Bayes", output)
 
     def test_child_parent_and_low_score_handling(self) -> None:
         parent_node = FakeNode("Parent -> PARENT -> Child")
-        self.assertEqual([], evidence_from_retrieved_node(FakeNodeWithScore(parent_node, 0.95), query="q", rank=1))
+        self.assertEqual(
+            [],
+            evidence_from_retrieved_node(
+                FakeNodeWithScore(parent_node, 0.95), query="q", rank=1
+            ),
+        )
 
         low_score_child = FakeNode("Parent -> CHILD -> Child")
-        self.assertEqual([], evidence_from_retrieved_node(FakeNodeWithScore(low_score_child, 0.2), query="q", rank=1))
+        self.assertEqual(
+            [],
+            evidence_from_retrieved_node(
+                FakeNodeWithScore(low_score_child, 0.2), query="q", rank=1
+            ),
+        )
 
         high_score_child = FakeNode(
             "({'text': 'Parent', 'path': \"['Root', 'Parent']\"}) -> CHILD -> "
             "({'text': 'Child', 'path': \"['Root', 'Child']\"})"
         )
-        items = evidence_from_retrieved_node(FakeNodeWithScore(high_score_child, 0.8), query="q", rank=1)
+        items = evidence_from_retrieved_node(
+            FakeNodeWithScore(high_score_child, 0.8), query="q", rank=1
+        )
         self.assertEqual(1, len(items))
         self.assertIsInstance(items[0], RelationEvidence)
         self.assertIn("Parent -> CHILD -> Child", items[0].raw_relation)
 
     def test_malformed_property_preserves_fallback_relation(self) -> None:
         node = FakeNode("Subject ({bad}) -> USES -> Object")
-        items = evidence_from_retrieved_node(FakeNodeWithScore(node, 0.6), query="q", rank=1)
+        items = evidence_from_retrieved_node(
+            FakeNodeWithScore(node, 0.6), query="q", rank=1
+        )
 
         self.assertEqual(1, len(items))
         relation = items[0]
@@ -149,6 +184,21 @@ class RetrievalEvidenceTests(unittest.TestCase):
     def test_empty_result_uses_sentinel(self) -> None:
         output = format_search_results([QueryEvidenceResult(query="missing", items=[])])
         self.assertEqual("No relevant information found.", output)
+
+    def test_search_tool_recovers_stringified_query_list(self) -> None:
+        query = "optimizers machine learning gradient descent"
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {query: [FakeNodeWithScore(FakeNode("Optimizer source"), 0.9)]}
+            )
+        )
+
+        output = tool.invoke({"queries": f"[{query}]"})
+        query_schema = tool.args_schema.model_json_schema()["properties"]["queries"]
+
+        self.assertIn("Optimizer source", output)
+        self.assertEqual("array", query_schema["type"])
+        self.assertEqual(3, query_schema["maxItems"])
 
     def test_search_tool_uses_reranker_exception_fallback(self) -> None:
         nodes = [
@@ -167,10 +217,18 @@ class RetrievalEvidenceTests(unittest.TestCase):
         result = QueryEvidenceResult(
             query="graph",
             items=[
-                *evidence_from_retrieved_node(FakeNode("A -> REL -> B"), query="graph", rank=1),
-                *evidence_from_retrieved_node(FakeNode("A -> REL -> B"), query="graph", rank=2),
-                *evidence_from_retrieved_node(FakeNode("Plain text", node_id="node_1"), query="graph", rank=3),
-                *evidence_from_retrieved_node(FakeNode("More text", node_id="node_1"), query="graph", rank=4),
+                *evidence_from_retrieved_node(
+                    FakeNode("A -> REL -> B"), query="graph", rank=1
+                ),
+                *evidence_from_retrieved_node(
+                    FakeNode("A -> REL -> B"), query="graph", rank=2
+                ),
+                *evidence_from_retrieved_node(
+                    FakeNode("Plain text", node_id="node_1"), query="graph", rank=3
+                ),
+                *evidence_from_retrieved_node(
+                    FakeNode("More text", node_id="node_1"), query="graph", rank=4
+                ),
             ],
         )
 

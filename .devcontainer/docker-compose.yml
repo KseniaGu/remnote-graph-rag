@@ -1,15 +1,20 @@
 services:
   app:
     build:
-      context: ..
-      dockerfile: .devcontainer/Dockerfile
+      context: .
+      dockerfile: Dockerfile
+    mem_limit: 8g
+    cpus: 4
+    pids_limit: 512
     command: sleep infinity
     volumes:
-      - ..:/workspaces/remnote-graph-rag:cached
+      - ..:/workspaces/remnote-graph-rag
       - hf-cache:/home/vscode/.cache/huggingface
+      - ${HOME}/.codex-devcontainers/remnote-graph-rag:/home/vscode/.codex
     env_file:
       - ../.env
     environment:
+      EMBEDDER_MODEL_PATH: /workspaces/remnote-graph-rag/models/all-MiniLM-L6-v2
       HF_HOME: /home/vscode/.cache/huggingface
       SENTENCE_TRANSFORMERS_HOME: /home/vscode/.cache/huggingface/sentence-transformers
       POETRY_VIRTUALENVS_IN_PROJECT: "false"
@@ -20,26 +25,19 @@ services:
       - mongodb
 
   redis:
-    image: redis/redis-stack-server:latest
-    ports:
-      - "6379:6379"
+    image: redis/redis-stack-server:7.4.0-v8-arm64
     volumes:
       - redis-data:/data
 
   memgraph:
-    image: memgraph/memgraph-mage:latest
-    ports:
-      - "7687:7687"
-      - "7444:7444"
+    image: memgraph/memgraph-mage:3.12.0
     volumes:
       - memgraph-data:/var/lib/memgraph
       - memgraph-log:/var/log/memgraph
       - memgraph-etc:/etc/memgraph
 
   mongodb:
-    image: mongo:7
-    ports:
-      - "27017:27017"
+    image: mongo:8.2.6
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: password

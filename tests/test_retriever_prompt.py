@@ -1,12 +1,13 @@
-from pathlib import Path
 import unittest
-
+from pathlib import Path
 
 RETRIEVER_V4_PROMPT = Path("backend/llm/prompts/learner_workflow/retriever/v4.yaml")
 
 
 class RetrieverPromptTests(unittest.TestCase):
-    def test_visualization_query_generation_examples_preserve_facets_and_comparisons(self) -> None:
+    def test_visualization_query_generation_examples_preserve_facets_and_comparisons(
+        self,
+    ) -> None:
         prompt = RETRIEVER_V4_PROMPT.read_text(encoding="utf-8")
 
         self.assertIn('["Text Classification methods"]', prompt)

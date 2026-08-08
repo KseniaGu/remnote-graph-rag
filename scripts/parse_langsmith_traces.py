@@ -12,25 +12,24 @@ Usage:
     python scripts/parse_langsmith_traces.py <input.json> [output.txt]
 """
 
+import hashlib
 import json
 import re
-import sys
-import hashlib
 import statistics
+import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Tunable limits (chars)
 # ---------------------------------------------------------------------------
-MAX_SYSTEM_PROMPT = 5_500   # system prompt shown in full on first occurrence
-MAX_CTX_VALUE = 4_000       # per-value cap inside the context dict
-MAX_SOURCE_TEXT = 400       # chars of each [SOURCE] block kept
-MAX_HISTORY_MSG = 600       # chars per conversation-history message
+MAX_SYSTEM_PROMPT = 5_500  # system prompt shown in full on first occurrence
+MAX_CTX_VALUE = 4_000  # per-value cap inside the context dict
+MAX_SOURCE_TEXT = 400  # chars of each [SOURCE] block kept
+MAX_HISTORY_MSG = 600  # chars per conversation-history message
 MAX_AGENT_RESPONSE = 4_000  # final agent response
 MAX_ROUTING_RESPONSE = 800  # orchestrator raw JSON response
-MAX_TOOL_OUTPUT = 4_000     # tool run output cap
+MAX_TOOL_OUTPUT = 4_000  # tool run output cap
 
 SEPARATOR_THICK = "=" * 80
 SEPARATOR_THIN = "-" * 60
@@ -40,17 +39,18 @@ SEPARATOR_THIN = "-" * 60
 # Deduplication
 # ---------------------------------------------------------------------------
 
+
 class DedupTracker:
     """Replace repeated text blocks with a short reference label."""
 
     def __init__(self) -> None:
-        self._seen: dict[str, str] = {}   # md5 -> label
+        self._seen: dict[str, str] = {}  # md5 -> label
         self._counters: dict[str, int] = defaultdict(int)
 
     def _fp(self, text: str) -> str:
         return hashlib.md5(text.encode()).hexdigest()[:10]
 
-    def label_of(self, text: str) -> Optional[str]:
+    def label_of(self, text: str) -> str | None:
         return self._seen.get(self._fp(text))
 
     def register(self, text: str, prefix: str) -> str:
@@ -80,6 +80,7 @@ class DedupTracker:
 # Text helpers
 # ---------------------------------------------------------------------------
 
+
 def _indent(text: str, n: int = 2) -> str:
     pad = " " * n
     return "\n".join(pad + line for line in text.split("\n"))
@@ -103,6 +104,7 @@ def _strip_code_fences(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Content-aware formatters
 # ---------------------------------------------------------------------------
+
 
 def _format_retriever_results(raw: str) -> str:
     """Keep QUERY + [RELATION] lines; truncate each [SOURCE] block."""
@@ -129,7 +131,11 @@ def _format_retriever_results(raw: str) -> str:
             _flush_source()
             in_source = True
             source_buf.append(line)
-        elif stripped.startswith("[RELATION]") or stripped.startswith("QUERY:") or stripped.startswith("RETRIEVER RESULTS"):
+        elif (
+            stripped.startswith("[RELATION]")
+            or stripped.startswith("QUERY:")
+            or stripped.startswith("RETRIEVER RESULTS")
+        ):
             _flush_source()
             in_source = False
             out.append(line)
@@ -379,6 +385,7 @@ def _get_model(run: dict) -> str:
 # Run-tree helpers
 # ---------------------------------------------------------------------------
 
+
 def _build_children(runs: list[dict]) -> dict[str, list[str]]:
     children: dict[str, list[str]] = defaultdict(list)
     for r in runs:
@@ -406,6 +413,7 @@ def _find_node_for_run(run_id: str, runs_by_id: dict, max_depth: int = 8) -> dic
 # Main trace formatter
 # ---------------------------------------------------------------------------
 
+
 def format_trace(trace_id: str, runs_by_id: dict, dedup: DedupTracker) -> str:
     trace_runs = [r for r in runs_by_id.values() if r.get("trace_id") == trace_id]
     if not trace_runs:
@@ -415,7 +423,11 @@ def format_trace(trace_id: str, runs_by_id: dict, dedup: DedupTracker) -> str:
     # Gather metadata
     session_id = trace_runs[0].get("session_id", "")
     thread_id = next(
-        (_get_langgraph_meta(r)["thread_id"] for r in trace_runs if _get_langgraph_meta(r)["thread_id"]),
+        (
+            _get_langgraph_meta(r)["thread_id"]
+            for r in trace_runs
+            if _get_langgraph_meta(r)["thread_id"]
+        ),
         "",
     )
     start_ts = trace_runs[0].get("start_time", "")[:19]
@@ -431,7 +443,9 @@ def format_trace(trace_id: str, runs_by_id: dict, dedup: DedupTracker) -> str:
     out.append(f"TRACE : {trace_id}")
     out.append(f"Thread: {thread_id or 'n/a'}  |  Session: {session_id}")
     out.append(f"Time  : {start_ts} → {end_ts}")
-    out.append(f"Tokens: {total_in} in + {total_out} out = {total_in + total_out} total  ({len(llm_runs)} LLM call(s))")
+    out.append(
+        f"Tokens: {total_in} in + {total_out} out = {total_in + total_out} total  ({len(llm_runs)} LLM call(s))"
+    )
     out.append(SEPARATOR_THICK)
 
     # One block per LLM call, in chronological order
@@ -520,7 +534,9 @@ def format_trace(trace_id: str, runs_by_id: dict, dedup: DedupTracker) -> str:
                         reasoning = parsed.get("reasoning", "")
                         out.append(f"  REASONING: {reasoning}")
                     else:
-                        out.append(_indent(_truncate(response_text, MAX_ROUTING_RESPONSE), 2))
+                        out.append(
+                            _indent(_truncate(response_text, MAX_ROUTING_RESPONSE), 2)
+                        )
                 except (json.JSONDecodeError, ValueError):
                     out.append(_indent(_truncate(response_text, MAX_AGENT_RESPONSE), 2))
             if tool_calls:
@@ -549,8 +565,11 @@ def _tool_runs_for_step(llm_run: dict, runs_by_id: dict) -> list[dict]:
         if r.get("trace_id") != llm_run.get("trace_id"):
             continue
         tm = _find_node_for_run(r["_id"], runs_by_id)
-        if tm["node"] == meta["node"] and tm["step"] == meta["step"] \
-                and r.get("start_time", "") >= llm_start:
+        if (
+            tm["node"] == meta["node"]
+            and tm["step"] == meta["step"]
+            and r.get("start_time", "") >= llm_start
+        ):
             matches.append(r)
     matches.sort(key=lambda r: r.get("start_time", ""))
     return matches
@@ -594,6 +613,7 @@ def _format_tool_run(tool_run: dict) -> str:
 # ---------------------------------------------------------------------------
 # Latency analysis
 # ---------------------------------------------------------------------------
+
 
 def _analyze_latency(runs: list[dict]) -> str:
     """Compute and format latency statistics by agent/node and overall."""
@@ -697,13 +717,18 @@ def _analyze_latency(runs: list[dict]) -> str:
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python parse_langsmith_traces.py <input.json> [output.txt]")
         sys.exit(1)
 
     input_path = Path(sys.argv[1])
-    output_path = Path(sys.argv[2]) if len(sys.argv) >= 3 else input_path.with_suffix(".analysis.txt")
+    output_path = (
+        Path(sys.argv[2])
+        if len(sys.argv) >= 3
+        else input_path.with_suffix(".analysis.txt")
+    )
 
     print(f"Loading {input_path} …")
     with open(input_path, encoding="utf-8") as f:
@@ -755,7 +780,9 @@ def main() -> None:
         f.write(full_output)
 
     print(f"\nOutput written to: {output_path}")
-    print(f"Output size      : {len(full_output):,} chars  ({len(full_output) // 1024} KB)")
+    print(
+        f"Output size      : {len(full_output):,} chars  ({len(full_output) // 1024} KB)"
+    )
 
 
 if __name__ == "__main__":

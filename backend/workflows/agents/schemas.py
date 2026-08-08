@@ -1,4 +1,5 @@
-from typing import Annotated, Sequence, Optional, Literal, Any, get_args
+from collections.abc import Sequence
+from typing import Annotated, Any, Literal, get_args
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -7,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class ResearchResult(BaseModel):
     """Structured output from web research containing findings with source attribution."""
+
     key_findings: str = Field(
         description="Synthesized summary of the most relevant information found on the web, focusing on what's missing from the knowledge base"
     )
@@ -19,49 +21,57 @@ class ResearchResult(BaseModel):
     status: Literal["success", "partial_match", "no_relevant_info"] = Field(
         description="Status of the research operation"
     )
-    gap_analysis: Optional[str] = Field(
+    gap_analysis: str | None = Field(
         default=None,
-        description="Brief note on what information was NOT found despite searching"
+        description="Brief note on what information was NOT found despite searching",
     )
 
 
 class RoutingDecision(BaseModel):
     """Determines the next agent to act."""
-    next_step: Literal["retriever", "researcher", "analyst", "mentor", "visualizer", "__end__"] = Field(
-        description="The target worker node"
-    )
-    reasoning: str = Field(
-        description="Short justification for the routing choice"
-    )
+
+    next_step: Literal[
+        "retriever", "researcher", "analyst", "mentor", "visualizer", "__end__"
+    ] = Field(description="The target worker node")
+    reasoning: str = Field(description="Short justification for the routing choice")
 
 
 class State(BaseModel):
     """Graph workflow state configuration."""
+
     messages: Annotated[Sequence[BaseMessage], add_messages] = Field(
-        default_factory=list, description="The full history of the conversation between user and agents."
+        default_factory=list,
+        description="The full history of the conversation between user and agents.",
     )
-    context: str = Field(default="", description="The grounding context retrieved from the knowledge base.")
+    context: str = Field(
+        default="",
+        description="The grounding context retrieved from the knowledge base.",
+    )
     session_summary: str = Field(
         default="",
-        description="Compact summary of older browser-session messages, injected only when useful."
+        description="Compact summary of older browser-session messages, injected only when useful.",
     )
     visual_artifacts: Annotated[list[dict[str, Any]], lambda _old, new: new] = Field(
         default_factory=list,
-        description="List of Plotly figures serialized as dictionaries, one per visualization request"
+        description="List of Plotly figures serialized as dictionaries, one per visualization request",
     )
-    next_step: Literal["retriever", "researcher", "analyst", "mentor", "visualizer", "__end__"] = Field(
-        default="retriever", description="The next node the Orchestrator has decided to activate"
+    next_step: Literal[
+        "retriever", "researcher", "analyst", "mentor", "visualizer", "__end__"
+    ] = Field(
+        default="retriever",
+        description="The next node the Orchestrator has decided to activate",
     )
-    user_score: Optional[float] = Field(
-        default=None, description="The quantitative evaluation of the user's latest answer"
+    user_score: float | None = Field(
+        default=None,
+        description="The quantitative evaluation of the user's latest answer",
     )
     retriever_empty: bool = Field(
         default=False,
-        description="True when the Retriever returned no KB hits this turn (escalation signal for Researcher)."
+        description="True when the Retriever returned no KB hits this turn (escalation signal for Researcher).",
     )
     sources_exhausted: bool = Field(
         default=False,
-        description="True when both Retriever and Researcher failed this turn (terminal signal for Orchestrator)."
+        description="True when both Retriever and Researcher failed this turn (terminal signal for Orchestrator).",
     )
 
     @classmethod

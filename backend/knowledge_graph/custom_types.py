@@ -1,11 +1,14 @@
 import hashlib
-from typing import Optional
 
-from llama_index.core.graph_stores import LabelledNode, EntityNode, Relation, ChunkNode
+from llama_index.core.graph_stores import ChunkNode, EntityNode, LabelledNode, Relation
 from llama_index.core.graph_stores.types import Triplet
 from llama_index.graph_stores.memgraph import MemgraphPropertyGraphStore
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
-from llama_index.graph_stores.neo4j.neo4j_property_graph import BASE_NODE_LABEL, BASE_ENTITY_LABEL, remove_empty_values
+from llama_index.graph_stores.neo4j.neo4j_property_graph import (
+    BASE_ENTITY_LABEL,
+    BASE_NODE_LABEL,
+    remove_empty_values,
+)
 
 
 def _clean_graph_properties(properties: dict | None) -> dict:
@@ -19,11 +22,11 @@ class CustomNeo4jPropertyGraphStore(Neo4jPropertyGraphStore):
     """Custom Neo4j Property Graph Store with support for ChunkNode relationships."""
 
     def get_rel_map(
-            self,
-            graph_nodes: list[LabelledNode],
-            depth: int = 2,
-            limit: int = 30,
-            ignore_rels: Optional[list[str]] = None,
+        self,
+        graph_nodes: list[LabelledNode],
+        depth: int = 2,
+        limit: int = 30,
+        ignore_rels: list[str] | None = None,
     ) -> list[Triplet]:
         """Gets depth-aware relationship map for all node types including ChunkNodes.
 
@@ -97,7 +100,9 @@ class CustomNeo4jPropertyGraphStore(Neo4jPropertyGraphStore):
 
         return triples
 
-    def get(self, properties: Optional[dict] = None, ids: Optional[list[str]] = None) -> list[LabelledNode]:
+    def get(
+        self, properties: dict | None = None, ids: list[str] | None = None
+    ) -> list[LabelledNode]:
         """Get nodes with correct label extraction.
 
         Adds support for returning actual entity label.
@@ -159,11 +164,11 @@ class CustomMemgraphPropertyGraphStore(MemgraphPropertyGraphStore):
     """Custom Memgraph Property Graph Store with support for ChunkNode relationships."""
 
     def get_rel_map(
-            self,
-            graph_nodes: list[LabelledNode],
-            depth: int = 2,
-            limit: int = 30,
-            ignore_rels: Optional[list[str]] = None,
+        self,
+        graph_nodes: list[LabelledNode],
+        depth: int = 2,
+        limit: int = 30,
+        ignore_rels: list[str] | None = None,
     ) -> list[Triplet]:
         """Gets depth-aware relationship map for all node types including ChunkNodes."""
         triples = []
@@ -242,7 +247,9 @@ class CustomMemgraphPropertyGraphStore(MemgraphPropertyGraphStore):
 
         return triples
 
-    def get(self, properties: Optional[dict] = None, ids: Optional[list[str]] = None) -> list[LabelledNode]:
+    def get(
+        self, properties: dict | None = None, ids: list[str] | None = None
+    ) -> list[LabelledNode]:
         """Get Memgraph nodes with correct ChunkNode and EntityNode reconstruction."""
         cypher_statement = f"MATCH (e:`{BASE_NODE_LABEL}`) "
 

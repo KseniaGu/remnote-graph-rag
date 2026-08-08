@@ -8,9 +8,13 @@ import plotly.graph_objects as go
 import reflex as rx
 from pydantic import BaseModel
 
-from app.strings import AGENT_DESCRIPTIONS, QUICK_ACTIONS, QUICK_ACTION_CACHE_POLICIES
-from backend.configs.constants import RECURSION_LIMIT, CACHED_AGENT_REPLAY_LATENCY, CACHED_TOKENS_REPLAY_LATENCY, \
-    DEFAULT_RECENT_MESSAGE_LIMIT
+from app.strings import AGENT_DESCRIPTIONS, QUICK_ACTION_CACHE_POLICIES, QUICK_ACTIONS
+from backend.configs.constants import (
+    CACHED_AGENT_REPLAY_LATENCY,
+    CACHED_TOKENS_REPLAY_LATENCY,
+    DEFAULT_RECENT_MESSAGE_LIMIT,
+    RECURSION_LIMIT,
+)
 from backend.configs.enums import WorkflowEventType
 from backend.utils.cache import get_quick_action_cache, normalize_quick_action_prompt
 from backend.utils.helpers import logger
@@ -22,10 +26,18 @@ SIDEBAR_TITLE_MAX_CHARS = 48
 
 
 _MATH_SPAN_RE = re.compile(r"\$\$.*?\$\$|\$.*?\$", flags=re.DOTALL)
+_TABLE_ROW_BOUNDARY_RE = re.compile(r"(?<!\\)\|\s+(?<!\\)\|")
+_TABLE_CELL_BOUNDARY_RE = re.compile(r"(?<!\\)\|")
+_TABLE_SEPARATOR_CELL_RE = re.compile(r":?-{3,}:?")
 
 
 def _demote_display_math_to_inline(text: str) -> str:
-    return re.sub(r"\$\$(.+?)\$\$", lambda match: f"${match.group(1).strip()}$", text, flags=re.DOTALL)
+    return re.sub(
+        r"\$\$(.+?)\$\$",
+        lambda match: f"${match.group(1).strip()}$",
+        text,
+        flags=re.DOTALL,
+    )
 
 
 def _collapse_table_display_math(text: str) -> str:
@@ -67,12 +79,68 @@ def _replace_math_pipes(text: str) -> str:
     return _MATH_SPAN_RE.sub(replace_in_span, text)
 
 
+def _escape_math_hashes(text: str) -> str:
+    """Escapes literal hashes that KaTeX treats as macro parameter characters."""
+
+    def replace_in_span(match: re.Match[str]) -> str:
+        return re.sub(r"(?<!\\)#", r"\\#", match.group(0))
+
+    return _MATH_SPAN_RE.sub(replace_in_span, text)
+
+
+def _markdown_table_cells(row: str) -> list[str]:
+    stripped = row.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return []
+    return [cell.strip() for cell in _TABLE_CELL_BOUNDARY_RE.split(stripped[1:-1])]
+
+
+def _repair_concatenated_markdown_tables(text: str) -> str:
+    """Splits table rows that an LLM concatenated onto one physical line."""
+    repaired_lines: list[str] = []
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            repaired_lines.append(line)
+            continue
+
+        segments = _TABLE_ROW_BOUNDARY_RE.split(stripped)
+        candidate_rows: list[str] = []
+        for segment in segments:
+            row = segment.strip()
+            if not row.startswith("|"):
+                row = f"| {row}"
+            if not row.endswith("|"):
+                row = f"{row} |"
+            candidate_rows.append(row)
+
+        candidate_cells = [_markdown_table_cells(row) for row in candidate_rows]
+        column_count = len(candidate_cells[0]) if candidate_cells else 0
+        has_separator = len(candidate_cells) > 1 and all(
+            _TABLE_SEPARATOR_CELL_RE.fullmatch(cell)
+            for cell in candidate_cells[1]
+        )
+        has_consistent_columns = column_count >= 2 and all(
+            len(cells) == column_count for cells in candidate_cells
+        )
+
+        if has_separator and has_consistent_columns:
+            repaired_lines.extend(candidate_rows)
+        else:
+            repaired_lines.append(line)
+
+    return "\n".join(repaired_lines)
+
+
 def _normalize_math_delimiters(text: str) -> str:
     """Normalizes LLM Markdown/LaTeX into forms supported by the chat renderer."""
-    text = re.sub(r'\\\[(.+?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
-    text = re.sub(r'\\\((.+?)\\\)', r'$\1$', text, flags=re.DOTALL)
+    text = re.sub(r"\\\[(.+?)\\\]", r"$$\1$$", text, flags=re.DOTALL)
+    text = re.sub(r"\\\((.+?)\\\)", r"$\1$", text, flags=re.DOTALL)
     text = _collapse_table_display_math(text)
-    return _replace_math_pipes(text)
+    text = _replace_math_pipes(text)
+    text = _repair_concatenated_markdown_tables(text)
+    return _escape_math_hashes(text)
 
 
 def _sidebar_title(text: str, max_chars: int = SIDEBAR_TITLE_MAX_CHARS) -> str:
@@ -82,12 +150,18 @@ def _sidebar_title(text: str, max_chars: int = SIDEBAR_TITLE_MAX_CHARS) -> str:
         return title
     if max_chars <= 3:
         return title[:max_chars]
-    return f"{title[:max_chars - 3].rstrip()}..."
+    return f"{title[: max_chars - 3].rstrip()}..."
 
 
-def _extract_map_title(artifact: dict[str, Any], fallback_prompt: str, position: int) -> str:
+def _extract_map_title(
+    artifact: dict[str, Any], fallback_prompt: str, position: int
+) -> str:
     """Extracts the best Recent Maps title from a Plotly artifact."""
-    raw_title = artifact.get("layout", {}).get("title", "") if isinstance(artifact, dict) else ""
+    raw_title = (
+        artifact.get("layout", {}).get("title", "")
+        if isinstance(artifact, dict)
+        else ""
+    )
     if isinstance(raw_title, dict):
         raw_title = raw_title.get("text", "")
     if isinstance(raw_title, str) and raw_title.strip():
@@ -103,7 +177,11 @@ def _build_quick_action_policy_map() -> dict[str, dict[str, Any]]:
     for raw_policy in QUICK_ACTION_CACHE_POLICIES:
         policy = dict(raw_policy)
         prompt = str(policy.get("prompt", ""))
-        if not prompt or prompt not in quick_action_prompts or not bool(policy.get("enabled", True)):
+        if (
+            not prompt
+            or prompt not in quick_action_prompts
+            or not bool(policy.get("enabled", True))
+        ):
             continue
         raw_aliases = policy.get("aliases", [])
         aliases = raw_aliases if isinstance(raw_aliases, (list, tuple)) else []
@@ -151,15 +229,15 @@ def _cached_response_chunks(content: str, chunk_size: int = 24) -> list[str]:
     """Splits cached content into small chunks so cache hits feel like live streaming."""
     if not content:
         return []
-    return [content[i:i + chunk_size] for i in range(0, len(content), chunk_size)]
+    return [content[i : i + chunk_size] for i in range(0, len(content), chunk_size)]
 
 
 async def _persist_session_snapshot(
-        session_id: str,
-        messages: list[dict[str, str]],
-        session_history: list[dict[str, Any]] | None = None,
-        recent_maps: list[dict[str, Any]] | None = None,
-        visual_artifacts: list[dict[str, Any]] | None = None,
+    session_id: str,
+    messages: list[dict[str, str]],
+    session_history: list[dict[str, Any]] | None = None,
+    recent_maps: list[dict[str, Any]] | None = None,
+    visual_artifacts: list[dict[str, Any]] | None = None,
 ) -> None:
     if not session_id:
         return
@@ -180,6 +258,7 @@ async def _persist_session_snapshot(
 
 class Message(BaseModel):
     """A chat message."""
+
     content: str
     role: str  # "user" or "assistant"
     agent: str = ""  # Agent name for assistant messages
@@ -189,6 +268,7 @@ class Message(BaseModel):
 
 class SessionHistoryItem(BaseModel):
     """Sidebar metadata for one user turn in the current browser tab session."""
+
     id: str
     title: str
     meta: str
@@ -199,6 +279,7 @@ class SessionHistoryItem(BaseModel):
 
 class RecentMapItem(BaseModel):
     """Sidebar metadata for one generated graph in the current browser tab session."""
+
     id: str
     title: str
     meta: str
@@ -212,12 +293,14 @@ def _message_dom_id(position: int) -> str:
 
 
 def _restore_ui_navigation_targets(
-        messages: list[Message],
-        session_history: list[SessionHistoryItem],
+    messages: list[Message],
+    session_history: list[SessionHistoryItem],
 ) -> tuple[list[Message], list[SessionHistoryItem]]:
     """Backfills message DOM ids and legacy history targets after session hydration."""
     restored_messages = [
-        message if message.dom_id else message.model_copy(update={"dom_id": _message_dom_id(index)})
+        message
+        if message.dom_id
+        else message.model_copy(update={"dom_id": _message_dom_id(index)})
         for index, message in enumerate(messages)
     ]
     restored_history = []
@@ -225,14 +308,16 @@ def _restore_ui_navigation_targets(
         message_dom_id = item.message_dom_id
         if not message_dom_id and 0 <= item.message_index < len(restored_messages):
             message_dom_id = restored_messages[item.message_index].dom_id
-        restored_history.append(item.model_copy(update={"message_dom_id": message_dom_id}))
+        restored_history.append(
+            item.model_copy(update={"message_dom_id": message_dom_id})
+        )
     return restored_messages, restored_history
 
 
 def _session_history_selection_state(
-        item_id: str,
-        session_history: list[SessionHistoryItem],
-        current_nonce: int,
+    item_id: str,
+    session_history: list[SessionHistoryItem],
+    current_nonce: int,
 ) -> dict[str, str | int] | None:
     """Returns state updates for navigating to a current-session history item."""
     for item in session_history:
@@ -248,9 +333,9 @@ def _session_history_selection_state(
 
 
 def _recent_map_selection_state(
-        item_id: str,
-        item: RecentMapItem,
-        visual_artifact_count: int,
+    item_id: str,
+    item: RecentMapItem,
+    visual_artifact_count: int,
 ) -> dict[str, str | int] | None:
     """Returns state updates for navigating to a valid recent map item."""
     if item.id != item_id or not 0 <= item.artifact_index < visual_artifact_count:
@@ -262,11 +347,11 @@ def _recent_map_selection_state(
 
 
 def _merge_recent_map_items(
-        visual_artifacts: list[dict[str, Any]],
-        recent_maps: list[RecentMapItem],
-        new_artifacts: list[dict[str, Any]],
-        fallback_prompt: str,
-        timestamp: str | None = None,
+    visual_artifacts: list[dict[str, Any]],
+    recent_maps: list[RecentMapItem],
+    new_artifacts: list[dict[str, Any]],
+    fallback_prompt: str,
+    timestamp: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[RecentMapItem], int, str]:
     """Appends graph artifacts while keeping recent-map indexes aligned after trimming."""
     combined_artifacts = visual_artifacts + new_artifacts
@@ -298,9 +383,7 @@ def _merge_recent_map_items(
 
     merged_maps = (adjusted_maps + new_items)[-MAX_SIDEBAR_HISTORY_ITEMS:]
     merged_maps = [
-        item
-        for item in merged_maps
-        if 0 <= item.artifact_index < len(kept_artifacts)
+        item for item in merged_maps if 0 <= item.artifact_index < len(kept_artifacts)
     ]
     selected_plot_index = len(kept_artifacts) - 1 if kept_artifacts else 0
     selected_recent_map_id = new_items[-1].id if new_items else ""
@@ -309,6 +392,7 @@ def _merge_recent_map_items(
 
 class AgentStatus(BaseModel):
     """Status of an agent in the workflow."""
+
     name: str
     is_active: bool = False
     last_action: str = ""
@@ -398,7 +482,9 @@ class AppState(rx.State):
         Cached so it only recalculates when visual_artifacts or selected_plot_index
         changes, preventing Plotly re-renders on unrelated state updates.
         """
-        if self.visual_artifacts and 0 <= self.selected_plot_index < len(self.visual_artifacts):
+        if self.visual_artifacts and 0 <= self.selected_plot_index < len(
+            self.visual_artifacts
+        ):
             fig = go.Figure(self.visual_artifacts[self.selected_plot_index])
             fig.update_layout(
                 autosize=True,
@@ -410,7 +496,14 @@ class AppState(rx.State):
     @rx.var
     def agent_status_list(self) -> list[dict]:
         """Get list of agent statuses for display."""
-        agents = ["orchestrator", "retriever", "researcher", "analyst", "mentor", "visualizer"]
+        agents = [
+            "orchestrator",
+            "retriever",
+            "researcher",
+            "analyst",
+            "mentor",
+            "visualizer",
+        ]
         return [
             {
                 "name": agent,
@@ -422,11 +515,11 @@ class AppState(rx.State):
         ]
 
     def _append_session_history_item(
-            self,
-            user_message: str,
-            meta: str,
-            message_index: int,
-            message_dom_id: str,
+        self,
+        user_message: str,
+        meta: str,
+        message_index: int,
+        message_dom_id: str,
     ) -> None:
         item = SessionHistoryItem(
             id=str(uuid.uuid4()),
@@ -436,23 +529,31 @@ class AppState(rx.State):
             message_dom_id=message_dom_id,
             timestamp=meta,
         )
-        self.session_history = (self.session_history + [item])[-MAX_SIDEBAR_HISTORY_ITEMS:]
+        self.session_history = (self.session_history + [item])[
+            -MAX_SIDEBAR_HISTORY_ITEMS:
+        ]
         self.selected_session_history_id = item.id
 
-    def _append_recent_map_items(self, artifacts: list[dict[str, Any]], fallback_prompt: str) -> None:
+    def _append_recent_map_items(
+        self, artifacts: list[dict[str, Any]], fallback_prompt: str
+    ) -> None:
         if not artifacts:
             return
 
-        visual_artifacts, recent_maps, selected_plot_index, selected_recent_map_id = _merge_recent_map_items(
-            self.visual_artifacts,
-            self.recent_maps,
-            artifacts,
-            fallback_prompt,
+        visual_artifacts, recent_maps, selected_plot_index, selected_recent_map_id = (
+            _merge_recent_map_items(
+                self.visual_artifacts,
+                self.recent_maps,
+                artifacts,
+                fallback_prompt,
+            )
         )
         self.visual_artifacts = visual_artifacts
         self.recent_maps = recent_maps
         self.selected_plot_index = selected_plot_index
-        self.selected_recent_map_id = selected_recent_map_id or self.selected_recent_map_id
+        self.selected_recent_map_id = (
+            selected_recent_map_id or self.selected_recent_map_id
+        )
 
     async def _persist_current_session_snapshot(self, session_id: str) -> None:
         async with self:
@@ -477,13 +578,17 @@ class AppState(rx.State):
                 self.session_id = str(uuid.uuid4())
                 return
             session_id = self.session_id
-            should_hydrate = not self.messages and not self.session_history and not self.recent_maps
+            should_hydrate = (
+                not self.messages and not self.session_history and not self.recent_maps
+            )
 
         if not should_hydrate:
             return
 
         try:
-            doc = await asyncio.to_thread(lambda: get_session_memory_store().get(session_id))
+            doc = await asyncio.to_thread(
+                lambda: get_session_memory_store().get(session_id)
+            )
         except Exception as e:
             logger.warning(f"Loading session snapshot failed: {e}")
             return
@@ -497,26 +602,35 @@ class AppState(rx.State):
                 if isinstance(message, dict)
             ]
             session_history = [
-                                  SessionHistoryItem(**item)
-                                  for item in doc.get("session_history", [])
-                                  if isinstance(item, dict)
-                              ][-MAX_SIDEBAR_HISTORY_ITEMS:]
+                SessionHistoryItem(**item)
+                for item in doc.get("session_history", [])
+                if isinstance(item, dict)
+            ][-MAX_SIDEBAR_HISTORY_ITEMS:]
             visual_artifacts = doc.get("visual_artifacts", [])
-            visual_artifacts = visual_artifacts if isinstance(visual_artifacts, list) else []
+            visual_artifacts = (
+                visual_artifacts if isinstance(visual_artifacts, list) else []
+            )
             visual_artifacts = visual_artifacts[-MAX_SIDEBAR_HISTORY_ITEMS:]
             recent_maps = [
-                              RecentMapItem(**item)
-                              for item in doc.get("recent_maps", [])
-                              if isinstance(item, dict)
-                          ][-MAX_SIDEBAR_HISTORY_ITEMS:]
+                RecentMapItem(**item)
+                for item in doc.get("recent_maps", [])
+                if isinstance(item, dict)
+            ][-MAX_SIDEBAR_HISTORY_ITEMS:]
         except Exception as e:
             logger.warning(f"Hydrating session snapshot failed: {e}")
             return
 
         async with self:
-            if self.session_id != session_id or self.messages or self.session_history or self.recent_maps:
+            if (
+                self.session_id != session_id
+                or self.messages
+                or self.session_history
+                or self.recent_maps
+            ):
                 return
-            messages, session_history = _restore_ui_navigation_targets(messages, session_history)
+            messages, session_history = _restore_ui_navigation_targets(
+                messages, session_history
+            )
             self.messages = messages
             self.session_history = session_history
             self.visual_artifacts = visual_artifacts
@@ -525,9 +639,15 @@ class AppState(rx.State):
                 for item in recent_maps
                 if 0 <= item.artifact_index < len(self.visual_artifacts)
             ]
-            self.selected_session_history_id = self.session_history[-1].id if self.session_history else ""
-            self.selected_recent_map_id = self.recent_maps[-1].id if self.recent_maps else ""
-            self.selected_plot_index = self.recent_maps[-1].artifact_index if self.recent_maps else 0
+            self.selected_session_history_id = (
+                self.session_history[-1].id if self.session_history else ""
+            )
+            self.selected_recent_map_id = (
+                self.recent_maps[-1].id if self.recent_maps else ""
+            )
+            self.selected_plot_index = (
+                self.recent_maps[-1].artifact_index if self.recent_maps else 0
+            )
             self.show_visualization = bool(self.visual_artifacts)
 
     def set_input(self, value: str):
@@ -592,7 +712,9 @@ class AppState(rx.State):
         if selection is None:
             return
         self.selected_session_history_id = str(selection["selected_session_history_id"])
-        self.scroll_target_message_dom_id = str(selection["scroll_target_message_dom_id"])
+        self.scroll_target_message_dom_id = str(
+            selection["scroll_target_message_dom_id"]
+        )
         self.scroll_request_nonce = int(selection["scroll_request_nonce"])
         self.active_view = "chat"
 
@@ -637,7 +759,9 @@ class AppState(rx.State):
 
         if old_session_id:
             try:
-                await asyncio.to_thread(lambda: get_session_memory_store().delete(old_session_id))
+                await asyncio.to_thread(
+                    lambda: get_session_memory_store().delete(old_session_id)
+                )
             except Exception as e:
                 logger.warning(f"Deleting session snapshot failed: {e}")
 
@@ -668,7 +792,11 @@ class AppState(rx.State):
             self.active_agent = agent_name if agent_name != "system" else ""
             self.streaming_agent = agent_name
             self.streaming_content = ""
-            if agent_name and agent_name != "system" and agent_name not in self.agent_history:
+            if (
+                agent_name
+                and agent_name != "system"
+                and agent_name not in self.agent_history
+            ):
                 self.agent_history = self.agent_history + [agent_name]
 
         for chunk in _cached_response_chunks(rendered_content):
@@ -702,7 +830,9 @@ class AppState(rx.State):
         await self._process_message(user_message)
 
     @rx.event(background=True)
-    async def process_submitted_message(self, user_message: str, submit_reserved: bool = False):
+    async def process_submitted_message(
+        self, user_message: str, submit_reserved: bool = False
+    ):
         """Processes a submitted form value without depending on composer state timing."""
         user_message = user_message.strip()
         if not user_message:
@@ -719,8 +849,14 @@ class AppState(rx.State):
         async with self:
             existing_message_count = len(self.messages)
         quick_action_policy = _get_quick_action_cache_policy(user_message)
-        should_cache_quick_action = existing_message_count == 0 and quick_action_policy is not None
-        cache_prompt = str(quick_action_policy.get("prompt", user_message)) if quick_action_policy else user_message
+        should_cache_quick_action = (
+            existing_message_count == 0 and quick_action_policy is not None
+        )
+        cache_prompt = (
+            str(quick_action_policy.get("prompt", user_message))
+            if quick_action_policy
+            else user_message
+        )
         graph_updated_this_run = False
 
         async with self:
@@ -746,12 +882,16 @@ class AppState(rx.State):
                     dom_id=message_dom_id,
                 )
             ]
-            self._append_session_history_item(user_message, timestamp, message_index, message_dom_id)
+            self._append_session_history_item(
+                user_message, timestamp, message_index, message_dom_id
+            )
 
         try:
             if should_cache_quick_action:
                 try:
-                    cached = await asyncio.to_thread(lambda: get_quick_action_cache().get(cache_prompt))
+                    cached = await asyncio.to_thread(
+                        lambda: get_quick_action_cache().get(cache_prompt)
+                    )
                 except Exception as e:
                     logger.warning(f"Quick-action cache lookup failed: {e}")
                     cached = None
@@ -770,7 +910,9 @@ class AppState(rx.State):
                     await self._replay_cached_agent_history(cached_agent_history)
                     async with self:
                         if cached_visual_artifacts:
-                            self._append_recent_map_items(cached_visual_artifacts, user_message)
+                            self._append_recent_map_items(
+                                cached_visual_artifacts, user_message
+                            )
                             self.show_visualization = True
                             graph_updated_this_run = True
                     for response in cached_responses:
@@ -783,8 +925,7 @@ class AppState(rx.State):
             # Prepare message history
             recent_messages = self.messages[:-1][-DEFAULT_RECENT_MESSAGE_LIMIT:]
             message_history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in recent_messages
+                {"role": msg.role, "content": msg.content} for msg in recent_messages
             ]
             cache_responses: list[dict[str, str]] = []
             cache_visual_artifacts: list[dict[str, Any]] = []
@@ -792,7 +933,9 @@ class AppState(rx.State):
             cache_error = False
             try:
                 session_summary = await asyncio.to_thread(
-                    lambda: get_session_memory_store().get_prompt_summary(session_id, user_message)
+                    lambda: get_session_memory_store().get_prompt_summary(
+                        session_id, user_message
+                    )
                 )
             except Exception as e:
                 logger.warning(f"Loading session summary failed: {e}")
@@ -800,17 +943,19 @@ class AppState(rx.State):
 
             # Stream through workflow with per-token updates
             async for event in workflow.stream_with_tokens(
-                    user_message=user_message,
-                    message_history=message_history,
-                    recursion_limit=RECURSION_LIMIT,
-                    session_id=session_id,
-                    session_summary=session_summary,
+                user_message=user_message,
+                message_history=message_history,
+                recursion_limit=RECURSION_LIMIT,
+                session_id=session_id,
+                session_summary=session_summary,
             ):
                 async with self:
                     if event.type == WorkflowEventType.AGENT_START:
                         self.active_agent = event.data["agent"]
                         if event.data["agent"] not in self.agent_history:
-                            self.agent_history = self.agent_history + [event.data["agent"]]
+                            self.agent_history = self.agent_history + [
+                                event.data["agent"]
+                            ]
 
                     elif event.type == WorkflowEventType.AGENT_END:
                         self.active_agent = ""
@@ -818,7 +963,9 @@ class AppState(rx.State):
                     elif event.type == WorkflowEventType.TOKEN:
                         agent_name = event.data.get("agent", "")
                         self.streaming_agent = agent_name
-                        self.streaming_content = self.streaming_content + event.data["chunk"]
+                        self.streaming_content = (
+                            self.streaming_content + event.data["chunk"]
+                        )
 
                     # Context is hidden for now
                     # elif event.type == WorkflowEventType.CONTEXT_UPDATE:
@@ -845,7 +992,9 @@ class AppState(rx.State):
                         agent_name = event.data.get("agent", "")
                         content = event.data["content"]
                         if agent_name != "system":
-                            cache_responses.append({"content": content, "agent": agent_name})
+                            cache_responses.append(
+                                {"content": content, "agent": agent_name}
+                            )
                         self.streaming_content = ""
                         self.streaming_agent = ""
                         self.messages = self.messages + [
@@ -860,7 +1009,9 @@ class AppState(rx.State):
 
                     elif event.type == WorkflowEventType.ERROR:
                         cache_error = True
-                        self.error_message = event.data.get("message", "Unknown error occurred")
+                        self.error_message = event.data.get(
+                            "message", "Unknown error occurred"
+                        )
 
                     elif event.type == WorkflowEventType.CONTEXT_UPDATE:
                         cache_context = event.data.get("context", "")
@@ -868,16 +1019,24 @@ class AppState(rx.State):
             if should_cache_quick_action and not cache_error:
                 async with self:
                     cache_agent_history = list(self.agent_history)
-                ttl_seconds = quick_action_policy.get("ttl_seconds") if quick_action_policy else None
+                ttl_seconds = (
+                    quick_action_policy.get("ttl_seconds")
+                    if quick_action_policy
+                    else None
+                )
                 try:
                     ttl_seconds = int(ttl_seconds) if ttl_seconds is not None else None
                 except (TypeError, ValueError):
                     ttl_seconds = None
                 responses_to_cache = (
-                    cache_responses if bool(quick_action_policy.get("cache_responses", True)) else []
+                    cache_responses
+                    if bool(quick_action_policy.get("cache_responses", True))
+                    else []
                 )
                 artifacts_to_cache = (
-                    cache_visual_artifacts if bool(quick_action_policy.get("cache_visual_artifacts", True)) else []
+                    cache_visual_artifacts
+                    if bool(quick_action_policy.get("cache_visual_artifacts", True))
+                    else []
                 )
                 try:
                     await asyncio.to_thread(
@@ -898,7 +1057,7 @@ class AppState(rx.State):
 
         except Exception as e:
             async with self:
-                self.error_message = f"Error processing request: {str(e)}"
+                self.error_message = f"Error processing request: {e!s}"
                 self.messages = self.messages + [
                     Message(
                         content="I encountered an error while processing your request. Please try again.",

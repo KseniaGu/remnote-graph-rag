@@ -1,7 +1,7 @@
 import reflex as rx
 from starlette.responses import JSONResponse
 
-from app.components import sidebar, main_content
+from app.components import main_content, sidebar
 from app.state import AppState
 from app.strings import APP_PAGE_TITLE
 from app.styles import COLORS, GLOBAL_STYLES
@@ -101,6 +101,7 @@ app.add_page(index, title=APP_PAGE_TITLE, on_load=AppState.initialize_session)
 async def healthz(request):
     """Health probe endpoint for Cloud Run startup and liveness checks."""
     from backend.health import is_healthy
+
     if is_healthy():
         return JSONResponse({"status": "ok"})
     return JSONResponse({"status": "initializing"}, status_code=503)

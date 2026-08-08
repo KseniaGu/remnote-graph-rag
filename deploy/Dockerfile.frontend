@@ -19,7 +19,10 @@ COPY . .
 RUN reflex init
 
 ARG API_URL
+ARG ASSET_BASE_URL
+
 ENV REFLEX_API_URL=${API_URL}
+ENV ASSET_BASE_URL=${ASSET_BASE_URL}
 
 RUN reflex export --frontend-only --no-zip
 

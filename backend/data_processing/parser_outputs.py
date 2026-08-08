@@ -22,7 +22,7 @@ RETRIEVAL_CHUNKS_FILENAME = "retrieval_chunks.jsonl"
 COMPARISON_FILENAME = "comparison.md"
 
 
-def result_to_jsonable(result: "OptimizedParseResult") -> dict[str, Any]:
+def result_to_jsonable(result: OptimizedParseResult) -> dict[str, Any]:
     """Converts optimized parser IR dataclasses to plain JSON-compatible records."""
 
     return {
@@ -30,22 +30,29 @@ def result_to_jsonable(result: "OptimizedParseResult") -> dict[str, Any]:
         "blocks": [asdict(item) for item in result.blocks],
         "external_resources": [asdict(item) for item in result.external_resources],
         "parsed_artifacts": [asdict(item) for item in result.parsed_artifacts],
-        "artifact_gate_decisions": [asdict(item) for item in result.artifact_gate_decisions],
+        "artifact_gate_decisions": [
+            asdict(item) for item in result.artifact_gate_decisions
+        ],
         "retrieval_chunks": [asdict(item) for item in result.retrieval_chunks],
         "summary": result.summary,
     }
 
 
-def write_optimized_parser_ir(output_root: Path, result: "OptimizedParseResult") -> Path:
+def write_optimized_parser_ir(output_root: Path, result: OptimizedParseResult) -> Path:
     """Writes all optimized parser IR sidecars and return the output directory."""
 
     jsonable = result_to_jsonable(result)
     write_json(output_root / SUMMARY_FILENAME, result.summary)
     write_jsonl(output_root / SOURCE_DOCUMENTS_FILENAME, jsonable["source_documents"])
     write_jsonl(output_root / BLOCKS_FILENAME, jsonable["blocks"])
-    write_jsonl(output_root / EXTERNAL_RESOURCES_FILENAME, jsonable["external_resources"])
+    write_jsonl(
+        output_root / EXTERNAL_RESOURCES_FILENAME, jsonable["external_resources"]
+    )
     write_jsonl(output_root / PARSED_ARTIFACTS_FILENAME, jsonable["parsed_artifacts"])
-    write_jsonl(output_root / ARTIFACT_GATE_DECISIONS_FILENAME, jsonable["artifact_gate_decisions"])
+    write_jsonl(
+        output_root / ARTIFACT_GATE_DECISIONS_FILENAME,
+        jsonable["artifact_gate_decisions"],
+    )
     write_jsonl(output_root / RETRIEVAL_CHUNKS_FILENAME, jsonable["retrieval_chunks"])
     write_comparison_markdown(output_root / COMPARISON_FILENAME, result.summary)
     return output_root

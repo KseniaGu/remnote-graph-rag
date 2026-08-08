@@ -20,7 +20,9 @@ class FakeVectorStore:
 
 
 class FakeGraphNode:
-    def __init__(self, node_id: str, label: str, *, node_label: str = "CONCEPT") -> None:
+    def __init__(
+        self, node_id: str, label: str, *, node_label: str = "CONCEPT"
+    ) -> None:
         self.id = node_id
         self.label = node_label
         self.properties = {
@@ -65,21 +67,27 @@ class FakeGraphStore:
         return [
             triplet
             for triplet in self.triplets
-            if triplet[1].label not in denied and (triplet[0].id in ids or triplet[2].id in ids)
+            if triplet[1].label not in denied
+            and (triplet[0].id in ids or triplet[2].id in ids)
         ][:limit]
 
-    def get_triplets(self, entity_names=None, relation_names=None, properties=None, ids=None):
+    def get_triplets(
+        self, entity_names=None, relation_names=None, properties=None, ids=None
+    ):
         if self.fail_triplets:
             raise RuntimeError("triplets failed")
         triplets = list(self.triplets)
         if relation_names:
-            triplets = [triplet for triplet in triplets if triplet[1].label in relation_names]
+            triplets = [
+                triplet for triplet in triplets if triplet[1].label in relation_names
+            ]
         if ids:
             id_set = set(ids)
             triplets = [
                 triplet
                 for triplet in triplets
-                if getattr(triplet[0], "id", None) in id_set or getattr(triplet[2], "id", None) in id_set
+                if getattr(triplet[0], "id", None) in id_set
+                or getattr(triplet[2], "id", None) in id_set
             ]
         return triplets
 
@@ -91,7 +99,9 @@ def make_access(vector_store=None, graph_store=None, docs=None) -> RetrievalStor
         property_graph_store=graph_store,
     )
     index = SimpleNamespace(vector_store=vector_store, property_graph_store=graph_store)
-    indexer = SimpleNamespace(index=index, storage_context=storage_context, embedder=object())
+    indexer = SimpleNamespace(
+        index=index, storage_context=storage_context, embedder=object()
+    )
     return RetrievalStoreAccess(indexer)
 
 
@@ -114,7 +124,9 @@ class RetrievalStoreAccessTests(unittest.TestCase):
         self.assertIsNone(vector_store.queries[1].filters)
         self.assertTrue(access.health_report.has_code("vector_filter_fallback"))
 
-    def test_relation_map_falls_back_to_triplets_and_filters_denied_relations(self) -> None:
+    def test_relation_map_falls_back_to_triplets_and_filters_denied_relations(
+        self,
+    ) -> None:
         source = FakeGraphNode("concept_source", "Source")
         kept = FakeGraphNode("concept_kept", "Kept")
         denied = FakeGraphNode("concept_denied", "Denied")

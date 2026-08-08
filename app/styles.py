@@ -35,7 +35,9 @@ AGENT_COLORS = {
 # Common styles
 CONTROL_TRANSITION = "background 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease"
 FOCUS_RING = "0 0 0 2px rgba(25, 215, 202, 0.28)"
-SURFACE_SHADOW = "inset 0 1px 0 rgba(243, 251, 255, 0.035), 0 18px 54px rgba(0, 0, 0, 0.22)"
+SURFACE_SHADOW = (
+    "inset 0 1px 0 rgba(243, 251, 255, 0.035), 0 18px 54px rgba(0, 0, 0, 0.22)"
+)
 
 CONTAINER_STYLE = {
     "width": "100%",

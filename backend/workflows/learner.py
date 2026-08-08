@@ -4,21 +4,25 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.mongodb import MongoDBSaver
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.postprocessor.cohere_rerank import CohereRerank
 from ollama._types import ResponseError
 from pymongo import MongoClient
 from tavily import TavilyClient
 
-from backend.configs.constants import TITLE_MAX_LENGTH, DEFAULT_RECENT_MESSAGE_LIMIT, VISUALIZATION_EMPTY_CONTEXT
+from backend.configs.constants import (
+    DEFAULT_RECENT_MESSAGE_LIMIT,
+    TITLE_MAX_LENGTH,
+    VISUALIZATION_EMPTY_CONTEXT,
+)
 from backend.configs.enums import ModelRoleType, PromptType
-from backend.configs.models import LocalModelSettings, ModelSettings
+from backend.configs.models import ModelSettings
 from backend.configs.paths import PathSettings
-from backend.configs.search import TavilySettings, KnowledgeGraphSearchSettings
+from backend.configs.search import KnowledgeGraphSearchSettings, TavilySettings
 from backend.configs.storage import StorageSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
@@ -36,22 +40,22 @@ logger = get_logger(WORKFLOW_LOGGING)
 
 class LearnerWorkflow:
     """Multi-agent workflow for technical interview preparation and learning.
-    
+
     Orchestrates multiple specialized agents (Orchestrator, Retriever, Researcher, Analyst,
     Mentor, Visualizer) to provide comprehensive learning support through knowledge base
     retrieval, web research, technical analysis, and interactive mentoring.
     """
 
     def __init__(
-            self,
-            models_settings: ModelSettings,
-            path_settings: PathSettings,
-            storage_settings: StorageSettings,
-            tavily_settings: TavilySettings,
-            kg_search_settings: KnowledgeGraphSearchSettings
+        self,
+        models_settings: ModelSettings,
+        path_settings: PathSettings,
+        storage_settings: StorageSettings,
+        tavily_settings: TavilySettings,
+        kg_search_settings: KnowledgeGraphSearchSettings,
     ):
         """Initializes the learner workflow with all required settings.
-        
+
         Args:
             models_settings: Configuration for all LLM models and agents.
             path_settings: File system paths for data and prompts.
@@ -66,19 +70,25 @@ class LearnerWorkflow:
         self.workflow = StateGraph(State)
 
         self.prompt_engine = PromptEngine(self.path_settings.prompts_dir)
-        self.search_engine = TavilyClient(api_key=tavily_settings.api_key.get_secret_value())
+        self.search_engine = TavilyClient(
+            api_key=tavily_settings.api_key.get_secret_value()
+        )
 
         # Initialize knowledge graph, agents, and workflow nodes
         self._init_graph(kg_search_settings, storage_settings)
         self._init_agents()
         self._init_nodes()
 
-    def _init_graph(self, kg_search_settings: KnowledgeGraphSearchSettings, storage_settings: StorageSettings):
+    def _init_graph(
+        self,
+        kg_search_settings: KnowledgeGraphSearchSettings,
+        storage_settings: StorageSettings,
+    ):
         """Initializes the knowledge graph indexer with embeddings and reranking.
-        
+
         Sets up the knowledge graph storage, embedder, reranker, and attempts to load existing index.
         If no index exists, builds a new one using the orchestrator agent.
-        
+
         Args:
             kg_search_settings: Knowledge graph search configuration.
             storage_settings: Storage backend settings.
@@ -120,26 +130,35 @@ class LearnerWorkflow:
         try:
             self.knowledge_graph_indexer.load_index()
         except ValueError:
-            logger.info("No existing index found. Building new knowledge graph index...")
-            role_settings = getattr(self.models_settings, ModelRoleType.orchestrator.name)
+            logger.info(
+                "No existing index found. Building new knowledge graph index..."
+            )
+            role_settings = getattr(
+                self.models_settings, ModelRoleType.orchestrator.name
+            )
             prompt_version = role_settings.prompt_version["graph_index"]
             graph_index_prompt, graph_index_system_prompt = self.prompt_engine.render(
-                PromptType.learner_workflow, ModelRoleType.orchestrator, prompt_version, "graph_index"
+                PromptType.learner_workflow,
+                ModelRoleType.orchestrator,
+                prompt_version,
+                "graph_index",
             )
             self.knowledge_graph_indexer.build_index(
                 llm=role_settings.graph_index_ollama_params(),
-                graph_index_prompt=graph_index_system_prompt["system_instruction"] + "\n" + graph_index_prompt,
+                graph_index_prompt=graph_index_system_prompt["system_instruction"]
+                + "\n"
+                + graph_index_prompt,
             )
             logger.info("Knowledge graph index built successfully")
 
     def _init_agents(self):
         """Initializes all agent models and tools.
-        
+
         Sets up:
         - Tools: knowledge base search, web research, graph visualization
         - Prompts: loads and configures prompts for each agent role
         - Models: initializes LLM instances with role-specific configurations
-        
+
         Special handling for:
         - Researcher: creates two variants (with_tools, structured output)
         - Orchestrator: configured with structured output for routing decisions
@@ -149,7 +168,14 @@ class LearnerWorkflow:
         base_kb_search_tool = self._build_kb_search_tool()
         web_search_tool = deep_web_research(self.search_engine)
         visualizer_kb_search_tool = self._build_visualizer_tool()
-        self.tools = {tool.name: tool for tool in (base_kb_search_tool, web_search_tool, visualizer_kb_search_tool)}
+        self.tools = {
+            tool.name: tool
+            for tool in (
+                base_kb_search_tool,
+                web_search_tool,
+                visualizer_kb_search_tool,
+            )
+        }
 
         # Load prompts and initialize models for each agent role
         self.prompts = {}
@@ -166,14 +192,21 @@ class LearnerWorkflow:
 
             # Load and store prompts for this agent
             prompt, system_prompt = self.prompt_engine.render(
-                PromptType.learner_workflow, role_type, prompt_version, model_function=model_function
+                PromptType.learner_workflow,
+                role_type,
+                prompt_version,
+                model_function=model_function,
             )
             self.prompts[role_type] = (prompt, system_prompt)
 
             # Initialize model agents with role-specific configurations
             if role_type == ModelRoleType.researcher:
-                self.researcher_with_tools = AgentsFactory.get_llm_by_role(model_settings.with_tools)
-                self.researcher_structured = AgentsFactory.get_llm_by_role(model_settings.structured)
+                self.researcher_with_tools = AgentsFactory.get_llm_by_role(
+                    model_settings.with_tools
+                )
+                self.researcher_structured = AgentsFactory.get_llm_by_role(
+                    model_settings.structured
+                )
                 self.researcher_with_tools = AgentsFactory.add_retry(
                     self.researcher_with_tools.bind_tools([web_search_tool]),
                     provider=model_settings.with_tools.provider,
@@ -190,14 +223,22 @@ class LearnerWorkflow:
                 if role_type == ModelRoleType.orchestrator:
                     model = model.with_structured_output(RoutingDecision)
                 elif role_type == ModelRoleType.retriever:
-                    model = model.bind_tools([base_kb_search_tool, visualizer_kb_search_tool])
+                    model = model.bind_tools(
+                        [base_kb_search_tool, visualizer_kb_search_tool]
+                    )
 
-            setattr(self, role_type.name, AgentsFactory.add_retry(model, provider=model_settings.provider))
+            setattr(
+                self,
+                role_type.name,
+                AgentsFactory.add_retry(model, provider=model_settings.provider),
+            )
 
     def _build_kb_search_tool(self):
         mode = self.knowledge_graph_indexer.kg_search_settings.analyst_retrieval_mode
         if mode == "optimized":
-            reranker_settings = getattr(getattr(self, "models_settings", None), "reranker", None)
+            reranker_settings = getattr(
+                getattr(self, "models_settings", None), "reranker", None
+            )
             analyst_retrieval_pipeline = AnalystRetrievalPipeline(
                 self.knowledge_graph_indexer,
                 reranker_settings=reranker_settings,
@@ -213,8 +254,12 @@ class LearnerWorkflow:
     def _build_visualizer_tool(self):
         mode = self.knowledge_graph_indexer.kg_search_settings.visualizer_retrieval_mode
         if mode == "optimized":
-            visualizer_retrieval_pipeline = VisualizerRetrievalPipeline(self.knowledge_graph_indexer)
-            return get_subgraphs_to_visualize(visualizer_pipeline=visualizer_retrieval_pipeline)
+            visualizer_retrieval_pipeline = VisualizerRetrievalPipeline(
+                self.knowledge_graph_indexer
+            )
+            return get_subgraphs_to_visualize(
+                visualizer_pipeline=visualizer_retrieval_pipeline
+            )
         if mode == "legacy_vector_context":
             legacy_retriever = self.knowledge_graph_indexer.get_retriever(
                 self.knowledge_graph_indexer.kg_search_settings.visualizer_retriever_params
@@ -224,7 +269,7 @@ class LearnerWorkflow:
 
     def _init_nodes(self):
         """Initializes workflow graph nodes and edges.
-        
+
         Creates the LangGraph workflow structure:
         - Adds all agent nodes (mentor, analyst, orchestrator, researcher, retriever, visualizer)
         - Defines edges: START -> orchestrator -> conditional routing -> agents -> orchestrator
@@ -250,7 +295,7 @@ class LearnerWorkflow:
                 ModelRoleType.retriever.name: "retriever",
                 "visualizer": "visualizer",
                 "__end__": END,
-            }
+            },
         )
 
         self.workflow.add_edge("retriever", "orchestrator")
@@ -268,16 +313,18 @@ class LearnerWorkflow:
             logger.info("LangGraph MongoDB checkpointer initialized")
             return saver
         except Exception as e:
-            logger.warning(f"MongoDB checkpointer unavailable, falling back to MemorySaver: {e}")
+            logger.warning(
+                f"MongoDB checkpointer unavailable, falling back to MemorySaver: {e}"
+            )
         return MemorySaver()
 
     @staticmethod
     def get_next_step(state: State) -> str:
         """Extracts the next routing step from workflow state.
-        
+
         Args:
             state: Current workflow state containing next_step decision.
-            
+
         Returns:
             Name of the next agent node to execute.
         """
@@ -285,13 +332,15 @@ class LearnerWorkflow:
 
     @staticmethod
     @traceable(run_type="chain", name="format_conversation_history")
-    def format_conversation_history(messages: list, max_message_chars: int = 1200) -> str:
+    def format_conversation_history(
+        messages: list, max_message_chars: int = 1200
+    ) -> str:
         """Formats conversation messages into a readable history string.
-        
+
         Args:
             messages: List of conversation messages.
             max_message_chars: Maximum content length per message before deterministic compression.
-            
+
         Returns:
             Formatted conversation history with agent labels and content.
         """
@@ -318,25 +367,25 @@ class LearnerWorkflow:
 
     @traceable(run_type="chain", name="create_messages_to_pass")
     def create_messages_to_pass(
-            self,
-            role_type: ModelRoleType,
-            state: State,
-            prompt_template_arguments: tuple,
-            conversation_history_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT
+        self,
+        role_type: ModelRoleType,
+        state: State,
+        prompt_template_arguments: tuple,
+        conversation_history_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
     ) -> list[tuple[str, str]]:
         """Creates formatted message list for agent invocation.
-        
+
         Builds prompt messages by:
         1. Extracting required data from state based on template arguments
         2. Formatting prompt template with extracted data
         3. Returning system instruction + formatted user prompt
-        
+
         Args:
             role_type: Type of agent receiving the messages.
             state: Current workflow state.
             prompt_template_arguments: Tuple of required template argument names.
             conversation_history_limit: The maximum number of last messages passed to the agent.
-            
+
         Returns:
             List of (role, content) tuples for model invocation.
         """
@@ -344,14 +393,19 @@ class LearnerWorkflow:
 
         # Extract user's latest input if needed
         if "input_text" in prompt_template_arguments:
-            user_messages = [message for message in state.messages if message.type == 'human']
+            user_messages = [
+                message for message in state.messages if message.type == "human"
+            ]
             prompt_kwargs["input_text"] = user_messages[-1].content
 
         # Add context (KB results, research findings, etc.)
         if "context" in prompt_template_arguments:
             prompt_kwargs["context"] = state.context
             # Notify if visualization was generated
-            if "visual_artifact" in prompt_template_arguments and state.visual_artifacts:
+            if (
+                "visual_artifact" in prompt_template_arguments
+                and state.visual_artifacts
+            ):
                 prompt_kwargs["context"] += "\nVisual artifact generated"
 
         if "conversation_history" in prompt_template_arguments:
@@ -368,14 +422,16 @@ class LearnerWorkflow:
 
         return [("system", system_prompt["system_instruction"]), ("human", prompt)]
 
-    async def call_model(self, messages_to_pass: list, role_type: ModelRoleType, **kwargs) -> Optional[Any]:
+    async def call_model(
+        self, messages_to_pass: list, role_type: ModelRoleType, **kwargs
+    ) -> AIMessage | None:
         """Invokes an agent model with error handling.
-        
+
         Args:
             messages_to_pass: Formatted messages for model input.
             role_type: Type of agent to invoke.
             **kwargs: Additional arguments (e.g., model_type for researcher variants).
-            
+
         Returns:
             Model response or None if invocation failed.
         """
@@ -391,7 +447,9 @@ class LearnerWorkflow:
         except ResponseError as e:
             add_trace_metadata("error_type", "ollama_service_error")
             add_trace_metadata("error_role", role_type.name)
-            logger.error(f"[{role_type.name.upper()}] Service error after retries exhausted: {e.status_code}")
+            logger.error(
+                f"[{role_type.name.upper()}] Service error after retries exhausted: {e.status_code}"
+            )
         except Exception as e:
             err_type = self._classify_error(e)
             add_trace_metadata("error_type", err_type)
@@ -407,9 +465,15 @@ class LearnerWorkflow:
         msg = str(exc)
         if isinstance(exc, UnicodeEncodeError) or "surrogates not allowed" in msg:
             return "unicode_encode_error"
-        if name in ("OutputParserException", "ValidationError") or "validation error" in msg.lower():
+        if (
+            name in ("OutputParserException", "ValidationError")
+            or "validation error" in msg.lower()
+        ):
             return "structured_output_parse_error"
-        if name in ("TimeoutError", "ReadTimeout", "WriteTimeout", "ConnectTimeout") or "timeout" in msg.lower():
+        if (
+            name in ("TimeoutError", "ReadTimeout", "WriteTimeout", "ConnectTimeout")
+            or "timeout" in msg.lower()
+        ):
             return "timeout"
         if "connection" in msg.lower() or name in ("ConnectError", "ConnectionError"):
             return "connection_error"
@@ -418,10 +482,10 @@ class LearnerWorkflow:
     @traceable(run_type="chain", name="call_tools")
     async def call_tools(self, response: Any) -> dict[str, Any]:
         """Executes tool calls from agent response in parallel.
-        
+
         Args:
             response: Agent response containing tool_calls.
-            
+
         Returns:
             Dictionary mapping tool names to their results.
         """
@@ -433,14 +497,14 @@ class LearnerWorkflow:
                 result = await self.tools[tool_name].ainvoke(tool_call["args"])
                 return tool_name, result
             except Exception as e:
-                logger.error(f"{tool_name} failed. Error: {str(e)}")
+                logger.error(f"{tool_name} failed. Error: {e!s}")
                 return tool_name, None
 
         results = await asyncio.gather(*[_invoke_one(tc) for tc in response.tool_calls])
         return {name: result for name, result in results if result is not None}
 
     @staticmethod
-    def _deterministic_route(state: State) -> Optional[str]:
+    def _deterministic_route(state: State) -> str | None:
         """Deterministic routing decisions.
 
         Returns the next step name if the context + last message uniquely determine it, otherwise None.
@@ -454,7 +518,11 @@ class LearnerWorkflow:
             return ModelRoleType.analyst.name
         if state.retriever_empty:
             return ModelRoleType.researcher.name
-        if "Visual artifact generated" in ctx or "Visualization failed" in ctx or VISUALIZATION_EMPTY_CONTEXT in ctx:
+        if (
+            "Visual artifact generated" in ctx
+            or "Visualization failed" in ctx
+            or VISUALIZATION_EMPTY_CONTEXT in ctx
+        ):
             return "__end__"
 
         # Priority 1: if an agent (analyst/mentor) has already produced a response this turn,
@@ -462,7 +530,11 @@ class LearnerWorkflow:
         # to their response; presence of that tag means the turn is complete.
         if state.messages:
             last = state.messages[-1]
-            agent_tag = last.additional_kwargs.get("agent", "") if hasattr(last, "additional_kwargs") else ""
+            agent_tag = (
+                last.additional_kwargs.get("agent", "")
+                if hasattr(last, "additional_kwargs")
+                else ""
+            )
             if agent_tag in ("[ANALYST]", "[MENTOR]"):
                 return "__end__"
 
@@ -501,10 +573,19 @@ class LearnerWorkflow:
         ctx = state.context or ""
         add_trace_metadata("context", ctx)
 
-        last_is_human = bool(state.messages) and getattr(state.messages[-1], "type", None) == "human"
+        last_is_human = (
+            bool(state.messages)
+            and getattr(state.messages[-1], "type", None) == "human"
+        )
         fresh_turn_reset = {}
-        if last_is_human and not ctx and (state.retriever_empty or state.sources_exhausted):
-            logger.info("[ORCHESTRATOR] New user turn detected; clearing retriever_empty/sources_exhausted.")
+        if (
+            last_is_human
+            and not ctx
+            and (state.retriever_empty or state.sources_exhausted)
+        ):
+            logger.info(
+                "[ORCHESTRATOR] New user turn detected; clearing retriever_empty/sources_exhausted."
+            )
             fresh_turn_reset = {"retriever_empty": False, "sources_exhausted": False}
             state = state.model_copy(update=fresh_turn_reset)
 
@@ -514,7 +595,9 @@ class LearnerWorkflow:
             return {"next_step": deterministic, **fresh_turn_reset}
 
         messages_to_pass = self.create_messages_to_pass(
-            ModelRoleType.orchestrator, state, ("conversation_history", "context", "visual_artifact")
+            ModelRoleType.orchestrator,
+            state,
+            ("conversation_history", "context", "visual_artifact"),
         )
         response = await self.call_model(messages_to_pass, ModelRoleType.orchestrator)
 
@@ -523,28 +606,32 @@ class LearnerWorkflow:
 
             # Safety: don't route to visualizer without graph data (first attempt only).
             if next_step == "visualizer" and "get_subgraphs_to_visualize" not in ctx:
-                logger.warning("[ORCHESTRATOR] No graph data for visualizer. Routing to retriever.")
+                logger.warning(
+                    "[ORCHESTRATOR] No graph data for visualizer. Routing to retriever."
+                )
                 next_step = ModelRoleType.retriever.name
 
             logger.info(f"[ORCHESTRATOR] Routing to: {next_step}")
             logger.info(f"[ORCHESTRATOR] Reasoning: {response.reasoning}")
             return {"next_step": next_step, **fresh_turn_reset}
 
-        logger.warning("[ORCHESTRATOR] LLM failed on ambiguous input; defaulting to retriever.")
+        logger.warning(
+            "[ORCHESTRATOR] LLM failed on ambiguous input; defaulting to retriever."
+        )
         return {"next_step": ModelRoleType.retriever.name, **fresh_turn_reset}
 
     async def retriever_node(self, state: State) -> dict[str, str]:
         """Retriever agent: fetches information from knowledge base or prepares visualization data.
-        
+
         Analyzes user request to determine intent:
         - Information search: calls search_knowledge_base tool to retrieve relevant facts
         - Visualization: calls get_subgraphs_to_visualize to gather graph structure data
-        
+
         The retrieved data is stored in context for downstream agents (Analyst, Visualizer).
-        
+
         Args:
             state: Current workflow state.
-            
+
         Returns:
             Dictionary with updated context containing tool results.
         """
@@ -559,9 +646,14 @@ class LearnerWorkflow:
             tool_results = await self.call_tools(response)
             all_empty = self._kb_results_empty(tool_results)
             if all_empty:
-                logger.warning(f"[{model_name}] All KB results below relevance threshold; marking retriever_empty.")
+                logger.warning(
+                    f"[{model_name}] All KB results below relevance threshold; marking retriever_empty."
+                )
                 return {"context": "", "retriever_empty": True}
-            return {"context": json.dumps(tool_results, ensure_ascii=False), "retriever_empty": False}
+            return {
+                "context": json.dumps(tool_results, ensure_ascii=False),
+                "retriever_empty": False,
+            }
 
         logger.warning(f"[{model_name}] Nothing retrieved; marking retriever_empty.")
         return {"context": "", "retriever_empty": True}
@@ -571,7 +663,7 @@ class LearnerWorkflow:
     _KB_MIN_USEFUL_SCORE = 0.30
 
     @classmethod
-    def _kb_results_empty(cls, tool_results: Optional[dict[str, Any]]) -> bool:
+    def _kb_results_empty(cls, tool_results: dict[str, Any] | None) -> bool:
         """Return True if every search_knowledge_base result lacks usable content.
 
         Three tolerant checks, any one of which declares a result "non-empty":
@@ -611,20 +703,20 @@ class LearnerWorkflow:
 
     async def researcher_node(self, state: State) -> dict[str, str]:
         """Researcher agent: conducts web research for information not in knowledge base.
-        
+
         Two-phase process:
             1. researcher_with_tools: analyzes request and calls deep_web_research tool
             2. researcher_structured: synthesizes search results into structured ResearchResult
-        
+
         Outputs structured findings with:
             - key_findings: synthesized summary of relevant information
             - sources: list of web sources with titles, URLs, and types
             - confidence_level: assessment of source quality (high/medium/low)
             - status: success, partial_match, or no_relevant_info
-        
+
         Args:
             state: Current workflow state.
-            
+
         Returns:
             Dictionary with updated context containing formatted research findings.
         """
@@ -634,7 +726,9 @@ class LearnerWorkflow:
             ModelRoleType.researcher, state, ("input_text", "context")
         )
 
-        response = await self.call_model(messages_to_pass, ModelRoleType.researcher, model_type="_with_tools")
+        response = await self.call_model(
+            messages_to_pass, ModelRoleType.researcher, model_type="_with_tools"
+        )
         logger.debug(f"[{model_name}] Initial response received")
 
         # Execute tools and synthesize results
@@ -643,16 +737,21 @@ class LearnerWorkflow:
 
             if tool_call_results:
                 # Format tool results for structured output model
-                tool_results_text = "\n\n".join([
-                    f"Tool: {tool_name}\n{result}"
-                    for tool_name, result in tool_call_results.items()
-                ])
+                tool_results_text = "\n\n".join(
+                    [
+                        f"Tool: {tool_name}\n{result}"
+                        for tool_name, result in tool_call_results.items()
+                    ]
+                )
 
                 # Create clean message history for researcher_structured
                 clean_messages = [
                     *messages_to_pass,
                     ("assistant", response.text),
-                    ("human", f"Here are the search results:\n\n{tool_results_text}\n\n.")
+                    (
+                        "human",
+                        f"Here are the search results:\n\n{tool_results_text}\n\n.",
+                    ),
                 ]
 
                 # Get structured research output
@@ -668,13 +767,19 @@ class LearnerWorkflow:
 
                     # Format research findings with sources for analyst. Strip any prior
                     # `retriever_empty`-era context so we don't concatenate stale markers.
-                    base_ctx = state.context if "[RESEARCH_COMPLETE]" not in (state.context or "") else ""
+                    base_ctx = (
+                        state.context
+                        if "[RESEARCH_COMPLETE]" not in (state.context or "")
+                        else ""
+                    )
                     formatted_context = f"{base_ctx}\n\n## Web Research Findings\n\n{research_result.key_findings}".lstrip()
                     if research_result.sources:
                         formatted_context += "\n\n### Sources:\n"
                         for source in research_result.sources:
-                            formatted_context += f"- [{source.get('title', 'Unknown')}]({source.get('url', '')}) " \
-                                                 f"({source.get('type', 'web')})\n"
+                            formatted_context += (
+                                f"- [{source.get('title', 'Unknown')}]({source.get('url', '')}) "
+                                f"({source.get('type', 'web')})\n"
+                            )
 
                     return {
                         "context": formatted_context + "\n[RESEARCH_COMPLETE]",
@@ -687,30 +792,34 @@ class LearnerWorkflow:
                 f"[{model_name}] No search result generated and retriever was empty. Marking sources_exhausted."
             )
             return {"context": "", "sources_exhausted": True}
-        logger.warning(f"[{model_name}] No search result generated, returning original context")
+        logger.warning(
+            f"[{model_name}] No search result generated, returning original context"
+        )
         return {"context": state.context}
 
     async def analyst_node(self, state: State) -> dict[str, list]:
         """Analyst agent: synthesizes retrieved data into professional technical responses.
-        
+
         Acts as the "Internal Scribe" that combines:
             - Knowledge base facts (from Retriever)
             - Web research findings (from Researcher)
-        
+
         Into a cohesive, well-formatted response with:
             - Technical precision (LaTeX for formulas, proper ML nomenclature)
             - Structural clarity (Markdown headers, tables, bolding)
             - Source attribution (KB vs. web sources)
-        
+
         Args:
             state: Current workflow state.
-            
+
         Returns:
             Dictionary with analyst's response message.
         """
         model_name = ModelRoleType.analyst.name.upper()
         add_trace_metadata("context", state.context or "")
-        messages_to_pass = self.create_messages_to_pass(ModelRoleType.analyst, state, ("input_text", "context"))
+        messages_to_pass = self.create_messages_to_pass(
+            ModelRoleType.analyst, state, ("input_text", "context")
+        )
         response = await self.call_model(messages_to_pass, ModelRoleType.analyst)
 
         if response:
@@ -718,7 +827,11 @@ class LearnerWorkflow:
             if isinstance(content, str):
                 stripped = content.strip()
                 if stripped.startswith("```"):
-                    stripped = stripped[stripped.index("\n") + 1:] if "\n" in stripped else stripped[3:]
+                    stripped = (
+                        stripped[stripped.index("\n") + 1 :]
+                        if "\n" in stripped
+                        else stripped[3:]
+                    )
                 if stripped.endswith("```"):
                     stripped = stripped[: stripped.rfind("```")]
                 stripped = stripped.strip()
@@ -728,12 +841,13 @@ class LearnerWorkflow:
                     return {"messages": [response], "context": ""}
 
         logger.warning(
-            f"[{model_name}] No meaningful response generated, returning empty messages for fallback handling")
+            f"[{model_name}] No meaningful response generated, returning empty messages for fallback handling"
+        )
         return {"messages": []}
 
     async def mentor_node(self, state: State) -> dict[str, list]:
         """Mentor agent: conducts Socratic interview practice and technical questioning.
-        
+
         Acts as a Senior Technical Interviewer that:
             - Uses retrieved context as "Ground Truth" to fact-check user answers
             - Applies Socratic method: asks follow-up questions to expose logic gaps
@@ -741,7 +855,7 @@ class LearnerWorkflow:
 
         Args:
             state: Current workflow state.
-            
+
         Returns:
             Dictionary with mentor's response message.
         """
@@ -755,18 +869,20 @@ class LearnerWorkflow:
             response.additional_kwargs["agent"] = f"[{model_name}]"
             return {"messages": [response]}
 
-        logger.warning(f"[{model_name}] No response generated, returning empty messages for fallback handling")
+        logger.warning(
+            f"[{model_name}] No response generated, returning empty messages for fallback handling"
+        )
         return {"messages": []}
 
     async def visualizer_node(self, state: State) -> dict[str, list]:
         """Visualizer agent: creates interactive graph visualizations from retrieved data.
-        
+
         Processes graph structure data from get_subgraphs_to_visualize tool and generates an interactive
         Plotly visualization. Appends the new plot to the existing visual_artifacts list.
-        
+
         Args:
             state: Current workflow state containing graph data in context.
-            
+
         Returns:
             Dictionary with updated visual_artifacts list.
         """
@@ -774,7 +890,9 @@ class LearnerWorkflow:
         try:
             tool_results = state.context
             if tool_results:
-                visualizer_tool_results = json.loads(tool_results).get("get_subgraphs_to_visualize")
+                visualizer_tool_results = json.loads(tool_results).get(
+                    "get_subgraphs_to_visualize"
+                )
                 if visualizer_tool_results:
                     nodes, relation_triplets, queries = visualizer_tool_results
                     if not nodes and not relation_triplets:
@@ -784,9 +902,15 @@ class LearnerWorkflow:
                             "context": VISUALIZATION_EMPTY_CONTEXT,
                         }
                     title = " & ".join(queries)
-                    title = (title[:TITLE_MAX_LENGTH] + "…") if len(title) > TITLE_MAX_LENGTH else title
-                    plotly_figure = self.knowledge_graph_indexer.get_graph_visualization(
-                        nodes, relation_triplets, title=title.title()
+                    title = (
+                        (title[:TITLE_MAX_LENGTH] + "…")
+                        if len(title) > TITLE_MAX_LENGTH
+                        else title
+                    )
+                    plotly_figure = (
+                        self.knowledge_graph_indexer.get_graph_visualization(
+                            nodes, relation_triplets, title=title.title()
+                        )
                     )
                     return {
                         "visual_artifacts": [plotly_figure.to_dict()],
@@ -794,9 +918,12 @@ class LearnerWorkflow:
                     }
             logger.error("[VISUALIZER] No graph data found in context")
         except Exception as e:
-            logger.error(f"[VISUALIZER] Failed to create visualization: {str(e)}")
+            logger.error(f"[VISUALIZER] Failed to create visualization: {e!s}")
 
-        return {"visual_artifacts": state.visual_artifacts, "context": "Visualization failed"}
+        return {
+            "visual_artifacts": state.visual_artifacts,
+            "context": "Visualization failed",
+        }
 
     def run(self) -> Any:
         """Compiles and returns the executable workflow graph.
@@ -806,13 +933,13 @@ class LearnerWorkflow:
         """
         return self.workflow.compile(checkpointer=self.get_checkpointer())
 
-    def show_graph(self, jupyter_notebook: bool = False) -> Optional[Any]:
+    def show_graph(self, jupyter_notebook: bool = False) -> None:
         """Visualizes the workflow graph structure.
-        
+
         Args:
             jupyter_notebook: If True, returns IPython display object for notebooks. If False, opens graph image in
                               system viewer.
-            
+
         Returns:
             IPython display object if jupyter_notebook=True, None otherwise.
         """
@@ -820,9 +947,12 @@ class LearnerWorkflow:
         png_graph = graph.get_graph().draw_mermaid_png()
         if jupyter_notebook:
             try:
-                from IPython.display import Image as IPyImage, display
+                from IPython.display import Image as IPyImage
+                from IPython.display import display
             except ModuleNotFoundError as e:
-                raise ModuleNotFoundError("IPython is required for jupyter_notebook=True.") from e
+                raise ModuleNotFoundError(
+                    "IPython is required for jupyter_notebook=True."
+                ) from e
 
             return display(IPyImage(png_graph))
 
@@ -835,7 +965,7 @@ class LearnerWorkflow:
         img.show()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # ...
     """
     from backend.configs.storage import StorageSettings

@@ -19,8 +19,8 @@ from backend.data_processing.concept_registry import (
     apply_concept_adjudications,
     build_concept_resolution,
     build_concept_resolution_from_mentions,
-    canonicalize_display_name,
     canonicalize_concept_type,
+    canonicalize_display_name,
     concept_adjudication_prompt_char_count,
     concept_adjudication_prompt_payload,
     mention_id_for,
@@ -36,9 +36,9 @@ from backend.data_processing.llm_postprocess import (
     DEFAULT_GRAPH_NUM_PREDICT,
     DEFAULT_LLM_NUM_CTX,
     DEFAULT_LLM_NUM_PREDICT,
-    DEFAULT_SMOKE_LIMIT,
     DEFAULT_PROMPT_VERSION,
     DEFAULT_QUALITY_NUM_PREDICT,
+    DEFAULT_SMOKE_LIMIT,
     FAILURES_FILENAME,
     GRAPH_PREVIEW_FILENAME,
     RELATION_REGISTRY_FILENAME,
@@ -63,8 +63,8 @@ from backend.data_processing.llm_postprocess_runner import (
     generation_settings_for_pass,
     is_empty_llm_response,
     is_usage_limit_error,
-    load_prompt_for_pass,
     load_excluded_chunk_ids,
+    load_prompt_for_pass,
     postprocess_pass_spec,
     resolve_run_limit,
     resolved_prompt_name_for_pass,
@@ -72,13 +72,14 @@ from backend.data_processing.llm_postprocess_runner import (
     select_run_inputs,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 from run_optimized_postprocess_pipeline import (
     parse_args as parse_optimized_pipeline_args,
+)
+from run_optimized_postprocess_pipeline import (
     validate_args as validate_optimized_pipeline_args,
 )
 
@@ -102,7 +103,9 @@ def make_input(text: str, *, chunk_id: str = "chunk_1") -> ChunkPostprocessInput
     )
 
 
-def valid_backprop_response(chunk_id: str = "chunk_1", predicate: str = "PRODUCES") -> str:
+def valid_backprop_response(
+    chunk_id: str = "chunk_1", predicate: str = "PRODUCES"
+) -> str:
     return json.dumps(
         {
             "decisions": [
@@ -144,7 +147,9 @@ def valid_backprop_response(chunk_id: str = "chunk_1", predicate: str = "PRODUCE
                             "target_concept_id": "c2",
                             "raw_predicate": predicate,
                             "canonical_predicate": predicate,
-                            "predicate_status": "proposed" if predicate != "USES" else "existing",
+                            "predicate_status": "proposed"
+                            if predicate != "USES"
+                            else "existing",
                             "predicate_family": "computation",
                             "predicate_definition": "The source creates or yields the target.",
                             "relation_phrase": "produces gradients for each layer",
@@ -241,8 +246,12 @@ class LLMPostprocessTests(unittest.TestCase):
 
         self.assertEqual(DEFAULT_LLM_NUM_CTX, args.num_ctx)
         self.assertEqual(DEFAULT_LLM_NUM_PREDICT, args.num_predict)
-        self.assertEqual(DEFAULT_QUALITY_NUM_PREDICT, effective_num_predict(args, "quality"))
-        self.assertEqual(DEFAULT_GRAPH_NUM_PREDICT, effective_num_predict(args, "graph"))
+        self.assertEqual(
+            DEFAULT_QUALITY_NUM_PREDICT, effective_num_predict(args, "quality")
+        )
+        self.assertEqual(
+            DEFAULT_GRAPH_NUM_PREDICT, effective_num_predict(args, "graph")
+        )
         self.assertEqual(
             DEFAULT_CONCEPT_RESOLUTION_NUM_PREDICT,
             effective_num_predict(args, "concept_resolution"),
@@ -269,10 +278,14 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual(1536, effective_num_predict(args, "quality"))
         self.assertEqual(3072, effective_num_predict(args, "graph"))
         self.assertEqual(1024, effective_num_predict(args, "concept_resolution"))
-        self.assertEqual(3072, generation_settings_for_pass(args, "graph")["num_predict"])
+        self.assertEqual(
+            3072, generation_settings_for_pass(args, "graph")["num_predict"]
+        )
 
     def test_generation_settings_are_included_in_batch_cache_key(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
 
         key_2048 = cache_key_for_batch(
@@ -293,7 +306,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertNotEqual(key_2048, key_3072)
 
     def test_usage_limit_and_empty_response_helpers(self) -> None:
-        self.assertTrue(is_usage_limit_error("ResponseError: weekly usage limit (status code: 429)"))
+        self.assertTrue(
+            is_usage_limit_error("ResponseError: weekly usage limit (status code: 429)")
+        )
         self.assertTrue(is_usage_limit_error("Rate limit exceeded"))
         self.assertFalse(is_usage_limit_error("JSONDecodeError: Expecting value"))
         self.assertTrue(is_empty_llm_response(""))
@@ -323,8 +338,13 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_optimized_pipeline_uses_default_split_prompts(self) -> None:
         args = self._optimized_pass_args()
 
-        self.assertEqual("remnote_postprocess_quality", resolved_prompt_name_for_pass(args, "quality"))
-        self.assertEqual("remnote_postprocess_graph", resolved_prompt_name_for_pass(args, "graph"))
+        self.assertEqual(
+            "remnote_postprocess_quality",
+            resolved_prompt_name_for_pass(args, "quality"),
+        )
+        self.assertEqual(
+            "remnote_postprocess_graph", resolved_prompt_name_for_pass(args, "graph")
+        )
 
         quality_prompt, quality_name = load_prompt_for_pass(args, "quality")
         graph_prompt, graph_name = load_prompt_for_pass(args, "graph")
@@ -355,12 +375,22 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertTrue(graph.prompt_hash_includes_pass)
 
     def test_optimized_pass_skips_repair_for_empty_response(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch("backend.data_processing.llm_postprocess_runner.build_ollama_llm", return_value=object()),
-                patch("backend.data_processing.llm_postprocess_runner.invoke_llm_batch", return_value=("", {})),
-                patch("backend.data_processing.llm_postprocess_runner.invoke_llm_repair") as repair_mock,
+                patch(
+                    "backend.data_processing.llm_postprocess_runner.build_ollama_llm",
+                    return_value=object(),
+                ),
+                patch(
+                    "backend.data_processing.llm_postprocess_runner.invoke_llm_batch",
+                    return_value=("", {}),
+                ),
+                patch(
+                    "backend.data_processing.llm_postprocess_runner.invoke_llm_repair"
+                ) as repair_mock,
             ):
                 decisions, failures, hits, misses, aborted = run_postprocess_pass(
                     self._optimized_pass_args(),
@@ -378,10 +408,15 @@ class LLMPostprocessTests(unittest.TestCase):
         repair_mock.assert_not_called()
 
     def test_optimized_pass_aborts_on_usage_limit_error(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         with tempfile.TemporaryDirectory() as tmp:
             with (
-                patch("backend.data_processing.llm_postprocess_runner.build_ollama_llm", return_value=object()),
+                patch(
+                    "backend.data_processing.llm_postprocess_runner.build_ollama_llm",
+                    return_value=object(),
+                ),
                 patch(
                     "backend.data_processing.llm_postprocess_runner.invoke_llm_batch",
                     side_effect=RuntimeError("weekly usage limit (status code: 429)"),
@@ -400,7 +435,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual(1, misses)
         self.assertTrue(aborted)
 
-    def test_preflag_detection_finds_html_caption_boilerplate_and_source_cards(self) -> None:
+    def test_preflag_detection_finds_html_caption_boilerplate_and_source_cards(
+        self,
+    ) -> None:
         flags = detect_preflags(
             {
                 "text": '<img src="chart.png"> Figure 1: model accuracy.',
@@ -429,7 +466,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual([], result.preserved_alt_texts)
 
     def test_sanitize_markup_preserves_meaningful_alt_text(self) -> None:
-        result = sanitize_markup_for_embedding('Before <img src="x.jpg" alt="Architecture diagram"> after')
+        result = sanitize_markup_for_embedding(
+            'Before <img src="x.jpg" alt="Architecture diagram"> after'
+        )
 
         self.assertEqual("Before Architecture diagram after", result.text)
         self.assertEqual(["Architecture diagram"], result.preserved_alt_texts)
@@ -445,14 +484,22 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("|", result.text)
 
     def test_sanitize_markup_handles_malformed_tags_and_preserves_math(self) -> None:
-        malformed = sanitize_markup_for_embedding('<div style="text-align: center;" Figure 1. Caption')
-        math_text = sanitize_markup_for_embedding("A threshold x < 0.5 > y should remain readable.")
+        malformed = sanitize_markup_for_embedding(
+            '<div style="text-align: center;" Figure 1. Caption'
+        )
+        math_text = sanitize_markup_for_embedding(
+            "A threshold x < 0.5 > y should remain readable."
+        )
 
         self.assertEqual("Figure 1. Caption", malformed.text)
-        self.assertEqual("A threshold x < 0.5 > y should remain readable.", math_text.text)
+        self.assertEqual(
+            "A threshold x < 0.5 > y should remain readable.", math_text.text
+        )
 
     def test_valid_response_produces_decision_projection_and_registry(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         parsed = parse_llm_response(valid_backprop_response())
 
@@ -470,17 +517,27 @@ class LLMPostprocessTests(unittest.TestCase):
         registry = build_relation_registry(decisions)
         self.assertEqual(2, len(projection.nodes))
         self.assertEqual(1, len(projection.edges))
-        self.assertEqual(["produces gradients for each layer"], projection.edges[0]["relation_phrases"])
+        self.assertEqual(
+            ["produces gradients for each layer"],
+            projection.edges[0]["relation_phrases"],
+        )
         self.assertEqual(0.82, projection.edges[0]["max_generality_score"])
         self.assertEqual(0.88, projection.edges[0]["max_retrieval_usefulness"])
         self.assertEqual(0.76, projection.edges[0]["max_visualization_usefulness"])
         self.assertEqual("PRODUCES", registry[0]["canonical_predicate"])
-        self.assertEqual(["produces gradients for each layer"], registry[0]["relation_phrases"])
+        self.assertEqual(
+            ["produces gradients for each layer"], registry[0]["relation_phrases"]
+        )
 
     def test_old_relation_payload_defaults_enrichment_fields(self) -> None:
         payload = json.loads(valid_backprop_response())
         relation = payload["decisions"][0]["relations"][0]
-        for key in ("relation_phrase", "generality_score", "retrieval_usefulness", "visualization_usefulness"):
+        for key in (
+            "relation_phrase",
+            "generality_score",
+            "retrieval_usefulness",
+            "visualization_usefulness",
+        ):
             relation.pop(key, None)
 
         parsed = parse_llm_response(json.dumps(payload))
@@ -511,8 +568,12 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_concept_resolution_auto_merges_singular_plural_names(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Data Store", mention_id="m1", concept_type="COMPONENT"),
-                make_concept_mention("Data Stores", mention_id="m2", concept_type="COMPONENT"),
+                make_concept_mention(
+                    "Data Store", mention_id="m1", concept_type="COMPONENT"
+                ),
+                make_concept_mention(
+                    "Data Stores", mention_id="m2", concept_type="COMPONENT"
+                ),
             ]
         )
 
@@ -523,7 +584,9 @@ class LLMPostprocessTests(unittest.TestCase):
 
     def test_canonical_display_name_preserves_invariant_ml_terms(self) -> None:
         self.assertEqual("Naive Bayes", canonicalize_display_name("Naive Bayes"))
-        self.assertEqual("Gaussian Naive Bayes", canonicalize_display_name("Gaussian Naive Bayes"))
+        self.assertEqual(
+            "Gaussian Naive Bayes", canonicalize_display_name("Gaussian Naive Bayes")
+        )
         self.assertEqual("Softplus", canonicalize_display_name("Softplus"))
         self.assertEqual("Bag of Words", canonicalize_display_name("Bag of Words"))
         self.assertEqual("Data Store", canonicalize_display_name("Data Stores"))
@@ -531,8 +594,12 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_concept_resolution_marks_derivational_variant_uncertain(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Function Call", mention_id="m1", concept_type="METHOD"),
-                make_concept_mention("Function Calling", mention_id="m2", concept_type="METHOD"),
+                make_concept_mention(
+                    "Function Call", mention_id="m1", concept_type="METHOD"
+                ),
+                make_concept_mention(
+                    "Function Calling", mention_id="m2", concept_type="METHOD"
+                ),
             ]
         )
 
@@ -540,11 +607,17 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual(1, len(resolution.review_clusters))
         self.assertIn("derivational_variant", resolution.review_clusters[0].risk_flags)
 
-    def test_concept_resolution_does_not_review_parent_child_modifier_containment(self) -> None:
+    def test_concept_resolution_does_not_review_parent_child_modifier_containment(
+        self,
+    ) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Convolution", mention_id="m1", concept_type="METHOD"),
-                make_concept_mention("Convolution Filter", mention_id="m2", concept_type="METHOD"),
+                make_concept_mention(
+                    "Convolution", mention_id="m1", concept_type="METHOD"
+                ),
+                make_concept_mention(
+                    "Convolution Filter", mention_id="m2", concept_type="METHOD"
+                ),
             ]
         )
 
@@ -554,7 +627,9 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_concept_resolution_does_not_merge_related_specific_model(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Word Embeddings", mention_id="m1", concept_type="CONCEPT"),
+                make_concept_mention(
+                    "Word Embeddings", mention_id="m1", concept_type="CONCEPT"
+                ),
                 make_concept_mention("Word2Vec", mention_id="m2", concept_type="MODEL"),
             ]
         )
@@ -577,17 +652,28 @@ class LLMPostprocessTests(unittest.TestCase):
 
         for raw_type, name, expected in cases:
             with self.subTest(raw_type=raw_type, name=name):
-                self.assertEqual(expected, canonicalize_concept_type(raw_type, name, []))
+                self.assertEqual(
+                    expected, canonicalize_concept_type(raw_type, name, [])
+                )
 
         resolution = build_concept_resolution_from_mentions(
-            [make_concept_mention("Floyd's algorithm", mention_id="m1", concept_type="ALGORITHM")]
+            [
+                make_concept_mention(
+                    "Floyd's algorithm", mention_id="m1", concept_type="ALGORITHM"
+                )
+            ]
         )
 
         self.assertEqual("METHOD", resolution.registry_entries[0].type)
         self.assertEqual(["ALGORITHM"], resolution.registry_entries[0].source_types)
-        self.assertTrue({entry.type for entry in resolution.registry_entries} <= set(CANONICAL_CONCEPT_TYPES))
+        self.assertTrue(
+            {entry.type for entry in resolution.registry_entries}
+            <= set(CANONICAL_CONCEPT_TYPES)
+        )
 
-    def test_concept_resolution_filters_sentence_and_formula_aliases_from_registry(self) -> None:
+    def test_concept_resolution_filters_sentence_and_formula_aliases_from_registry(
+        self,
+    ) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
                 make_concept_mention(
@@ -604,8 +690,14 @@ class LLMPostprocessTests(unittest.TestCase):
         )
 
         entry = resolution.registry_entries[0]
-        self.assertIn("Naive Bayes calculates the prior probability for each class.", entry.source_names)
-        self.assertNotIn("Naive Bayes calculates the prior probability for each class.", entry.aliases)
+        self.assertIn(
+            "Naive Bayes calculates the prior probability for each class.",
+            entry.source_names,
+        )
+        self.assertNotIn(
+            "Naive Bayes calculates the prior probability for each class.",
+            entry.aliases,
+        )
         self.assertNotIn("$P(C)$", entry.aliases)
         self.assertNotIn("Prior probability P(C)", entry.aliases)
 
@@ -616,41 +708,76 @@ class LLMPostprocessTests(unittest.TestCase):
                     "Advantage Calculation",
                     mention_id="m1",
                     concept_type="FORMULA",
-                    evidence_spans=['calculates the "Advantage"', "Logistic regression"],
+                    evidence_spans=[
+                        'calculates the "Advantage"',
+                        "Logistic regression",
+                    ],
                 ),
-                make_concept_mention("Logistic regression", mention_id="m2", concept_type="METHOD"),
+                make_concept_mention(
+                    "Logistic regression", mention_id="m2", concept_type="METHOD"
+                ),
             ]
         )
 
         self.assertEqual(2, len(resolution.registry_entries))
-        advantage_entry = next(entry for entry in resolution.registry_entries if entry.canonical_name == "Advantage Calculation")
+        advantage_entry = next(
+            entry
+            for entry in resolution.registry_entries
+            if entry.canonical_name == "Advantage Calculation"
+        )
         self.assertIn("Logistic regression", advantage_entry.evidence_spans)
         self.assertNotIn("Logistic regression", advantage_entry.source_names)
         self.assertNotIn("Logistic regression", advantage_entry.aliases)
 
-    def test_concept_resolution_does_not_block_on_two_letter_acronym_only_matches(self) -> None:
+    def test_concept_resolution_does_not_block_on_two_letter_acronym_only_matches(
+        self,
+    ) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Learning Rate", mention_id="m1", concept_type="CONCEPT", aliases=["LR"]),
-                make_concept_mention("Logistic Regression", mention_id="m2", concept_type="CONCEPT", aliases=["LR"]),
+                make_concept_mention(
+                    "Learning Rate",
+                    mention_id="m1",
+                    concept_type="CONCEPT",
+                    aliases=["LR"],
+                ),
+                make_concept_mention(
+                    "Logistic Regression",
+                    mention_id="m2",
+                    concept_type="CONCEPT",
+                    aliases=["LR"],
+                ),
             ]
         )
 
         self.assertEqual(2, len(resolution.registry_entries))
         self.assertEqual([], resolution.review_clusters)
 
-    def test_concept_resolution_does_not_merge_formula_like_short_alias_chain(self) -> None:
+    def test_concept_resolution_does_not_merge_formula_like_short_alias_chain(
+        self,
+    ) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Latent Diffusion Model", mention_id="m1", concept_type="MODEL", aliases=["LDM"]),
+                make_concept_mention(
+                    "Latent Diffusion Model",
+                    mention_id="m1",
+                    concept_type="MODEL",
+                    aliases=["LDM"],
+                ),
                 make_concept_mention(
                     "Discriminator loss",
                     mention_id="m2",
                     concept_type="FORMULA",
                     aliases=["L_D", "\\mathcal{L}_{D}^{\\mathrm{vanilla}}"],
                 ),
-                make_concept_mention("Learning Rate", mention_id="m3", concept_type="PARAMETER", aliases=["LR"]),
-                make_concept_mention("Logistic regression", mention_id="m4", concept_type="METHOD"),
+                make_concept_mention(
+                    "Learning Rate",
+                    mention_id="m3",
+                    concept_type="PARAMETER",
+                    aliases=["LR"],
+                ),
+                make_concept_mention(
+                    "Logistic regression", mention_id="m4", concept_type="METHOD"
+                ),
             ]
         )
 
@@ -659,7 +786,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("Latent Diffusion Model", names)
         self.assertIn("Logistic regression", names)
 
-    def test_concept_resolution_keeps_prior_probability_apart_from_dpo_family_acronyms(self) -> None:
+    def test_concept_resolution_keeps_prior_probability_apart_from_dpo_family_acronyms(
+        self,
+    ) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
                 make_concept_mention(
@@ -674,9 +803,24 @@ class LLMPostprocessTests(unittest.TestCase):
                     concept_type="CONCEPT",
                     aliases=["P(C)", "Prior probability P(C)"],
                 ),
-                make_concept_mention("Primary Key", mention_id="m3", concept_type="CONCEPT", aliases=["PK"]),
-                make_concept_mention("Principal Component", mention_id="m4", concept_type="CONCEPT", aliases=["PC"]),
-                make_concept_mention("Top-P", mention_id="m5", concept_type="PARAMETER", aliases=["top-P"]),
+                make_concept_mention(
+                    "Primary Key",
+                    mention_id="m3",
+                    concept_type="CONCEPT",
+                    aliases=["PK"],
+                ),
+                make_concept_mention(
+                    "Principal Component",
+                    mention_id="m4",
+                    concept_type="CONCEPT",
+                    aliases=["PC"],
+                ),
+                make_concept_mention(
+                    "Top-P",
+                    mention_id="m5",
+                    concept_type="PARAMETER",
+                    aliases=["top-P"],
+                ),
             ]
         )
 
@@ -686,7 +830,9 @@ class LLMPostprocessTests(unittest.TestCase):
             {entry.canonical_name for entry in resolution.registry_entries},
         )
 
-    def test_concept_resolution_keeps_symbolic_mixing_weight_apart_from_key_and_dpo(self) -> None:
+    def test_concept_resolution_keeps_symbolic_mixing_weight_apart_from_key_and_dpo(
+        self,
+    ) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
                 make_concept_mention(
@@ -695,14 +841,21 @@ class LLMPostprocessTests(unittest.TestCase):
                     concept_type="PARAMETER",
                     aliases=["$\\pi_k$", "π_k"],
                 ),
-                make_concept_mention("Primary Key", mention_id="m2", concept_type="CONCEPT", aliases=["PK"]),
+                make_concept_mention(
+                    "Primary Key",
+                    mention_id="m2",
+                    concept_type="CONCEPT",
+                    aliases=["PK"],
+                ),
                 make_concept_mention("DPO", mention_id="m3", concept_type="METHOD"),
             ]
         )
 
         self.assertEqual(3, len(resolution.registry_entries))
 
-    def test_concept_resolution_splits_oversized_auto_merge_hub_for_review(self) -> None:
+    def test_concept_resolution_splits_oversized_auto_merge_hub_for_review(
+        self,
+    ) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
                 make_concept_mention(
@@ -717,10 +870,19 @@ class LLMPostprocessTests(unittest.TestCase):
 
         self.assertEqual(9, len(resolution.registry_entries))
         self.assertGreater(len(resolution.review_clusters), 1)
-        self.assertTrue(all(len(cluster.mention_ids) <= 2 for cluster in resolution.review_clusters))
-        self.assertTrue(any("auto_group_safety_guard" in cluster.risk_flags for cluster in resolution.review_clusters))
+        self.assertTrue(
+            all(len(cluster.mention_ids) <= 2 for cluster in resolution.review_clusters)
+        )
+        self.assertTrue(
+            any(
+                "auto_group_safety_guard" in cluster.risk_flags
+                for cluster in resolution.review_clusters
+            )
+        )
 
-    def test_concept_resolution_bounds_production_like_weak_chain_clusters(self) -> None:
+    def test_concept_resolution_bounds_production_like_weak_chain_clusters(
+        self,
+    ) -> None:
         mentions = []
         for index in range(60):
             mentions.append(
@@ -736,7 +898,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertTrue(resolution.review_clusters)
         for cluster in resolution.review_clusters:
             self.assertLessEqual(len(cluster.mention_ids), MAX_REVIEW_CLUSTER_MENTIONS)
-            self.assertLessEqual(len(cluster.pair_scores), MAX_REVIEW_CLUSTER_PAIR_SCORES)
+            self.assertLessEqual(
+                len(cluster.pair_scores), MAX_REVIEW_CLUSTER_PAIR_SCORES
+            )
             self.assertLessEqual(
                 concept_adjudication_prompt_char_count(cluster, resolution.mentions),
                 MAX_CONCEPT_ADJUDICATION_PROMPT_CHARS,
@@ -752,11 +916,15 @@ class LLMPostprocessTests(unittest.TestCase):
                     aliases=["Function Calling Interface"],
                     evidence_spans=["Function Call evidence " * 20],
                 ),
-                make_concept_mention("Function Calling", mention_id="m2", concept_type="METHOD"),
+                make_concept_mention(
+                    "Function Calling", mention_id="m2", concept_type="METHOD"
+                ),
             ]
         )
 
-        payload = concept_adjudication_prompt_payload(resolution.review_clusters[0], resolution.mentions)
+        payload = concept_adjudication_prompt_payload(
+            resolution.review_clusters[0], resolution.mentions
+        )
         mention_payload = payload["mentions"][0]
 
         self.assertEqual(
@@ -792,7 +960,11 @@ class LLMPostprocessTests(unittest.TestCase):
         resolution = build_concept_resolution_from_mentions(
             [
                 make_concept_mention("DPO", mention_id="m1", concept_type="METHOD"),
-                make_concept_mention("Direct Preference Optimization", mention_id="m2", concept_type="METHOD"),
+                make_concept_mention(
+                    "Direct Preference Optimization",
+                    mention_id="m2",
+                    concept_type="METHOD",
+                ),
             ]
         )
 
@@ -824,8 +996,12 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_concept_adjudication_can_merge_uncertain_cluster(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Function Call", mention_id="m1", concept_type="METHOD"),
-                make_concept_mention("Function Calling", mention_id="m2", concept_type="METHOD"),
+                make_concept_mention(
+                    "Function Call", mention_id="m1", concept_type="METHOD"
+                ),
+                make_concept_mention(
+                    "Function Calling", mention_id="m2", concept_type="METHOD"
+                ),
             ]
         )
         cluster = resolution.review_clusters[0]
@@ -848,7 +1024,9 @@ class LLMPostprocessTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual([], validate_concept_adjudication_response(adjudication, cluster))
+        self.assertEqual(
+            [], validate_concept_adjudication_response(adjudication, cluster)
+        )
         applied = apply_concept_adjudications(resolution, [adjudication])
         self.assertEqual(1, len(applied.registry_entries))
         self.assertEqual([], applied.review_clusters)
@@ -857,8 +1035,12 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_concept_adjudication_rejects_duplicate_or_missing_mentions(self) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Function Call", mention_id="m1", concept_type="METHOD"),
-                make_concept_mention("Function Calling", mention_id="m2", concept_type="METHOD"),
+                make_concept_mention(
+                    "Function Call", mention_id="m1", concept_type="METHOD"
+                ),
+                make_concept_mention(
+                    "Function Calling", mention_id="m2", concept_type="METHOD"
+                ),
             ]
         )
         cluster = resolution.review_clusters[0]
@@ -885,10 +1067,14 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertTrue(any("duplicate" in error for error in errors))
         self.assertTrue(any("missing" in error for error in errors))
 
-    def test_singleton_llm_split_preserves_deterministic_canonical_name_and_audit(self) -> None:
+    def test_singleton_llm_split_preserves_deterministic_canonical_name_and_audit(
+        self,
+    ) -> None:
         resolution = build_concept_resolution_from_mentions(
             [
-                make_concept_mention("Function Call", mention_id="m1", concept_type="METHOD"),
+                make_concept_mention(
+                    "Function Call", mention_id="m1", concept_type="METHOD"
+                ),
                 make_concept_mention(
                     "Function Calling",
                     mention_id="m2",
@@ -926,7 +1112,9 @@ class LLMPostprocessTests(unittest.TestCase):
         )
 
         applied = apply_concept_adjudications(resolution, [adjudication])
-        filter_entry = next(entry for entry in applied.registry_entries if "m2" in entry.mention_ids)
+        filter_entry = next(
+            entry for entry in applied.registry_entries if "m2" in entry.mention_ids
+        )
 
         self.assertEqual("Function Calling", filter_entry.canonical_name)
         self.assertIn("Function Calling Interface", filter_entry.aliases)
@@ -935,13 +1123,20 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual("llm_adjudicated", filter_entry.resolution_source)
         self.assertEqual([cluster.cluster_id], filter_entry.adjudication_cluster_ids)
         self.assertEqual(["split_all"], filter_entry.adjudication_actions)
-        self.assertEqual(["The operation and filter are distinct concepts."], filter_entry.adjudication_rationales)
+        self.assertEqual(
+            ["The operation and filter are distinct concepts."],
+            filter_entry.adjudication_rationales,
+        )
 
     def test_invalid_evidence_span_is_rejected(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         payload = json.loads(valid_backprop_response())
-        payload["decisions"][0]["concepts"][0]["evidence_spans"] = ["not present in the chunk"]
+        payload["decisions"][0]["concepts"][0]["evidence_spans"] = [
+            "not present in the chunk"
+        ]
 
         decisions, failures = validate_and_enrich_response(
             parse_llm_response(json.dumps(payload)),
@@ -956,10 +1151,14 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("source-grounded", failures[0].message)
 
     def test_cleaned_text_with_debug_label_is_rejected(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         payload = json.loads(valid_backprop_response())
-        payload["decisions"][0]["cleaned_embedding_text"] = "artifact_path: /tmp/raw/file.md"
+        payload["decisions"][0]["cleaned_embedding_text"] = (
+            "artifact_path: /tmp/raw/file.md"
+        )
 
         decisions, failures = validate_and_enrich_response(
             parse_llm_response(json.dumps(payload)),
@@ -974,7 +1173,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("cleaned_embedding_text", failures[0].message)
 
     def test_related_to_with_specific_relation_cue_is_rejected(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         payload = json.loads(valid_backprop_response(predicate="RELATED_TO"))
 
@@ -991,7 +1192,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("too generic", failures[0].message)
 
     def test_duplicate_decision_for_same_chunk_is_rejected(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         payload = json.loads(valid_backprop_response())
         payload["decisions"].append(payload["decisions"][0])
@@ -1009,7 +1212,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertEqual("duplicate_decision", failures[0].error_type)
 
     def test_unknown_existing_relation_label_is_downgraded_to_proposed(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         payload = json.loads(valid_backprop_response(predicate="SHOWS"))
         payload["decisions"][0]["relations"][0]["predicate_status"] = "existing"
@@ -1032,7 +1237,9 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("unknown_existing_predicate_downgraded", decisions[0].warnings)
 
     def test_is_part_of_relation_alias_is_normalized_to_part_of(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         payload = json.loads(valid_backprop_response(predicate="IS_PART_OF"))
         payload["decisions"][0]["relations"][0]["predicate_status"] = "existing"
@@ -1063,7 +1270,9 @@ class LLMPostprocessTests(unittest.TestCase):
             parse_llm_response(json.dumps(payload))
 
     def test_graph_projection_skips_post_resolution_self_loop_edges(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         decisions, failures = validate_and_enrich_response(
             parse_llm_response(valid_backprop_response()),
@@ -1113,15 +1322,22 @@ class LLMPostprocessTests(unittest.TestCase):
 
     def test_production_split_prompt_preserves_final_v9_contract(self) -> None:
         # The tracked v1 prompt files are the production rename of the final experimental v9 split prompts.
-        prompt_root = ROOT / "backend" / "llm" / "prompts" / "learner_workflow" / "orchestrator"
+        prompt_root = (
+            ROOT / "backend" / "llm" / "prompts" / "learner_workflow" / "orchestrator"
+        )
         quality_prompt = (
-            prompt_root / "remnote_postprocess_quality" / f"{DEFAULT_PROMPT_VERSION}.yaml"
+            prompt_root
+            / "remnote_postprocess_quality"
+            / f"{DEFAULT_PROMPT_VERSION}.yaml"
         ).read_text(encoding="utf-8")
         graph_prompt = (
             prompt_root / "remnote_postprocess_graph" / f"{DEFAULT_PROMPT_VERSION}.yaml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("Do not extract graph concepts or relations in the quality pass", quality_prompt)
+        self.assertIn(
+            "Do not extract graph concepts or relations in the quality pass",
+            quality_prompt,
+        )
         self.assertIn('"concepts": []', quality_prompt)
         self.assertIn('"relations": []', quality_prompt)
         self.assertIn("relation_phrase", graph_prompt)
@@ -1129,9 +1345,17 @@ class LLMPostprocessTests(unittest.TestCase):
         self.assertIn("generality_score", graph_prompt)
         self.assertIn("retrieval_usefulness", graph_prompt)
         self.assertIn("visualization_usefulness", graph_prompt)
-        self.assertIn("Normal useful chunks: 3-5 concepts and 2-3 relations", graph_prompt)
-        self.assertIn("Dense technical, list, or table-like chunks: 4-6 concepts and 2-4 relations", graph_prompt)
-        self.assertIn("Do not create standalone nodes for local variables, indexed tensors", graph_prompt)
+        self.assertIn(
+            "Normal useful chunks: 3-5 concepts and 2-3 relations", graph_prompt
+        )
+        self.assertIn(
+            "Dense technical, list, or table-like chunks: 4-6 concepts and 2-4 relations",
+            graph_prompt,
+        )
+        self.assertIn(
+            "Do not create standalone nodes for local variables, indexed tensors",
+            graph_prompt,
+        )
         self.assertNotIn("connect at least half", graph_prompt)
 
     def test_default_prompt_version_is_production_v1(self) -> None:
@@ -1214,12 +1438,18 @@ class LLMPostprocessTests(unittest.TestCase):
         )
 
         self.assertEqual([], failures)
-        self.assertEqual(["Google Flights APl"], decisions[0].concepts[1].evidence_spans)
-        self.assertEqual(["use the Google Flights APl"], decisions[0].relations[0].evidence_spans)
+        self.assertEqual(
+            ["Google Flights APl"], decisions[0].concepts[1].evidence_spans
+        )
+        self.assertEqual(
+            ["use the Google Flights APl"], decisions[0].relations[0].evidence_spans
+        )
         self.assertIn("postprocess_normalized_llm_output", decisions[0].warnings)
 
     def test_visual_reparse_issue_type_is_normalized(self) -> None:
-        chunk = make_input('<img src="diagram.png" alt="Image" />', chunk_id="chunk_visual")
+        chunk = make_input(
+            '<img src="diagram.png" alt="Image" />', chunk_id="chunk_visual"
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         payload = {
             "decisions": [
@@ -1258,7 +1488,9 @@ class LLMPostprocessTests(unittest.TestCase):
             self.assertEqual('{"decisions": []}', cache.get("abc"))
 
     def test_sidecar_outputs_with_fake_llm_response(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         decisions, failures = validate_and_enrich_response(
             parse_llm_response(fake_llm_response_for_batch(batch)),
@@ -1297,15 +1529,27 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_select_run_inputs_supports_offset(self) -> None:
         values = list(range(10))
 
-        self.assertEqual([3, 4, 5], select_run_inputs(values, limit=3, offset=3, allow_full_run=False))
-        self.assertEqual([7, 8, 9], select_run_inputs(values, limit=0, offset=7, allow_full_run=True))
+        self.assertEqual(
+            [3, 4, 5],
+            select_run_inputs(values, limit=3, offset=3, allow_full_run=False),
+        )
+        self.assertEqual(
+            [7, 8, 9], select_run_inputs(values, limit=0, offset=7, allow_full_run=True)
+        )
 
     def test_select_run_inputs_resolves_omitted_limit_from_full_run_flag(self) -> None:
         values = list(range(DEFAULT_SMOKE_LIMIT + 5))
 
-        self.assertEqual(values[:DEFAULT_SMOKE_LIMIT], select_run_inputs(values, limit=None, allow_full_run=False))
-        self.assertEqual(values, select_run_inputs(values, limit=None, allow_full_run=True))
-        self.assertEqual(DEFAULT_SMOKE_LIMIT, resolve_run_limit(None, allow_full_run=False))
+        self.assertEqual(
+            values[:DEFAULT_SMOKE_LIMIT],
+            select_run_inputs(values, limit=None, allow_full_run=False),
+        )
+        self.assertEqual(
+            values, select_run_inputs(values, limit=None, allow_full_run=True)
+        )
+        self.assertEqual(
+            DEFAULT_SMOKE_LIMIT, resolve_run_limit(None, allow_full_run=False)
+        )
         self.assertEqual(0, resolve_run_limit(None, allow_full_run=True))
 
     def test_load_excluded_chunk_ids_from_previous_output(self) -> None:
@@ -1319,7 +1563,9 @@ class LLMPostprocessTests(unittest.TestCase):
                 ],
             )
 
-            self.assertEqual({"chunk_a", "chunk_b"}, load_excluded_chunk_ids([output_dir]))
+            self.assertEqual(
+                {"chunk_a", "chunk_b"}, load_excluded_chunk_ids([output_dir])
+            )
 
     def test_cli_fake_llm_smoke_writes_sidecars(self) -> None:
         long_text = (
@@ -1371,8 +1617,12 @@ class LLMPostprocessTests(unittest.TestCase):
             self.assertTrue((output_dir / CONCEPT_REGISTRY_FILENAME).exists())
             self.assertTrue((output_dir / GRAPH_PREVIEW_FILENAME).exists())
 
-    def test_llm_postprocess_cli_concept_resolution_only_reads_existing_sidecars(self) -> None:
-        chunk = make_input("Backpropagation produces gradients for each layer during training.")
+    def test_llm_postprocess_cli_concept_resolution_only_reads_existing_sidecars(
+        self,
+    ) -> None:
+        chunk = make_input(
+            "Backpropagation produces gradients for each layer during training."
+        )
         batch = ChunkPostprocessBatch(batch_id="batch_1", chunks=[chunk])
         decisions, failures = validate_and_enrich_response(
             parse_llm_response(valid_backprop_response()),

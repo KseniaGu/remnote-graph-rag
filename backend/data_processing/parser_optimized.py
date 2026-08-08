@@ -11,9 +11,10 @@ import hashlib
 import re
 import unicodedata
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from backend.data_processing.parser_outputs import (
@@ -22,7 +23,6 @@ from backend.data_processing.parser_outputs import (
     write_optimized_parser_ir,
 )
 from backend.utils.common_funcs import write_json, write_jsonl
-
 
 REMNOTE_IMAGE_HOST_MARKER = "remnote-user-data.s3.amazonaws.com"
 IMAGE_PLACEHOLDER = "[IMG URL]"
@@ -36,28 +36,161 @@ HEADER_TEXT_RE = re.compile(r"^#{1,6}\s+")
 ORDERED_LIST_ITEM_RE = re.compile(r"^\d+\.\s+")
 ONLY_PUNCT_RE = re.compile(r"^[\W_]+$", re.UNICODE)
 CODE_FENCE_RE = re.compile(r"^(?:`{3,}|~{3,})(?:\s*[A-Za-z0-9_+.#-]+)?\s*$")
-ARTIFACT_URL_RE = re.compile(r"^url:\s*(?P<url>https?://\S+)\s*$", re.MULTILINE | re.IGNORECASE)
+ARTIFACT_URL_RE = re.compile(
+    r"^url:\s*(?P<url>https?://\S+)\s*$", re.MULTILINE | re.IGNORECASE
+)
 TRACKING_QUERY_PARAMS = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
 
 READABLE_ENGLISH_WORDS = {
-    "a", "about", "agent", "agents", "all", "allow", "allows", "an", "and", "api", "approach",
-    "are", "arguments", "as", "at", "bayes", "be", "between", "bridges", "by", "call", "can",
-    "class", "compute", "configuration", "connect", "could", "decide", "endpoint", "estimate",
-    "estimation", "example", "examples", "extension", "extensions", "external", "feature", "figure",
-    "for", "from", "gap", "gaussian", "goal", "how", "if", "image", "in", "independently", "into",
-    "is", "it", "likelihood", "mean", "model", "more", "naive", "needed", "new", "of", "on", "or",
-    "parameters", "part", "per", "prior", "priors", "provided", "query", "resilient", "rule", "runtime",
-    "sample", "should", "solving", "steps", "successfully", "suitable", "teaching", "text", "that", "the",
-    "this", "to", "training", "use", "used", "user", "uses", "using", "variance", "via", "what", "which",
-    "with", "would",
+    "a",
+    "about",
+    "agent",
+    "agents",
+    "all",
+    "allow",
+    "allows",
+    "an",
+    "and",
+    "api",
+    "approach",
+    "are",
+    "arguments",
+    "as",
+    "at",
+    "bayes",
+    "be",
+    "between",
+    "bridges",
+    "by",
+    "call",
+    "can",
+    "class",
+    "compute",
+    "configuration",
+    "connect",
+    "could",
+    "decide",
+    "endpoint",
+    "estimate",
+    "estimation",
+    "example",
+    "examples",
+    "extension",
+    "extensions",
+    "external",
+    "feature",
+    "figure",
+    "for",
+    "from",
+    "gap",
+    "gaussian",
+    "goal",
+    "how",
+    "if",
+    "image",
+    "in",
+    "independently",
+    "into",
+    "is",
+    "it",
+    "likelihood",
+    "mean",
+    "model",
+    "more",
+    "naive",
+    "needed",
+    "new",
+    "of",
+    "on",
+    "or",
+    "parameters",
+    "part",
+    "per",
+    "prior",
+    "priors",
+    "provided",
+    "query",
+    "resilient",
+    "rule",
+    "runtime",
+    "sample",
+    "should",
+    "solving",
+    "steps",
+    "successfully",
+    "suitable",
+    "teaching",
+    "text",
+    "that",
+    "the",
+    "this",
+    "to",
+    "training",
+    "use",
+    "used",
+    "user",
+    "uses",
+    "using",
+    "variance",
+    "via",
+    "what",
+    "which",
+    "with",
+    "would",
 }
 FORMULA_WORDS = {
-    "alpha", "begin", "beta", "cdot", "delta", "ell", "end", "exp", "frac", "gamma", "geq",
-    "infty", "lambda", "langle", "ldots", "leq", "left", "mathbb", "mathcal", "mathrm", "min",
-    "max", "mid", "mu", "operatorname", "phi", "pi", "prod", "quad", "rangle", "right", "sigma",
-    "sqrt", "sum", "text", "theta", "times", "varepsilon", "xi",
+    "alpha",
+    "begin",
+    "beta",
+    "cdot",
+    "delta",
+    "ell",
+    "end",
+    "exp",
+    "frac",
+    "gamma",
+    "geq",
+    "infty",
+    "lambda",
+    "langle",
+    "ldots",
+    "leq",
+    "left",
+    "mathbb",
+    "mathcal",
+    "mathrm",
+    "min",
+    "max",
+    "mid",
+    "mu",
+    "operatorname",
+    "phi",
+    "pi",
+    "prod",
+    "quad",
+    "rangle",
+    "right",
+    "sigma",
+    "sqrt",
+    "sum",
+    "text",
+    "theta",
+    "times",
+    "varepsilon",
+    "xi",
 }
-HTML_WORDS = {"alt", "center", "div", "height", "image", "img", "src", "style", "text-align", "width"}
+HTML_WORDS = {
+    "alt",
+    "center",
+    "div",
+    "height",
+    "image",
+    "img",
+    "src",
+    "style",
+    "text-align",
+    "width",
+}
 QUALITY_TOKEN_RE = re.compile(r"[A-Za-zΑ-Ωα-ωА-Яа-яЁё][A-Za-zΑ-Ωα-ωА-Яа-яЁё'-]{1,}")
 
 __all__ = [
@@ -83,7 +216,7 @@ __all__ = [
 class UrlMatch:
     """One URL occurrence found in a RemNote markdown line."""
 
-    name: Optional[str]
+    name: str | None
     url: str
     kind: str
     start: int
@@ -117,7 +250,7 @@ class RemNoteBlock:
     text: str
     depth_level: int
     path: list[str]
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     child_ids: list[str] = field(default_factory=list)
     external_resource_ids: list[str] = field(default_factory=list)
 
@@ -132,13 +265,13 @@ class ExternalResource:
     line_number: int
     url: str
     url_hash: str
-    label: Optional[str]
+    label: str | None
     kind: str
     content_type_hint: str
     parse_status: str
-    artifact_path: Optional[str] = None
-    artifact_type: Optional[str] = None
-    error: Optional[str] = None
+    artifact_path: str | None = None
+    artifact_type: str | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -166,8 +299,8 @@ class ArtifactGateDecision:
     reason_codes: list[str]
     content_hash: str
     normalized_source_url: str
-    declared_artifact_url: Optional[str]
-    normalized_declared_artifact_url: Optional[str]
+    declared_artifact_url: str | None
+    normalized_declared_artifact_url: str | None
     stats: dict[str, Any]
     emitted_chunk_count: int = 0
 
@@ -185,17 +318,17 @@ class RetrievalChunk:
     line_end: int
     source_block_ids: list[str]
     external_resource_ids: list[str] = field(default_factory=list)
-    parent_block_id: Optional[str] = None
+    parent_block_id: str | None = None
     context_block_ids: list[str] = field(default_factory=list)
-    context_text: Optional[str] = None
-    source_relation: Optional[str] = None
-    artifact_path: Optional[str] = None
-    artifact_line_start: Optional[int] = None
-    artifact_line_end: Optional[int] = None
+    context_text: str | None = None
+    source_relation: str | None = None
+    artifact_path: str | None = None
+    artifact_line_start: int | None = None
+    artifact_line_end: int | None = None
     chunk_role: str = "paragraph_group"
     heading_path: list[str] = field(default_factory=list)
-    display_text: Optional[str] = None
-    embedding_text: Optional[str] = None
+    display_text: str | None = None
+    embedding_text: str | None = None
     chunk_quality_flags: list[str] = field(default_factory=list)
 
 
@@ -294,7 +427,10 @@ def extract_url_matches(line: str) -> list[UrlMatch]:
         occupied_spans.append((match.start("url"), match.end("url")))
 
     def inside_markdown_span(start: int, end: int) -> bool:
-        return any(start >= span_start and end <= span_end for span_start, span_end in occupied_spans)
+        return any(
+            start >= span_start and end <= span_end
+            for span_start, span_end in occupied_spans
+        )
 
     for match in RAW_URL_RE.finditer(line):
         if inside_markdown_span(match.start(), match.end()):
@@ -313,7 +449,12 @@ def extract_url_matches(line: str) -> list[UrlMatch]:
     return sorted(matches, key=lambda item: (item.start, item.end))
 
 
-def infer_depth(stripped_line: str, found_headers: set[int], indent_level: int, header_bonus: Optional[int]) -> tuple[int, Optional[int]]:
+def infer_depth(
+    stripped_line: str,
+    found_headers: set[int],
+    indent_level: int,
+    header_bonus: int | None,
+) -> tuple[int, int | None]:
     """Mirrors the production parser's depth heuristic without touching it."""
 
     header_match = HEADER_RE.search(stripped_line)
@@ -342,7 +483,7 @@ def guess_content_type_hint(url: str, kind: str) -> str:
     return "unknown"
 
 
-def sanitize_artifact_name(name: Optional[str], url: str) -> str:
+def sanitize_artifact_name(name: str | None, url: str) -> str:
     if name:
         clean_name = re.sub(r"[^\w\s-]", "", name).strip().replace(" ", "_")
     else:
@@ -352,19 +493,17 @@ def sanitize_artifact_name(name: Optional[str], url: str) -> str:
     return clean_name[-FILENAME_LENGTH_MAX:]
 
 
-def is_bad_artifact_path(path: Optional[str]) -> bool:
+def is_bad_artifact_path(path: str | None) -> bool:
     if not path:
         return False
     return path in {".", str(Path())}
-
-
 
 
 def is_code_fence_marker(text: str) -> bool:
     return bool(CODE_FENCE_RE.match(normalize_whitespace(text).strip()))
 
 
-def normalize_url_for_gate(url: Optional[str]) -> str:
+def normalize_url_for_gate(url: str | None) -> str:
     if not url:
         return ""
     parsed = urlparse(url.strip().rstrip("),."))
@@ -376,18 +515,19 @@ def normalize_url_for_gate(url: Optional[str]) -> str:
     query_items = [
         (key, value)
         for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-        if not key.casefold().startswith("utm_") and key.casefold() not in TRACKING_QUERY_PARAMS
+        if not key.casefold().startswith("utm_")
+        and key.casefold() not in TRACKING_QUERY_PARAMS
     ]
     query = urlencode(query_items, doseq=True)
     return urlunparse(("", parsed.netloc.casefold(), path, "", query, ""))
 
 
-def extract_declared_artifact_url(text: str) -> Optional[str]:
+def extract_declared_artifact_url(text: str) -> str | None:
     match = ARTIFACT_URL_RE.search(text)
     return normalize_nfc(match.group("url").strip()) if match else None
 
 
-def is_dataset_like_url(url: Optional[str]) -> bool:
+def is_dataset_like_url(url: str | None) -> bool:
     if not url:
         return False
     parsed = urlparse(url)
@@ -414,10 +554,13 @@ def artifact_text_looks_like_dataset(text: str) -> bool:
     return any(marker in sample for marker in markers)
 
 
-def is_generic_navigation_artifact(declared_url: Optional[str], text: str) -> bool:
+def is_generic_navigation_artifact(declared_url: str | None, text: str) -> bool:
     normalized = normalize_url_for_gate(declared_url)
     sample = text[:1000].casefold()
-    return normalized.endswith("//huggingface.co/papers/trending") or "title: trending papers - hugging face" in sample
+    return (
+        normalized.endswith("//huggingface.co/papers/trending")
+        or "title: trending papers - hugging face" in sample
+    )
 
 
 def has_cyrillic(text: str) -> bool:
@@ -470,7 +613,10 @@ def ocr_text_quality_stats(text: str) -> dict[str, Any]:
         if token.casefold().strip("'-") not in FORMULA_WORDS | HTML_WORDS
     ]
     token_count = len(content_tokens)
-    common_english_count = sum(token.casefold().strip("'-") in READABLE_ENGLISH_WORDS for token in content_tokens)
+    common_english_count = sum(
+        token.casefold().strip("'-") in READABLE_ENGLISH_WORDS
+        for token in content_tokens
+    )
     mixed_case_count = sum(
         len(token) >= 5
         and any(char.islower() for char in token[1:])
@@ -488,18 +634,31 @@ def ocr_text_quality_stats(text: str) -> dict[str, Any]:
     return {
         "ocr_quality_token_count": token_count,
         "ocr_quality_common_english_count": common_english_count,
-        "ocr_quality_common_english_ratio": common_english_count / token_count if token_count else 0.0,
+        "ocr_quality_common_english_ratio": common_english_count / token_count
+        if token_count
+        else 0.0,
         "ocr_quality_mixed_case_token_count": mixed_case_count,
-        "ocr_quality_mixed_case_token_ratio": mixed_case_count / token_count if token_count else 0.0,
+        "ocr_quality_mixed_case_token_ratio": mixed_case_count / token_count
+        if token_count
+        else 0.0,
         "ocr_quality_greek_token_count": greek_token_count,
-        "ocr_quality_greek_token_ratio": greek_token_count / token_count if token_count else 0.0,
+        "ocr_quality_greek_token_ratio": greek_token_count / token_count
+        if token_count
+        else 0.0,
         "ocr_quality_suspicious_lookalike_token_count": suspicious_lookalike_count,
-        "ocr_quality_suspicious_lookalike_token_ratio": suspicious_lookalike_count / token_count if token_count else 0.0,
+        "ocr_quality_suspicious_lookalike_token_ratio": suspicious_lookalike_count
+        / token_count
+        if token_count
+        else 0.0,
     }
 
 
-def is_low_quality_ocr(text: str, resource: ExternalResource, artifact_path: Path, stats: dict[str, Any]) -> bool:
-    is_image_artifact = resource.content_type_hint == "image" or "parsed_images" in artifact_path.parts
+def is_low_quality_ocr(
+    text: str, resource: ExternalResource, artifact_path: Path, stats: dict[str, Any]
+) -> bool:
+    is_image_artifact = (
+        resource.content_type_hint == "image" or "parsed_images" in artifact_path.parts
+    )
     if not is_image_artifact:
         return False
     if stats["char_count"] < 250 or stats["alpha_count"] < 120:
@@ -518,6 +677,7 @@ def is_low_quality_ocr(text: str, resource: ExternalResource, artifact_path: Pat
         or quality_stats["ocr_quality_greek_token_ratio"] >= 0.06
     )
     return low_readable_english and lookalike_noise
+
 
 def is_noise_text(text: str) -> bool:
     stripped = normalize_whitespace(text).strip()
@@ -552,7 +712,7 @@ def semantic_path_text(path: Iterable[str]) -> str:
     return " > ".join(parts)
 
 
-def semantic_context_text(context_text: Optional[str]) -> Optional[str]:
+def semantic_context_text(context_text: str | None) -> str | None:
     if not context_text:
         return None
     lines = []
@@ -605,7 +765,7 @@ class CachedArtifactResolver:
                 self._by_name.setdefault(path.name, path)
                 self._by_name.setdefault(path.stem, path)
 
-    def resolve(self, match: UrlMatch) -> tuple[Optional[Path], Optional[str]]:
+    def resolve(self, match: UrlMatch) -> tuple[Path | None, str | None]:
         clean_name = sanitize_artifact_name(match.name, match.url)
         suffix_name = Path(urlparse(match.url).path).name[-FILENAME_LENGTH_MAX:]
         suffix = Path(suffix_name).suffix.casefold()
@@ -642,14 +802,18 @@ class OptimizedRemNoteParser:
         self.raw_data_dir = Path(raw_data_dir)
         self.artifact_resolver = CachedArtifactResolver(parsed_roots)
 
-    def run(self, baseline_summary: Optional[dict[str, Any]] = None) -> OptimizedParseResult:
+    def run(
+        self, baseline_summary: dict[str, Any] | None = None
+    ) -> OptimizedParseResult:
         source_documents: list[SourceDocument] = []
         blocks: list[RemNoteBlock] = []
         external_resources: list[ExternalResource] = []
         parsed_artifacts: list[ParsedArtifact] = []
 
         for file_path in sorted(self.raw_data_dir.rglob("*.md")):
-            doc, doc_blocks, doc_resources, doc_artifacts = self._parse_source_document(file_path)
+            doc, doc_blocks, doc_resources, doc_artifacts = self._parse_source_document(
+                file_path
+            )
             source_documents.append(doc)
             blocks.extend(doc_blocks)
             external_resources.extend(doc_resources)
@@ -679,7 +843,9 @@ class OptimizedRemNoteParser:
 
     def _parse_source_document(
         self, file_path: Path
-    ) -> tuple[SourceDocument, list[RemNoteBlock], list[ExternalResource], list[ParsedArtifact]]:
+    ) -> tuple[
+        SourceDocument, list[RemNoteBlock], list[ExternalResource], list[ParsedArtifact]
+    ]:
         raw_lines = file_path.read_text(encoding="utf-8").splitlines()
         relative_path = normalize_nfc(str(file_path.relative_to(self.raw_data_dir)))
         source = normalize_nfc(file_path.stem)
@@ -688,10 +854,10 @@ class OptimizedRemNoteParser:
         blocks: list[RemNoteBlock] = []
         resources: list[ExternalResource] = []
         artifacts: list[ParsedArtifact] = []
-        node_stack: list[Optional[RemNoteBlock]] = []
+        node_stack: list[RemNoteBlock | None] = []
         context_stack: list[str] = []
         found_headers: set[int] = set()
-        header_bonus: Optional[int] = None
+        header_bonus: int | None = None
         block_ordinal = 0
         url_count = 0
 
@@ -702,7 +868,9 @@ class OptimizedRemNoteParser:
 
             indent_spaces = len(line) - len(line.lstrip())
             indent_level = indent_spaces // 2
-            depth_level, header_bonus = infer_depth(stripped_line, found_headers, indent_level, header_bonus)
+            depth_level, header_bonus = infer_depth(
+                stripped_line, found_headers, indent_level, header_bonus
+            )
 
             raw_content = stripped_line.lstrip("-*").strip()
             if not raw_content:
@@ -719,9 +887,17 @@ class OptimizedRemNoteParser:
                 node_stack.append(node_stack[-1] if node_stack else None)
                 context_stack.append("...")
 
-            path = [source] + [item for item in context_stack if item != "..." and not is_code_fence_marker(item)]
-            parent = next((item for item in reversed(node_stack) if item is not None), None)
-            block_id = stable_id("block", relative_path, line_number, block_ordinal, raw_content)
+            path = [source] + [
+                item
+                for item in context_stack
+                if item != "..." and not is_code_fence_marker(item)
+            ]
+            parent = next(
+                (item for item in reversed(node_stack) if item is not None), None
+            )
+            block_id = stable_id(
+                "block", relative_path, line_number, block_ordinal, raw_content
+            )
             block = RemNoteBlock(
                 id=block_id,
                 source_document_id=source_document_id,
@@ -762,7 +938,9 @@ class OptimizedRemNoteParser:
         )
         return doc, blocks, resources, artifacts
 
-    def _resource_from_match(self, match: UrlMatch, block: RemNoteBlock) -> tuple[ExternalResource, Optional[ParsedArtifact]]:
+    def _resource_from_match(
+        self, match: UrlMatch, block: RemNoteBlock
+    ) -> tuple[ExternalResource, ParsedArtifact | None]:
         url_hash = stable_hash(match.url)
         resource_id = stable_id("res", block.id, match.ordinal, match.url)
         artifact_path, artifact_type = self.artifact_resolver.resolve(match)
@@ -816,12 +994,19 @@ class OptimizedRemNoteParser:
         resources_by_id = {resource.id: resource for resource in external_resources}
         blocks_by_id = {block.id: block for block in blocks}
         children_by_id = {
-            block.id: [blocks_by_id[child_id] for child_id in block.child_ids if child_id in blocks_by_id]
+            block.id: [
+                blocks_by_id[child_id]
+                for child_id in block.child_ids
+                if child_id in blocks_by_id
+            ]
             for block in blocks
         }
 
         def ordered_children(block: RemNoteBlock) -> list[RemNoteBlock]:
-            return sorted(children_by_id.get(block.id, []), key=lambda item: (item.line_number, item.block_ordinal))
+            return sorted(
+                children_by_id.get(block.id, []),
+                key=lambda item: (item.line_number, item.block_ordinal),
+            )
 
         def walk_subtree(block: RemNoteBlock) -> list[RemNoteBlock]:
             subtree = [block]
@@ -836,17 +1021,25 @@ class OptimizedRemNoteParser:
                 return "subtree"
             return "paragraph"
 
-        def make_candidate(block: RemNoteBlock) -> Optional[ChunkCandidate]:
+        def make_candidate(block: RemNoteBlock) -> ChunkCandidate | None:
             subtree = walk_subtree(block)
-            text_blocks = [item for item in subtree if not is_noise_text(item.text) and not is_header_text(item.text)]
+            text_blocks = [
+                item
+                for item in subtree
+                if not is_noise_text(item.text) and not is_header_text(item.text)
+            ]
             resource_ids = unique_preserving_order(
-                resource_id for item in subtree for resource_id in item.external_resource_ids
+                resource_id
+                for item in subtree
+                for resource_id in item.external_resource_ids
             )
             if not text_blocks:
                 return None
 
             text = "\n".join(item.text for item in text_blocks).strip()
-            heading_path = common_path(item.path for item in text_blocks) or [block.source]
+            heading_path = common_path(item.path for item in text_blocks) or [
+                block.source
+            ]
             quality_flags: list[str] = []
             if resource_ids:
                 quality_flags.append("resource_attached")
@@ -902,9 +1095,14 @@ class OptimizedRemNoteParser:
 
             text = "\n".join(candidate.text for candidate in candidates).strip()
             first, last = ordered_blocks[0], ordered_blocks[-1]
-            heading_path = common_path(candidate.heading_path for candidate in candidates) or candidates[0].heading_path
+            heading_path = (
+                common_path(candidate.heading_path for candidate in candidates)
+                or candidates[0].heading_path
+            )
             resource_ids = unique_preserving_order(
-                resource_id for candidate in candidates for resource_id in candidate.external_resource_ids
+                resource_id
+                for candidate in candidates
+                for resource_id in candidate.external_resource_ids
             )
             quality_flags = unique_preserving_order(
                 flag for candidate in candidates for flag in candidate.quality_flags
@@ -917,7 +1115,14 @@ class OptimizedRemNoteParser:
             breadcrumb = semantic_path_text(heading_path)
             embedding_text = f"{breadcrumb}\n{text}" if breadcrumb else text
             return RetrievalChunk(
-                id=stable_id("chunk", "blocks_tree", first.source, first.line_number, last.line_number, text),
+                id=stable_id(
+                    "chunk",
+                    "blocks_tree",
+                    first.source,
+                    first.line_number,
+                    last.line_number,
+                    text,
+                ),
                 text=text,
                 chunk_type="remnote_section",
                 source=first.source,
@@ -942,18 +1147,28 @@ class OptimizedRemNoteParser:
         for source in source_order:
             source_blocks = [block for block in blocks if block.source == source]
             source_block_ids = {block.id for block in source_blocks}
-            roots = [block for block in source_blocks if block.parent_id not in source_block_ids]
+            roots = [
+                block
+                for block in source_blocks
+                if block.parent_id not in source_block_ids
+            ]
             source_candidates: list[ChunkCandidate] = []
-            for root in sorted(roots, key=lambda item: (item.line_number, item.block_ordinal)):
+            for root in sorted(
+                roots, key=lambda item: (item.line_number, item.block_ordinal)
+            ):
                 source_candidates.extend(collect_candidates(root))
 
             current_candidates: list[ChunkCandidate] = []
-            current_key: Optional[tuple[str, tuple[str, ...]]] = None
+            current_key: tuple[str, tuple[str, ...]] | None = None
             for candidate in source_candidates:
                 key = (candidate.source, tuple(candidate.heading_path))
-                candidate_text = "\n".join(item.text for item in current_candidates + [candidate])
+                candidate_text = "\n".join(
+                    item.text for item in current_candidates + [candidate]
+                )
                 key_changed = current_key is not None and key != current_key
-                over_max_chars = bool(current_candidates) and len(candidate_text) > max_chars
+                over_max_chars = (
+                    bool(current_candidates) and len(candidate_text) > max_chars
+                )
                 if key_changed or over_max_chars:
                     flush_candidates(current_candidates)
                     current_candidates = []
@@ -965,7 +1180,11 @@ class OptimizedRemNoteParser:
         def artifact_context(resource: ExternalResource) -> dict[str, Any]:
             parent_block = blocks_by_id.get(resource.parent_block_id)
             if not parent_block:
-                return {"path": [resource.source], "context_block_ids": [], "context_text": None}
+                return {
+                    "path": [resource.source],
+                    "context_block_ids": [],
+                    "context_text": None,
+                }
 
             def ancestors(block: RemNoteBlock) -> list[RemNoteBlock]:
                 chain: list[RemNoteBlock] = []
@@ -982,11 +1201,16 @@ class OptimizedRemNoteParser:
                     siblings = [
                         candidate
                         for candidate in blocks
-                        if candidate.source_document_id == block.source_document_id and candidate.parent_id is None
+                        if candidate.source_document_id == block.source_document_id
+                        and candidate.parent_id is None
                     ]
-                return sorted(siblings, key=lambda item: (item.line_number, item.block_ordinal))
+                return sorted(
+                    siblings, key=lambda item: (item.line_number, item.block_ordinal)
+                )
 
-            def immediate_previous_text_sibling(block: RemNoteBlock) -> Optional[RemNoteBlock]:
+            def immediate_previous_text_sibling(
+                block: RemNoteBlock,
+            ) -> RemNoteBlock | None:
                 siblings = siblings_for(block)
                 for index, sibling in enumerate(siblings):
                     if sibling.id != block.id:
@@ -1004,7 +1228,9 @@ class OptimizedRemNoteParser:
                 for block in ancestors(parent_block)
                 if is_header_text(block.text) and not is_noise_text(block.text)
             ]
-            if is_header_text(parent_block.text) and not is_noise_text(parent_block.text):
+            if is_header_text(parent_block.text) and not is_noise_text(
+                parent_block.text
+            ):
                 context_blocks.append(parent_block)
 
             direct_previous_text = immediate_previous_text_sibling(parent_block)
@@ -1013,13 +1239,18 @@ class OptimizedRemNoteParser:
 
             ordered_context: list[RemNoteBlock] = []
             seen_context_ids: set[str] = set()
-            for block in sorted(context_blocks, key=lambda item: (item.line_number, item.block_ordinal)):
+            for block in sorted(
+                context_blocks, key=lambda item: (item.line_number, item.block_ordinal)
+            ):
                 if block.id in seen_context_ids:
                     continue
                 seen_context_ids.add(block.id)
                 ordered_context.append(block)
 
-            context_text = "\n".join(block.text for block in ordered_context if block.text.strip()) or None
+            context_text = (
+                "\n".join(block.text for block in ordered_context if block.text.strip())
+                or None
+            )
             return {
                 "path": parent_block.path or [resource.source],
                 "context_block_ids": [block.id for block in ordered_context],
@@ -1031,7 +1262,9 @@ class OptimizedRemNoteParser:
             if not resource:
                 continue
             artifact_path = Path(artifact.artifact_path)
-            decision = self._gate_artifact(artifact, resource, artifact_path, seen_embedded_artifact_hashes)
+            decision = self._gate_artifact(
+                artifact, resource, artifact_path, seen_embedded_artifact_hashes
+            )
             artifact_gate_decisions.append(decision)
             if decision.policy != "embed_full":
                 continue
@@ -1059,7 +1292,7 @@ class OptimizedRemNoteParser:
     ) -> ArtifactGateDecision:
         reason_codes: list[str] = []
         text = ""
-        read_error: Optional[str] = None
+        read_error: str | None = None
         try:
             if artifact_path.suffix != ".md":
                 read_error = "unsupported_artifact_type"
@@ -1072,29 +1305,39 @@ class OptimizedRemNoteParser:
         declared_url = extract_declared_artifact_url(text) if text else None
         normalized_source_url = normalize_url_for_gate(resource.url)
         normalized_declared_url = normalize_url_for_gate(declared_url)
-        stats = script_stats(text) if text else {
-            "char_count": 0,
-            "line_count": 0,
-            "nonempty_line_count": 0,
-            "alpha_count": 0,
-            "cyrillic_count": 0,
-            "latin_count": 0,
-            "greek_count": 0,
-            "cyrillic_ratio": 0.0,
-            "latin_greek_ratio": 0.0,
-        }
+        stats = (
+            script_stats(text)
+            if text
+            else {
+                "char_count": 0,
+                "line_count": 0,
+                "nonempty_line_count": 0,
+                "alpha_count": 0,
+                "cyrillic_count": 0,
+                "latin_count": 0,
+                "greek_count": 0,
+                "cyrillic_ratio": 0.0,
+                "latin_greek_ratio": 0.0,
+            }
+        )
         source_is_dataset = is_dataset_like_url(resource.url)
         declared_is_dataset = is_dataset_like_url(declared_url)
         text_is_dataset = artifact_text_looks_like_dataset(text) if text else False
-        is_dataset_artifact = source_is_dataset or declared_is_dataset or text_is_dataset
-        generic_navigation = is_generic_navigation_artifact(declared_url, text) if text else False
+        is_dataset_artifact = (
+            source_is_dataset or declared_is_dataset or text_is_dataset
+        )
+        generic_navigation = (
+            is_generic_navigation_artifact(declared_url, text) if text else False
+        )
         url_mismatch = bool(
             normalized_declared_url
             and normalized_source_url
             and normalized_declared_url != normalized_source_url
             and not (source_is_dataset and declared_is_dataset)
         )
-        low_quality_ocr = is_low_quality_ocr(text, resource, artifact_path, stats) if text else False
+        low_quality_ocr = (
+            is_low_quality_ocr(text, resource, artifact_path, stats) if text else False
+        )
 
         stats.update(
             {
@@ -1134,7 +1377,9 @@ class OptimizedRemNoteParser:
             reason_codes.append("accepted")
 
         return ArtifactGateDecision(
-            id=stable_id("gate", artifact.id, resource.id, content_hash or artifact_path),
+            id=stable_id(
+                "gate", artifact.id, resource.id, content_hash or artifact_path
+            ),
             external_resource_id=resource.id,
             artifact_path=normalize_nfc(str(artifact_path)),
             policy=policy,
@@ -1157,7 +1402,7 @@ class OptimizedRemNoteParser:
         lines = artifact_path.read_text(encoding="utf-8", errors="replace").splitlines()
         chunks: list[RetrievalChunk] = []
         buffer: list[str] = []
-        start_line: Optional[int] = None
+        start_line: int | None = None
         context_path = list(context.get("path") or [resource.source])
         context_text = context.get("context_text")
         context_block_ids = list(context.get("context_block_ids") or [])
@@ -1181,7 +1426,9 @@ class OptimizedRemNoteParser:
                     quality_flags.append("small_but_kept")
                 chunks.append(
                     RetrievalChunk(
-                        id=stable_id("chunk", "artifact", resource.id, start_line, end_line, text),
+                        id=stable_id(
+                            "chunk", "artifact", resource.id, start_line, end_line, text
+                        ),
                         text=text,
                         chunk_type="external_artifact",
                         source=resource.source,
@@ -1223,7 +1470,11 @@ class OptimizedRemNoteParser:
         if buffer:
             flush(len(lines) - 1)
 
-        return [chunk for chunk in chunks if len(chunk.text) >= min_chars or len(chunks) == 1]
+        return [
+            chunk
+            for chunk in chunks
+            if len(chunk.text) >= min_chars or len(chunks) == 1
+        ]
 
     def _build_summary(
         self,
@@ -1233,15 +1484,31 @@ class OptimizedRemNoteParser:
         parsed_artifacts: list[ParsedArtifact],
         artifact_gate_decisions: list[ArtifactGateDecision],
         retrieval_chunks: list[RetrievalChunk],
-        baseline_summary: Optional[dict[str, Any]],
+        baseline_summary: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        status_counts = Counter(resource.parse_status for resource in external_resources)
-        content_type_counts = Counter(resource.content_type_hint for resource in external_resources)
-        multi_url_lines = Counter((resource.source, resource.line_number) for resource in external_resources)
+        status_counts = Counter(
+            resource.parse_status for resource in external_resources
+        )
+        content_type_counts = Counter(
+            resource.content_type_hint for resource in external_resources
+        )
+        multi_url_lines = Counter(
+            (resource.source, resource.line_number) for resource in external_resources
+        )
         duplicate_chunk_text = Counter(chunk.text for chunk in retrieval_chunks)
-        tiny_chunks = [chunk for chunk in retrieval_chunks if len(chunk.text.strip()) <= 3]
-        placeholder_chunks = [chunk for chunk in retrieval_chunks if chunk.text.strip() == IMAGE_PLACEHOLDER]
-        code_fence_chunks = [chunk for chunk in retrieval_chunks if is_code_fence_marker(chunk.text.strip())]
+        tiny_chunks = [
+            chunk for chunk in retrieval_chunks if len(chunk.text.strip()) <= 3
+        ]
+        placeholder_chunks = [
+            chunk
+            for chunk in retrieval_chunks
+            if chunk.text.strip() == IMAGE_PLACEHOLDER
+        ]
+        code_fence_chunks = [
+            chunk
+            for chunk in retrieval_chunks
+            if is_code_fence_marker(chunk.text.strip())
+        ]
         code_fence_marker_lines = [
             line
             for chunk in retrieval_chunks
@@ -1252,12 +1519,19 @@ class OptimizedRemNoteParser:
             chunk
             for chunk in retrieval_chunks
             if chunk.chunk_type == "remnote_section"
-            and all(is_header_text(line.strip()) for line in chunk.text.splitlines() if line.strip())
+            and all(
+                is_header_text(line.strip())
+                for line in chunk.text.splitlines()
+                if line.strip()
+            )
         ]
         missing_provenance = [
             chunk.id
             for chunk in retrieval_chunks
-            if not chunk.source_block_ids or not chunk.source or not chunk.path or chunk.line_start is None
+            if not chunk.source_block_ids
+            or not chunk.source
+            or not chunk.path
+            or chunk.line_start is None
         ]
         block_by_id = {block.id: block for block in blocks}
         block_source_by_id = {block.id: block.source for block in blocks}
@@ -1282,7 +1556,9 @@ class OptimizedRemNoteParser:
                 for block_id in chunk.source_block_ids
                 if block_id in block_source_by_id
             }
-            if len(chunk_block_sources) > 1 or (chunk_block_sources and chunk.source not in chunk_block_sources):
+            if len(chunk_block_sources) > 1 or (
+                chunk_block_sources and chunk.source not in chunk_block_sources
+            ):
                 mixed_source_chunks.append(chunk.id)
         orphan_list_parent_chunks = []
         split_list_item_blocks = []
@@ -1291,10 +1567,20 @@ class OptimizedRemNoteParser:
                 continue
             subtree_ids = subtree_block_ids(block)
             containing_chunks = chunk_ids_by_block_id.get(block.id, [])
-            if containing_chunks and not any(subtree_ids.issubset(chunk_ids) for chunk_ids in containing_chunks):
+            if containing_chunks and not any(
+                subtree_ids.issubset(chunk_ids) for chunk_ids in containing_chunks
+            ):
                 split_list_item_blocks.append(block.id)
-            direct_child_ids = {child_id for child_id in block.child_ids if child_id in block_by_id}
-            if containing_chunks and direct_child_ids and not any(direct_child_ids & chunk_ids for chunk_ids in containing_chunks):
+            direct_child_ids = {
+                child_id for child_id in block.child_ids if child_id in block_by_id
+            }
+            if (
+                containing_chunks
+                and direct_child_ids
+                and not any(
+                    direct_child_ids & chunk_ids for chunk_ids in containing_chunks
+                )
+            ):
                 orphan_list_parent_chunks.append(block.id)
 
         resource_only_chunks = [
@@ -1303,7 +1589,8 @@ class OptimizedRemNoteParser:
             if chunk.chunk_type == "remnote_section"
             and chunk.external_resource_ids
             and not any(
-                block_id in block_by_id and not is_noise_text(block_by_id[block_id].text)
+                block_id in block_by_id
+                and not is_noise_text(block_by_id[block_id].text)
                 for block_id in chunk.source_block_ids
             )
         ]
@@ -1320,29 +1607,37 @@ class OptimizedRemNoteParser:
             and Path(resource.artifact_path).suffix.casefold() in IMAGE_EXTENSIONS
             and Path(resource.artifact_path).with_suffix(".md").exists()
         ]
-        artifact_policy_counts = Counter(decision.policy for decision in artifact_gate_decisions)
+        artifact_policy_counts = Counter(
+            decision.policy for decision in artifact_gate_decisions
+        )
         dataset_metadata_only = [
             decision
             for decision in artifact_gate_decisions
-            if decision.policy == "metadata_only" and "dataset_artifact" in decision.reason_codes
+            if decision.policy == "metadata_only"
+            and "dataset_artifact" in decision.reason_codes
         ]
         duplicate_metadata_only = [
             decision
             for decision in artifact_gate_decisions
-            if decision.policy == "metadata_only" and "duplicate_content_hash" in decision.reason_codes
+            if decision.policy == "metadata_only"
+            and "duplicate_content_hash" in decision.reason_codes
         ]
         url_mismatch_quarantine = [
             decision
             for decision in artifact_gate_decisions
-            if decision.policy == "quarantine" and "url_mismatch" in decision.reason_codes
+            if decision.policy == "quarantine"
+            and "url_mismatch" in decision.reason_codes
         ]
         low_quality_ocr_quarantine = [
             decision
             for decision in artifact_gate_decisions
-            if decision.policy == "quarantine" and "low_quality_ocr" in decision.reason_codes
+            if decision.policy == "quarantine"
+            and "low_quality_ocr" in decision.reason_codes
         ]
         external_artifact_chunks = [
-            chunk for chunk in retrieval_chunks if chunk.chunk_type == "external_artifact"
+            chunk
+            for chunk in retrieval_chunks
+            if chunk.chunk_type == "external_artifact"
         ]
         external_artifact_chunks_with_context = [
             chunk
@@ -1370,9 +1665,15 @@ class OptimizedRemNoteParser:
         raw_url_count = sum(document.url_count for document in source_documents)
         parser_visible_url_count = len(external_resources)
         baseline = baseline_summary or {}
-        baseline_external = baseline.get("external_parsing", {}) if isinstance(baseline, dict) else {}
-        baseline_docstore = baseline.get("docstore", {}) if isinstance(baseline, dict) else {}
-        baseline_chunking = baseline.get("chunking_quality", {}) if isinstance(baseline, dict) else {}
+        baseline_external = (
+            baseline.get("external_parsing", {}) if isinstance(baseline, dict) else {}
+        )
+        baseline_docstore = (
+            baseline.get("docstore", {}) if isinstance(baseline, dict) else {}
+        )
+        baseline_chunking = (
+            baseline.get("chunking_quality", {}) if isinstance(baseline, dict) else {}
+        )
 
         return {
             "source_document_count": len(source_documents),
@@ -1380,7 +1681,9 @@ class OptimizedRemNoteParser:
             "raw_url_occurrences": raw_url_count,
             "parser_visible_url_resources": parser_visible_url_count,
             "url_count_match": raw_url_count == parser_visible_url_count,
-            "multi_url_line_count": sum(1 for count in multi_url_lines.values() if count > 1),
+            "multi_url_line_count": sum(
+                1 for count in multi_url_lines.values() if count > 1
+            ),
             "external_resource_status_counts": dict(status_counts),
             "external_resource_content_type_counts": dict(content_type_counts),
             "parsed_artifact_count": len(parsed_artifacts),
@@ -1393,34 +1696,54 @@ class OptimizedRemNoteParser:
             "orphan_list_parent_chunk_count": len(orphan_list_parent_chunks),
             "split_list_item_subtree_count": len(split_list_item_blocks),
             "resource_only_chunk_count": len(resource_only_chunks),
-            "duplicate_retrieval_chunk_text_keys": sum(1 for count in duplicate_chunk_text.values() if count > 1),
+            "duplicate_retrieval_chunk_text_keys": sum(
+                1 for count in duplicate_chunk_text.values() if count > 1
+            ),
             "chunks_missing_provenance_count": len(missing_provenance),
             "mixed_source_retrieval_chunk_count": len(mixed_source_chunks),
             "failed_path_current_dir_count": len(bad_resource_paths),
-            "image_binary_selected_despite_md_sibling_count": len(image_binary_selected_despite_md_sibling),
+            "image_binary_selected_despite_md_sibling_count": len(
+                image_binary_selected_despite_md_sibling
+            ),
             "artifact_gate_policy_counts": dict(artifact_policy_counts),
             "dataset_artifact_metadata_only_count": len(dataset_metadata_only),
             "url_mismatch_quarantine_count": len(url_mismatch_quarantine),
             "duplicate_artifact_metadata_only_count": len(duplicate_metadata_only),
             "low_quality_ocr_quarantine_count": len(low_quality_ocr_quarantine),
             "external_artifact_chunk_count": len(external_artifact_chunks),
-            "external_artifact_chunks_with_context_count": len(external_artifact_chunks_with_context),
+            "external_artifact_chunks_with_context_count": len(
+                external_artifact_chunks_with_context
+            ),
             "external_artifact_chunks_without_context_count": (
-                len(external_artifact_chunks) - len(external_artifact_chunks_with_context)
+                len(external_artifact_chunks)
+                - len(external_artifact_chunks_with_context)
             ),
             "external_artifact_embedding_support_label_count": len(
                 external_artifact_embedding_support_label_chunks
             ),
-            "embedded_dataset_dump_chunk_count": embedded_chunk_count_for_reason("dataset_artifact"),
-            "embedded_url_mismatch_chunk_count": embedded_chunk_count_for_reason("url_mismatch"),
-            "embedded_duplicate_artifact_chunk_count": embedded_chunk_count_for_reason("duplicate_content_hash"),
-            "embedded_low_quality_ocr_chunk_count": embedded_chunk_count_for_reason("low_quality_ocr"),
+            "embedded_dataset_dump_chunk_count": embedded_chunk_count_for_reason(
+                "dataset_artifact"
+            ),
+            "embedded_url_mismatch_chunk_count": embedded_chunk_count_for_reason(
+                "url_mismatch"
+            ),
+            "embedded_duplicate_artifact_chunk_count": embedded_chunk_count_for_reason(
+                "duplicate_content_hash"
+            ),
+            "embedded_low_quality_ocr_chunk_count": embedded_chunk_count_for_reason(
+                "low_quality_ocr"
+            ),
             "success_criteria": {
-                "raw_url_count_equals_parser_visible": raw_url_count == parser_visible_url_count,
+                "raw_url_count_equals_parser_visible": raw_url_count
+                == parser_visible_url_count,
                 "no_current_dir_failed_paths": len(bad_resource_paths) == 0,
-                "no_image_binary_selected_when_md_sibling_exists": len(image_binary_selected_despite_md_sibling) == 0,
+                "no_image_binary_selected_when_md_sibling_exists": len(
+                    image_binary_selected_despite_md_sibling
+                )
+                == 0,
                 "tiny_chunks_near_zero": len(tiny_chunks) <= 3,
-                "no_placeholder_or_code_fence_chunks": not placeholder_chunks and not code_fence_chunks,
+                "no_placeholder_or_code_fence_chunks": not placeholder_chunks
+                and not code_fence_chunks,
                 "no_code_fence_marker_lines": len(code_fence_marker_lines) == 0,
                 "no_header_only_chunks": not header_only_chunks,
                 "no_orphan_list_parent_chunks": not orphan_list_parent_chunks,
@@ -1428,19 +1751,42 @@ class OptimizedRemNoteParser:
                 "no_resource_only_chunks": not resource_only_chunks,
                 "all_chunks_have_provenance": not missing_provenance,
                 "no_mixed_source_chunks": not mixed_source_chunks,
-                "no_embedded_dataset_dumps": embedded_chunk_count_for_reason("dataset_artifact") == 0,
-                "no_embedded_url_mismatch_artifacts": embedded_chunk_count_for_reason("url_mismatch") == 0,
-                "no_embedded_duplicate_artifacts": embedded_chunk_count_for_reason("duplicate_content_hash") == 0,
-                "no_embedded_low_quality_ocr": embedded_chunk_count_for_reason("low_quality_ocr") == 0,
+                "no_embedded_dataset_dumps": embedded_chunk_count_for_reason(
+                    "dataset_artifact"
+                )
+                == 0,
+                "no_embedded_url_mismatch_artifacts": embedded_chunk_count_for_reason(
+                    "url_mismatch"
+                )
+                == 0,
+                "no_embedded_duplicate_artifacts": embedded_chunk_count_for_reason(
+                    "duplicate_content_hash"
+                )
+                == 0,
+                "no_embedded_low_quality_ocr": embedded_chunk_count_for_reason(
+                    "low_quality_ocr"
+                )
+                == 0,
                 "no_external_artifact_embedding_support_labels": not external_artifact_embedding_support_label_chunks,
             },
             "baseline_comparison": {
-                "baseline_raw_url_total_in_selected_files": baseline_external.get("raw_url_total_in_selected_files"),
-                "baseline_parser_visible_url_candidate_nodes": baseline_external.get("parser_visible_url_candidate_nodes"),
-                "baseline_multi_url_line_gap_count": baseline_external.get("multi_url_line_gap_count"),
-                "baseline_tiny_node_count_len_1_to_3": baseline_docstore.get("tiny_node_count_len_1_to_3"),
-                "baseline_duplicate_source_text_keys": baseline_chunking.get("duplicate_source_text_keys"),
-                "optimized_multi_url_gap_count": raw_url_count - parser_visible_url_count,
+                "baseline_raw_url_total_in_selected_files": baseline_external.get(
+                    "raw_url_total_in_selected_files"
+                ),
+                "baseline_parser_visible_url_candidate_nodes": baseline_external.get(
+                    "parser_visible_url_candidate_nodes"
+                ),
+                "baseline_multi_url_line_gap_count": baseline_external.get(
+                    "multi_url_line_gap_count"
+                ),
+                "baseline_tiny_node_count_len_1_to_3": baseline_docstore.get(
+                    "tiny_node_count_len_1_to_3"
+                ),
+                "baseline_duplicate_source_text_keys": baseline_chunking.get(
+                    "duplicate_source_text_keys"
+                ),
+                "optimized_multi_url_gap_count": raw_url_count
+                - parser_visible_url_count,
                 "optimized_tiny_retrieval_chunk_count": len(tiny_chunks),
                 "optimized_duplicate_retrieval_chunk_text_keys": sum(
                     1 for count in duplicate_chunk_text.values() if count > 1
@@ -1465,7 +1811,7 @@ class RemNoteParserOptimized:
         *,
         prepare_external_artifacts: bool = True,
         copy_existing_artifacts: bool = False,
-        existing_artifacts_dir: Optional[Path] = None,
+        existing_artifacts_dir: Path | None = None,
         force_rebuild: bool = False,
         write_ir: bool = True,
     ) -> None:
@@ -1479,12 +1825,14 @@ class RemNoteParserOptimized:
         self.kg_storage: Any = None
         self.document_storage_type = storage_settings.document_storage.storage_type
         self.ocr_pipeline: Any = None
-        self.last_result: Optional[OptimizedParseResult] = None
+        self.last_result: OptimizedParseResult | None = None
         self.last_copied_artifact_count = 0
         self.last_prepared_artifact_count = 0
 
     def _parsed_roots(self) -> list[Path]:
-        from backend.data_processing.artifact_preparation import parsed_roots_from_settings
+        from backend.data_processing.artifact_preparation import (
+            parsed_roots_from_settings,
+        )
 
         return parsed_roots_from_settings(self.path_settings)
 
@@ -1515,9 +1863,13 @@ class RemNoteParserOptimized:
         return kg_storage.storage_context.docstore.docs
 
     def _persist_if_local(self) -> None:
-        storage_type = getattr(self.document_storage_type, "value", self.document_storage_type)
+        storage_type = getattr(
+            self.document_storage_type, "value", self.document_storage_type
+        )
         if storage_type == "local":
-            self.kg_storage.storage_context.persist(persist_dir=str(self.path_settings.local_storage_dir))
+            self.kg_storage.storage_context.persist(
+                persist_dir=str(self.path_settings.local_storage_dir)
+            )
 
     def _clear_docstore(self) -> None:
         docstore = self._ensure_storage().storage_context.docstore
@@ -1531,7 +1883,7 @@ class RemNoteParserOptimized:
             docstore.docs.clear()
         self._persist_if_local()
 
-    def copy_existing_artifacts(self, source_dir: Optional[Path] = None) -> int:
+    def copy_existing_artifacts(self, source_dir: Path | None = None) -> int:
         """Copy cached OCR Markdown artifacts into the isolated parsed-images cache.
 
         The testing flow reuses reviewed ``.md`` OCR outputs and deliberately avoids
@@ -1541,8 +1893,12 @@ class RemNoteParserOptimized:
 
         from backend.data_processing.artifact_preparation import copy_existing_artifacts
 
-        configured_source = source_dir if source_dir is not None else self.existing_artifacts_dir
-        copied = copy_existing_artifacts(configured_source, Path(self.path_settings.parsed_images_dir))
+        configured_source = (
+            source_dir if source_dir is not None else self.existing_artifacts_dir
+        )
+        copied = copy_existing_artifacts(
+            configured_source, Path(self.path_settings.parsed_images_dir)
+        )
         self.last_copied_artifact_count = copied
         return copied
 
@@ -1561,7 +1917,9 @@ class RemNoteParserOptimized:
         have been created.
         """
 
-        from backend.data_processing.artifact_preparation import prepare_external_artifacts
+        from backend.data_processing.artifact_preparation import (
+            prepare_external_artifacts,
+        )
 
         prepared_count = prepare_external_artifacts(
             self.path_settings,
@@ -1671,16 +2029,20 @@ class RemNoteParserOptimized:
 
         if gate_decisions:
             metadata["artifact_gate_policy_by_resource_id"] = {
-                resource_id: decision.policy for resource_id, decision in gate_decisions.items()
+                resource_id: decision.policy
+                for resource_id, decision in gate_decisions.items()
             }
             metadata["artifact_gate_reason_codes_by_resource_id"] = {
-                resource_id: decision.reason_codes for resource_id, decision in gate_decisions.items()
+                resource_id: decision.reason_codes
+                for resource_id, decision in gate_decisions.items()
             }
             metadata["artifact_gate_content_hash_by_resource_id"] = {
-                resource_id: decision.content_hash for resource_id, decision in gate_decisions.items()
+                resource_id: decision.content_hash
+                for resource_id, decision in gate_decisions.items()
             }
             metadata["artifact_gate_stats_by_resource_id"] = {
-                resource_id: decision.stats for resource_id, decision in gate_decisions.items()
+                resource_id: decision.stats
+                for resource_id, decision in gate_decisions.items()
             }
             if len(gate_decisions) == 1:
                 decision = next(iter(gate_decisions.values()))
@@ -1714,7 +2076,8 @@ class RemNoteParserOptimized:
         return [
             key
             for key in metadata
-            if key in technical_keys or any(key.startswith(prefix) for prefix in technical_prefixes)
+            if key in technical_keys
+            or any(key.startswith(prefix) for prefix in technical_prefixes)
         ]
 
     def _assign_relationships(
@@ -1738,12 +2101,17 @@ class RemNoteParserOptimized:
             if child_id not in parent_node.metadata["child_ids"]:
                 parent_node.metadata["child_ids"].append(child_id)
             parent_node.relationships.setdefault(node_relationship.CHILD, [])
-            if not any(info.node_id == child_id for info in parent_node.relationships[node_relationship.CHILD]):
+            if not any(
+                info.node_id == child_id
+                for info in parent_node.relationships[node_relationship.CHILD]
+            ):
                 parent_node.relationships[node_relationship.CHILD].append(
-                    related_node_info(node_id=child_id, metadata={"title": child_node.text[:160]})
+                    related_node_info(
+                        node_id=child_id, metadata={"title": child_node.text[:160]}
+                    )
                 )
 
-        def parent_chunk_id_for(chunk: RetrievalChunk) -> Optional[str]:
+        def parent_chunk_id_for(chunk: RetrievalChunk) -> str | None:
             candidate_block_ids = list(reversed(chunk.context_block_ids))
             if chunk.parent_block_id:
                 candidate_block_ids.append(chunk.parent_block_id)
@@ -1751,7 +2119,11 @@ class RemNoteParserOptimized:
             seen_blocks: set[str] = set()
             for block_id in candidate_block_ids:
                 current_id = block_id
-                while current_id and current_id in blocks_by_id and current_id not in seen_blocks:
+                while (
+                    current_id
+                    and current_id in blocks_by_id
+                    and current_id not in seen_blocks
+                ):
                     seen_blocks.add(current_id)
                     mapped_chunk_id = block_to_chunk_id.get(current_id)
                     if mapped_chunk_id and mapped_chunk_id != chunk.id:
@@ -1778,10 +2150,14 @@ class RemNoteParserOptimized:
 
         groups: dict[tuple[str, tuple[str, ...]], list[RetrievalChunk]] = {}
         for chunk in chunks:
-            groups.setdefault((chunk.source, tuple(chunk.heading_path or chunk.path)), []).append(chunk)
+            groups.setdefault(
+                (chunk.source, tuple(chunk.heading_path or chunk.path)), []
+            ).append(chunk)
 
         for group_chunks in groups.values():
-            ordered = sorted(group_chunks, key=lambda item: (item.line_start, item.line_end, item.id))
+            ordered = sorted(
+                group_chunks, key=lambda item: (item.line_start, item.line_end, item.id)
+            )
             for previous_chunk, next_chunk in zip(ordered, ordered[1:]):
                 previous_node = nodes_by_id[previous_chunk.id]
                 next_node = nodes_by_id[next_chunk.id]
@@ -1798,16 +2174,21 @@ class RemNoteParserOptimized:
         """Converts accepted RetrievalChunk records to LlamaIndex TextNodes."""
 
         text_node_cls, node_relationship, related_node_info = self._llama_index_schema()
-        resources_by_id = {resource.id: resource for resource in result.external_resources}
+        resources_by_id = {
+            resource.id: resource for resource in result.external_resources
+        }
         gates_by_resource_id = {
-            decision.external_resource_id: decision for decision in result.artifact_gate_decisions
+            decision.external_resource_id: decision
+            for decision in result.artifact_gate_decisions
         }
         nodes: list[Any] = []
         nodes_by_id: dict[str, Any] = {}
 
         for chunk in result.retrieval_chunks:
             node_text = chunk.embedding_text or chunk.text
-            metadata = self._chunk_metadata(chunk, resources_by_id, gates_by_resource_id)
+            metadata = self._chunk_metadata(
+                chunk, resources_by_id, gates_by_resource_id
+            )
             node = text_node_cls(
                 text=node_text,
                 metadata=metadata,
@@ -1818,7 +2199,13 @@ class RemNoteParserOptimized:
             nodes.append(node)
             nodes_by_id[chunk.id] = node
 
-        self._assign_relationships(nodes_by_id, result.retrieval_chunks, result, node_relationship, related_node_info)
+        self._assign_relationships(
+            nodes_by_id,
+            result.retrieval_chunks,
+            result,
+            node_relationship,
+            related_node_info,
+        )
         return nodes
 
     def get_text_nodes(self) -> list[Any]:
@@ -1842,10 +2229,12 @@ class RemNoteParserOptimized:
         kg_storage = self._ensure_storage()
         if not text_nodes:
             return
-        kg_storage.storage_context.docstore.add_documents(text_nodes, allow_update=allow_update)
+        kg_storage.storage_context.docstore.add_documents(
+            text_nodes, allow_update=allow_update
+        )
         self._persist_if_local()
 
-    def run(self) -> Optional[OptimizedParseResult]:
+    def run(self) -> OptimizedParseResult | None:
         """Runs the optimized shadow parsing pipeline with production-parser idempotency."""
 
         if self._docstore_docs():

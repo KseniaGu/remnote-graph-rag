@@ -1,11 +1,15 @@
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any
 
 from pymongo import MongoClient
 
-from backend.configs.constants import CACHE_SCHEMA_VERSION, DEFAULT_CACHE_COLLECTION_NAME, DEFAULT_TTL_SECONDS
+from backend.configs.constants import (
+    CACHE_SCHEMA_VERSION,
+    DEFAULT_CACHE_COLLECTION_NAME,
+    DEFAULT_TTL_SECONDS,
+)
 from backend.utils.helpers import logger
 
 
@@ -22,13 +26,14 @@ class QuickActionAnswerCache:
     """
 
     def __init__(
-            self,
-            settings: Optional[Any] = None,
-            collection_name: str = DEFAULT_CACHE_COLLECTION_NAME,
-            ttl_seconds: Optional[int] = None,
+        self,
+        settings: Any | None = None,
+        collection_name: str = DEFAULT_CACHE_COLLECTION_NAME,
+        ttl_seconds: int | None = None,
     ) -> None:
         if settings is None:
             from backend.configs.storage import StorageSettings
+
             settings = StorageSettings().checkpoint_storage
         self.settings = settings
         self.collection_name = collection_name
@@ -38,7 +43,7 @@ class QuickActionAnswerCache:
         self._indexes_ready = False
 
     @staticmethod
-    def _get_ttl_seconds(explicit_ttl: Optional[int]) -> Optional[int]:
+    def _get_ttl_seconds(explicit_ttl: int | None) -> int | None:
         if explicit_ttl is not None:
             return explicit_ttl if explicit_ttl > 0 else None
 
@@ -65,13 +70,15 @@ class QuickActionAnswerCache:
             self._collection.create_index("expires_at", expireAfterSeconds=0)
         self._indexes_ready = True
 
-    def get(self, prompt: str) -> Optional[dict[str, Any]]:
+    def get(self, prompt: str) -> dict[str, Any] | None:
         """Returns cached response payload for a prompt, or None on miss/error."""
         key = normalize_quick_action_prompt(prompt)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
-            doc = self._get_collection().find_one({"_id": key, "schema_version": CACHE_SCHEMA_VERSION})
+            doc = self._get_collection().find_one(
+                {"_id": key, "schema_version": CACHE_SCHEMA_VERSION}
+            )
         except Exception as e:
             logger.warning(f"Quick-action cache read failed: {e}")
             return None
@@ -82,7 +89,7 @@ class QuickActionAnswerCache:
         expires_at = doc.get("expires_at")
         if expires_at is not None:
             if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
+                expires_at = expires_at.replace(tzinfo=UTC)
             if expires_at <= now:
                 return None
 
@@ -94,21 +101,25 @@ class QuickActionAnswerCache:
         }
 
     def set(
-            self,
-            prompt: str,
-            responses: list[dict[str, str]],
-            visual_artifacts: list[dict[str, Any]],
-            context: str = "",
-            agent_history: Optional[list[str]] = None,
-            ttl_seconds: Optional[int] = None,
+        self,
+        prompt: str,
+        responses: list[dict[str, str]],
+        visual_artifacts: list[dict[str, Any]],
+        context: str = "",
+        agent_history: list[str] | None = None,
+        ttl_seconds: int | None = None,
     ) -> bool:
         """Stores a quick-action answer. Returns False if MongoDB is unavailable."""
         if not responses and not visual_artifacts:
             return False
 
         key = normalize_quick_action_prompt(prompt)
-        now = datetime.now(timezone.utc)
-        effective_ttl = self._get_ttl_seconds(ttl_seconds) if ttl_seconds is not None else self.ttl_seconds
+        now = datetime.now(UTC)
+        effective_ttl = (
+            self._get_ttl_seconds(ttl_seconds)
+            if ttl_seconds is not None
+            else self.ttl_seconds
+        )
         doc = {
             "_id": key,
             "schema_version": CACHE_SCHEMA_VERSION,

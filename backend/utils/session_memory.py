@@ -1,13 +1,18 @@
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any
 
 from pymongo import MongoClient
 
-from backend.configs.constants import SESSION_MEMORY_SCHEMA_VERSION, DEFAULT_SESSION_MEMORY_COLLECTION_NAME, \
-    DEFAULT_RECENT_MESSAGE_LIMIT, DEFAULT_MAX_MESSAGE_CHARS, DEFAULT_SUMMARY_MAX_CHARS, \
-    DEFAULT_SESSION_MEMORY_TTL_SECONDS
+from backend.configs.constants import (
+    DEFAULT_MAX_MESSAGE_CHARS,
+    DEFAULT_RECENT_MESSAGE_LIMIT,
+    DEFAULT_SESSION_MEMORY_COLLECTION_NAME,
+    DEFAULT_SESSION_MEMORY_TTL_SECONDS,
+    DEFAULT_SUMMARY_MAX_CHARS,
+    SESSION_MEMORY_SCHEMA_VERSION,
+)
 from backend.configs.storage import StorageSettings
 from backend.utils.helpers import logger
 
@@ -35,8 +40,8 @@ def compress_text(text: str, max_chars: int = DEFAULT_MAX_MESSAGE_CHARS) -> str:
 
 
 def format_messages_for_memory(
-        messages: list[dict[str, str]],
-        max_message_chars: int = DEFAULT_MAX_MESSAGE_CHARS,
+    messages: list[dict[str, str]],
+    max_message_chars: int = DEFAULT_MAX_MESSAGE_CHARS,
 ) -> str:
     """Formats persisted messages into a compact prompt block."""
     chunks = []
@@ -51,8 +56,8 @@ def format_messages_for_memory(
 
 
 def build_extractive_summary(
-        messages: list[dict[str, str]],
-        max_chars: int = DEFAULT_SUMMARY_MAX_CHARS,
+    messages: list[dict[str, str]],
+    max_chars: int = DEFAULT_SUMMARY_MAX_CHARS,
 ) -> str:
     """Builds a cheap, deterministic summary from older turns.
 
@@ -115,16 +120,16 @@ class SessionMemoryStore:
     """MongoDB-backed chat memory independent of LangGraph checkpoints."""
 
     def __init__(
-            self,
-            settings: Optional[Any] = None,
-            collection_name: str = DEFAULT_SESSION_MEMORY_COLLECTION_NAME,
+        self,
+        settings: Any | None = None,
+        collection_name: str = DEFAULT_SESSION_MEMORY_COLLECTION_NAME,
     ) -> None:
         if settings is None:
             settings = StorageSettings().checkpoint_storage
         self.settings = settings
         self.collection_name = collection_name
-        self._client: Optional[Any] = None
-        self._collection: Optional[Any] = None
+        self._client: Any | None = None
+        self._collection: Any | None = None
         self._indexes_ready = False
 
     def _get_collection(self) -> Any:
@@ -148,7 +153,7 @@ class SessionMemoryStore:
         self._collection.create_index("expires_at", expireAfterSeconds=0)
         self._indexes_ready = True
 
-    def get(self, session_id: str) -> Optional[dict[str, Any]]:
+    def get(self, session_id: str) -> dict[str, Any] | None:
         """Returns a persisted session memory document, or None on miss/error."""
         safe_session_id = normalize_session_id(session_id)
         if not safe_session_id:
@@ -156,7 +161,10 @@ class SessionMemoryStore:
 
         try:
             doc = self._get_collection().find_one(
-                {"_id": safe_session_id, "schema_version": SESSION_MEMORY_SCHEMA_VERSION}
+                {
+                    "_id": safe_session_id,
+                    "schema_version": SESSION_MEMORY_SCHEMA_VERSION,
+                }
             )
         except Exception as e:
             logger.warning(f"Session memory read failed: {e}")
@@ -167,8 +175,8 @@ class SessionMemoryStore:
         expires_at = doc.get("expires_at")
         if expires_at is not None:
             if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at <= datetime.now(timezone.utc):
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= datetime.now(UTC):
                 return None
         return doc
 
@@ -183,22 +191,24 @@ class SessionMemoryStore:
         return doc.get("summary", "")
 
     def replace_messages(
-            self,
-            session_id: str,
-            messages: list[dict[str, str]],
-            recent_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
-            session_history: Optional[list[dict[str, Any]]] = None,
-            recent_maps: Optional[list[dict[str, Any]]] = None,
-            visual_artifacts: Optional[list[dict[str, Any]]] = None,
+        self,
+        session_id: str,
+        messages: list[dict[str, str]],
+        recent_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
+        session_history: list[dict[str, Any]] | None = None,
+        recent_maps: list[dict[str, Any]] | None = None,
+        visual_artifacts: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Persists browser-session messages, summary, and optional UI restore metadata."""
         safe_session_id = normalize_session_id(session_id)
         if not safe_session_id:
             return False
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         safe_messages = make_bson_safe(messages)
-        older_messages = safe_messages[:-recent_limit] if len(safe_messages) > recent_limit else []
+        older_messages = (
+            safe_messages[:-recent_limit] if len(safe_messages) > recent_limit else []
+        )
         summary = build_extractive_summary(older_messages)
         doc = {
             "_id": safe_session_id,
@@ -217,7 +227,9 @@ class SessionMemoryStore:
             doc["visual_artifacts"] = make_bson_safe(visual_artifacts)
 
         try:
-            self._get_collection().replace_one({"_id": safe_session_id}, doc, upsert=True)
+            self._get_collection().replace_one(
+                {"_id": safe_session_id}, doc, upsert=True
+            )
         except Exception as e:
             logger.warning(f"Session memory write failed: {e}")
             return False

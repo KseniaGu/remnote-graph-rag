@@ -42,7 +42,9 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
 # Chat area
 # ---------------------------------------------------------------------------
 CHAT_EMPTY_HEADING = "Start from a concept"
-CHAT_EMPTY_SUBTEXT = "Ask a question, request interview practice, or map relationships from your notes."
+CHAT_EMPTY_SUBTEXT = (
+    "Ask a question, request interview practice, or map relationships from your notes."
+)
 CHAT_INPUT_PLACEHOLDER = "Ask your knowledge base..."
 CHAT_PROCESSING_LABEL = "Processing"
 
@@ -51,8 +53,16 @@ CHAT_PROCESSING_LABEL = "Processing"
 # ---------------------------------------------------------------------------
 QUICK_ACTIONS: list[tuple[str, str, str]] = [
     ("graduation-cap", "Practice a concept", "Quiz me on Diffusions topic"),
-    ("search", "Search my notes", "What information do I have about Transformer architecture?"),
-    ("book-open-text", "Research a topic", "Research the latest developments in fine-tuning LLMs"),
+    (
+        "search",
+        "Search my notes",
+        "What information do I have about Transformer architecture?",
+    ),
+    (
+        "book-open-text",
+        "Research a topic",
+        "Research the latest developments in fine-tuning LLMs",
+    ),
     ("network", "Map relationships", "Visualize my knowledge about BERT"),
 ]
 
@@ -112,7 +122,9 @@ GRAPH_UNAVAILABLE_HEADING = "Knowledge graph unavailable"
 GRAPH_LOADING_HEADING = "Preparing knowledge graph"
 GRAPH_LOADING_SUBTEXT = "Searching graph data and arranging the visualization."
 GRAPH_EMPTY_HEADING = "No knowledge graph yet"
-GRAPH_EMPTY_SUBTEXT = "Ask to map relationships from your notes, then the graph will appear here."
+GRAPH_EMPTY_SUBTEXT = (
+    "Ask to map relationships from your notes, then the graph will appear here."
+)
 
 # ---------------------------------------------------------------------------
 # Context debug panel

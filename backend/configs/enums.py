@@ -1,4 +1,4 @@
-from enum import StrEnum, Enum
+from enum import Enum, StrEnum
 
 
 class ModelRoleType(Enum):
@@ -7,6 +7,7 @@ class ModelRoleType(Enum):
     The role value is a tuple consisting of an integer ID and a boolean value indicating whether the model is being used
     as a system agent.
     """
+
     other = (0, False)
     embedder = (1, False)
     orchestrator = (2, True)
@@ -20,16 +21,22 @@ class ModelRoleType(Enum):
     def get_all_members(cls, is_agent: bool = None):
         if is_agent is None:
             return list(cls.__members__.keys())
-        return [key for key in cls.__members__.keys() if getattr(cls, key).value[1] == is_agent]
+        return [
+            key
+            for key in cls.__members__.keys()
+            if getattr(cls, key).value[1] == is_agent
+        ]
 
 
 class PromptType(StrEnum):
     """A class representing different types of prompts used with language models."""
+
     learner_workflow = "learner_workflow"
 
 
 class PDFParsingStatus(StrEnum):
     """A class representing the status of PDF file parsing."""
+
     file_exists = "PDF file is already saved"
     success = "PDF file is saved successfully"
     failed = "Error occurred while trying to save PDF"
@@ -37,6 +44,7 @@ class PDFParsingStatus(StrEnum):
 
 class ImageParsingStatus(StrEnum):
     """A class representing the status of image file parsing."""
+
     file_exists = "Image file is already saved"
     success = "Image file is saved successfully"
     failed = "Error occurred while trying to save image"
@@ -44,6 +52,7 @@ class ImageParsingStatus(StrEnum):
 
 class TextParsingStatus(StrEnum):
     """A class representing the status of text file parsing."""
+
     file_exists = "Text file is already saved"
     success = "Text file is saved successfully"
     failed = "Error occurred while trying to save text"
@@ -51,6 +60,7 @@ class TextParsingStatus(StrEnum):
 
 class ContentType(StrEnum):
     """A class representing different content types for HTTP responses."""
+
     application_json = "application/json"
     text_html = "text/html"
     text_plain = "text/plain"
@@ -60,6 +70,7 @@ class ContentType(StrEnum):
 
 class StorageType(StrEnum):
     """A class representing different types of storage backends."""
+
     local = "local"
     redis = "redis"
     neo4j = "neo4j"
@@ -70,6 +81,7 @@ class StorageType(StrEnum):
 
 class ExternalSourceUrlType(StrEnum):
     """A class representing different types of external URL sources."""
+
     source = "[SOURCE URL]"
     image = "[IMG URL]"
     article = "[ARTICLE URL]"
@@ -77,6 +89,7 @@ class ExternalSourceUrlType(StrEnum):
 
 class KnowledgeGraphEntity(StrEnum):
     """A class representing entity types in the knowledge graph."""
+
     model = "MODEL"
     concept = "CONCEPT"
     component = "COMPONENT"
@@ -89,6 +102,7 @@ class KnowledgeGraphEntity(StrEnum):
 
 class KnowledgeGraphRelation(StrEnum):
     """A class representing relation types between entities in the knowledge graph."""
+
     is_a = "IS_A"  # Hierarchy (ReLU is_a Activation Function)
     part_of = "PART_OF"  # Structure (Attention part_of Transformer)
     calculates = "CALCULATES"  # Math (Softmax calculates Probability)
@@ -100,6 +114,7 @@ class KnowledgeGraphRelation(StrEnum):
 
 class LLMProviderType(StrEnum):
     """Supported LLM inference providers."""
+
     ollama = "ollama"
     vllm = "vllm"
     openai = "openai"
@@ -108,6 +123,7 @@ class LLMProviderType(StrEnum):
 
 class WorkflowEventType(str, Enum):
     """Types of events emitted by the workflow."""
+
     AGENT_START = "agent_start"
     AGENT_END = "agent_end"
     CONTEXT_UPDATE = "context_update"

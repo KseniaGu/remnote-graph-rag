@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 from backend.configs.constants import MAX_SOURCE_CHARS, RELATION_DROP_SCORE
 
-
 FACT_BLOCK_HEADER = "Here are some facts extracted from the provided text:"
 PROPERTY_PATTERN = re.compile(r"\(\{.*?\}\)", re.DOTALL)
 
@@ -73,7 +72,9 @@ class QueryEvidenceResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-def evidence_from_retrieved_node(item: Any, *, query: str, rank: int) -> list[SourceEvidence | RelationEvidence]:
+def evidence_from_retrieved_node(
+    item: Any, *, query: str, rank: int
+) -> list[SourceEvidence | RelationEvidence]:
     node, score = _unwrap_retrieved_item(item)
     text = _node_text(node)
     metadata = normalize_metadata(node)
@@ -92,7 +93,9 @@ def evidence_from_retrieved_node(item: Any, *, query: str, rank: int) -> list[So
         ]
 
     if FACT_BLOCK_HEADER in text:
-        return _evidence_from_fact_block(text, score=score, rank=rank, metadata=metadata)
+        return _evidence_from_fact_block(
+            text, score=score, rank=rank, metadata=metadata
+        )
 
     return _evidence_from_relation_text(text, score=score, rank=rank, metadata=metadata)
 
@@ -108,14 +111,20 @@ def normalize_metadata(node: Any) -> NormalizedMetadata:
         source=_string_or_none(metadata.get("source")),
         path=_string_list(metadata.get("path")),
         heading_path=_string_list(metadata.get("heading_path")),
-        line_start=_int_or_none(metadata.get("line_start") if metadata.get("line_start") is not None else metadata.get("line_number")),
+        line_start=_int_or_none(
+            metadata.get("line_start")
+            if metadata.get("line_start") is not None
+            else metadata.get("line_number")
+        ),
         line_end=_int_or_none(metadata.get("line_end")),
         source_block_ids=_string_list(metadata.get("source_block_ids")),
         external_resource_ids=_string_list(metadata.get("external_resource_ids")),
         retrieval_enabled=_bool_or_none(metadata.get("retrieval_enabled")),
         graph_enabled=_bool_or_none(metadata.get("graph_enabled")),
         quarantined=_bool_or_none(metadata.get("quarantined")),
-        postprocess_decision_id=_string_or_none(metadata.get("postprocess_decision_id")),
+        postprocess_decision_id=_string_or_none(
+            metadata.get("postprocess_decision_id")
+        ),
         raw=metadata,
     )
 
@@ -131,7 +140,9 @@ def format_search_results(results: list[QueryEvidenceResult]) -> str:
         for evidence in result.items:
             if isinstance(evidence, RelationEvidence):
                 query_lines.append(
-                    _clean(f"[RELATION] {evidence.raw_relation} (Score: {_score_for_display(evidence.score):.2f})")
+                    _clean(
+                        f"[RELATION] {evidence.raw_relation} (Score: {_score_for_display(evidence.score):.2f})"
+                    )
                 )
 
             if isinstance(evidence, SourceEvidence) and evidence.text:
@@ -139,7 +150,11 @@ def format_search_results(results: list[QueryEvidenceResult]) -> str:
                 dedup_key = clipped[:120]
                 if dedup_key not in seen_sources_global:
                     seen_sources_global.add(dedup_key)
-                    score_tag = "" if evidence.derived_from_relation_node else f" (Score: {_score_for_display(evidence.score):.2f})"
+                    score_tag = (
+                        ""
+                        if evidence.derived_from_relation_node
+                        else f" (Score: {_score_for_display(evidence.score):.2f})"
+                    )
                     query_lines.append(f"[SOURCE]{score_tag} {_clean(clipped)}")
 
             for path in _evidence_paths(evidence):
@@ -185,14 +200,18 @@ def _evidence_from_fact_block(
     warnings: list[str] = []
     parts = text.split("\n\n", 2)
     if len(parts) < 3:
-        warnings.append("fact block did not contain expected relation and source sections")
+        warnings.append(
+            "fact block did not contain expected relation and source sections"
+        )
         relations_text = text.replace(FACT_BLOCK_HEADER, "").strip()
         source_text = ""
     else:
         _, relations_text, source_text = parts
 
     evidence: list[SourceEvidence | RelationEvidence] = []
-    for relation_line in _ordered_unique(line.strip() for line in relations_text.splitlines() if line.strip()):
+    for relation_line in _ordered_unique(
+        line.strip() for line in relations_text.splitlines() if line.strip()
+    ):
         parsed = _parse_relation_line(relation_line)
         evidence.append(
             RelationEvidence(
@@ -244,7 +263,9 @@ def _evidence_from_relation_text(
         return []
 
     parsed = _parse_relation_line(text)
-    source_paths = _paths_from_properties(parsed["properties"]) or _metadata_paths(metadata)
+    source_paths = _paths_from_properties(parsed["properties"]) or _metadata_paths(
+        metadata
+    )
     relation_text = parsed["raw_relation"]
 
     if "CHILD" in text:
@@ -292,7 +313,11 @@ def _parse_relation_line(line: str) -> dict[str, Any]:
         relation = _replace_property_in_relation(relation, raw_property, parsed)
 
         internal_name = parsed.get("name")
-        display_name = parsed.get("entity_name") or parsed.get("display_name") or parsed.get("text")
+        display_name = (
+            parsed.get("entity_name")
+            or parsed.get("display_name")
+            or parsed.get("text")
+        )
         if internal_name and display_name:
             id_to_name[str(internal_name)] = str(display_name)
 
@@ -311,14 +336,18 @@ def _parse_relation_line(line: str) -> dict[str, Any]:
         "evidence_chunk_ids": _ordered_unique(
             value
             for prop in properties
-            for value in _string_list(prop.get("evidence_chunk_ids") or prop.get("source_chunk_ids"))
+            for value in _string_list(
+                prop.get("evidence_chunk_ids") or prop.get("source_chunk_ids")
+            )
         ),
         "evidence_spans": _ordered_unique(
             value
             for prop in properties
             for value in _string_list(prop.get("evidence_spans"))
         ),
-        "confidence": _max_number(prop.get("max_confidence") or prop.get("confidence") for prop in properties),
+        "confidence": _max_number(
+            prop.get("max_confidence") or prop.get("confidence") for prop in properties
+        ),
         "warnings": warnings,
     }
 
@@ -334,7 +363,9 @@ def _parse_property(raw_property: str) -> dict[str, Any] | None:
     return None
 
 
-def _replace_property_in_relation(relation: str, raw_property: str, prop: dict[str, Any]) -> str:
+def _replace_property_in_relation(
+    relation: str, raw_property: str, prop: dict[str, Any]
+) -> str:
     label = _label_from_property(prop)
     internal_name = _string_or_none(prop.get("name"))
 
@@ -347,7 +378,9 @@ def _replace_property_in_relation(relation: str, raw_property: str, prop: dict[s
     return relation.replace(raw_property, label)
 
 
-def _child_relation_from_properties(properties: list[dict[str, Any]]) -> tuple[str, list[str]] | None:
+def _child_relation_from_properties(
+    properties: list[dict[str, Any]],
+) -> tuple[str, list[str]] | None:
     node_texts: list[str] = []
     parsed_paths: list[str] = []
 

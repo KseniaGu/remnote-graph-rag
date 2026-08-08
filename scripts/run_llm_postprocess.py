@@ -17,7 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.data_processing.concept_registry import DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION
+from backend.data_processing.concept_registry import (
+    DEFAULT_CONCEPT_RESOLUTION_PROMPT_VERSION,
+)
 from backend.data_processing.llm_postprocess import (
     DEFAULT_CONCEPT_RESOLUTION_NUM_PREDICT,
     DEFAULT_LLM_BASE_URL,
@@ -52,8 +54,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="LLM sidecar post-processing for optimized RemNote parser chunks."
     )
-    parser.add_argument("--input-dir", required=True, type=Path, help="Directory with optimized parser IR JSONL files.")
-    parser.add_argument("--output-dir", required=True, type=Path, help="Directory for sidecar postprocess outputs.")
+    parser.add_argument(
+        "--input-dir",
+        required=True,
+        type=Path,
+        help="Directory with optimized parser IR JSONL files.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        required=True,
+        type=Path,
+        help="Directory for sidecar postprocess outputs.",
+    )
     parser.add_argument(
         "--concept-resolution-only",
         action="store_true",
@@ -109,8 +121,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Ignore cached LLM responses and call the model again.",
     )
-    parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME, help="Ollama model name.")
-    parser.add_argument("--prompt-version", default=DEFAULT_PROMPT_VERSION, help="Prompt version under remnote_postprocess.")
+    parser.add_argument(
+        "--model-name", default=DEFAULT_MODEL_NAME, help="Ollama model name."
+    )
+    parser.add_argument(
+        "--prompt-version",
+        default=DEFAULT_PROMPT_VERSION,
+        help="Prompt version under remnote_postprocess.",
+    )
     parser.add_argument(
         "--concept-resolution-mode",
         choices=("off", "deterministic", "llm"),
@@ -136,8 +154,12 @@ def parse_args() -> argparse.Namespace:
             "--allow-full-run, otherwise the smoke-test limit."
         ),
     )
-    parser.add_argument("--prompt-dir", type=Path, default=ROOT / "backend" / "llm" / "prompts")
-    parser.add_argument("--max-batch-chunks", type=int, default=DEFAULT_MAX_BATCH_CHUNKS)
+    parser.add_argument(
+        "--prompt-dir", type=Path, default=ROOT / "backend" / "llm" / "prompts"
+    )
+    parser.add_argument(
+        "--max-batch-chunks", type=int, default=DEFAULT_MAX_BATCH_CHUNKS
+    )
     parser.add_argument("--max-batch-chars", type=int, default=DEFAULT_MAX_BATCH_CHARS)
     parser.add_argument("--base-url", default=DEFAULT_LLM_BASE_URL)
     parser.add_argument("--temperature", type=float, default=DEFAULT_LLM_TEMPERATURE)
@@ -166,7 +188,9 @@ def main() -> int:
     all_inputs = inputs_from_jsonl_dir(args.input_dir)
     candidates = select_candidate_inputs(all_inputs)
     excluded_chunk_ids = load_excluded_chunk_ids(args.exclude_output_dir)
-    candidate_pool = [item for item in candidates if item.chunk_id not in excluded_chunk_ids]
+    candidate_pool = [
+        item for item in candidates if item.chunk_id not in excluded_chunk_ids
+    ]
     selected_inputs = select_run_inputs(
         candidate_pool,
         limit=args.limit,
@@ -186,7 +210,9 @@ def main() -> int:
             decisions=[],
             failures=[],
         )
-        print(f"Dry run complete. Report: {args.output_dir / 'llm_postprocess_report.md'}")
+        print(
+            f"Dry run complete. Report: {args.output_dir / 'llm_postprocess_report.md'}"
+        )
         print(json.dumps(report, indent=2))
         return 0
 
@@ -209,9 +235,15 @@ def main() -> int:
         concept_cache_hits=concept_result.cache_hits,
         concept_cache_misses=concept_result.cache_misses,
     )
-    print(f"Postprocess complete. Report: {args.output_dir / 'llm_postprocess_report.md'}")
+    print(
+        f"Postprocess complete. Report: {args.output_dir / 'llm_postprocess_report.md'}"
+    )
     print(json.dumps(report, indent=2))
-    concept_failures = concept_result.resolution.adjudication_failures if concept_result.resolution else []
+    concept_failures = (
+        concept_result.resolution.adjudication_failures
+        if concept_result.resolution
+        else []
+    )
     return 1 if pass_result.failures or concept_failures else 0
 
 
@@ -224,7 +256,9 @@ def run_concept_resolution_only(args: argparse.Namespace) -> int:
 
     validate_concept_resolution_only_args(args)
     inputs, decisions, failures = load_existing_postprocess_sidecars(args.input_dir)
-    print(f"Loaded {len(inputs)} inputs, {len(decisions)} decisions, {len(failures)} existing failures.")
+    print(
+        f"Loaded {len(inputs)} inputs, {len(decisions)} decisions, {len(failures)} existing failures."
+    )
     concept_result = resolve_concepts(
         args,
         args.output_dir,
@@ -241,7 +275,9 @@ def run_concept_resolution_only(args: argparse.Namespace) -> int:
         concept_cache_hits=concept_result.cache_hits,
         concept_cache_misses=concept_result.cache_misses,
     )
-    print(f"Concept resolution complete. Report: {args.output_dir / 'llm_postprocess_report.md'}")
+    print(
+        f"Concept resolution complete. Report: {args.output_dir / 'llm_postprocess_report.md'}"
+    )
     print(json.dumps(report, indent=2))
     concept_resolution = concept_result.resolution
     return 1 if concept_resolution and concept_resolution.adjudication_failures else 0

@@ -17,6 +17,7 @@ env:
   MODEL_CACHE_BUILD_DIR: .docker-build/sentence-transformers
   RUNTIME_STORAGE_BUCKET_NAME: ${{ vars.STORAGE_BUCKET_NAME }}
   RUNTIME_STORAGE_BUILD_DIR: .docker-build/runtime-storage
+  ASSET_BASE_URL: "https://storage.googleapis.com/${{ secrets.GCP_PROJECT_ID }}-remnote-graph-rag-assets"
 
 jobs:
   deploy:
@@ -124,7 +125,7 @@ jobs:
             --port 8000 \
             --quiet \
             --allow-unauthenticated \
-            --memory 2Gi \
+            --memory 4Gi \
             --cpu 2 \
             --timeout 300 \
             --min-instances 1 \
@@ -215,6 +216,7 @@ jobs:
         run: |
           docker build \
             --build-arg API_URL=$BACKEND_URL \
+            --build-arg ASSET_BASE_URL="$ASSET_BASE_URL" \
             -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY_REPOSITORY/remnote-graph-rag-frontend:${{ github.sha }} \
             -f deploy/Dockerfile.frontend .
 

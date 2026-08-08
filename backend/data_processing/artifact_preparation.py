@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 
 def parsed_roots_from_settings(path_settings: Any) -> list[Path]:
@@ -25,7 +26,7 @@ def ensure_parsed_dirs(path_settings: Any) -> None:
         root.mkdir(parents=True, exist_ok=True)
 
 
-def copy_existing_artifacts(source_dir: Optional[Path], target_dir: Path) -> int:
+def copy_existing_artifacts(source_dir: Path | None, target_dir: Path) -> int:
     """Copies reviewed cached OCR Markdown artifacts into an isolated parsed-image cache.
 
     Only Markdown files are copied, relative paths are preserved, and existing
@@ -66,11 +67,22 @@ def prepare_external_artifacts(
 ) -> int:
     """Downloads and parse unresolved external resources into the configured caches."""
 
-    from backend.configs.enums import ImageParsingStatus, PDFParsingStatus, TextParsingStatus
-    from backend.data_processing.parser_optimized import OptimizedRemNoteParser, is_bad_artifact_path
-    from backend.data_processing.utils import save_image_by_url, save_pdf_by_url, save_text_by_url
-
     import requests
+
+    from backend.configs.enums import (
+        ImageParsingStatus,
+        PDFParsingStatus,
+        TextParsingStatus,
+    )
+    from backend.data_processing.parser_optimized import (
+        OptimizedRemNoteParser,
+        is_bad_artifact_path,
+    )
+    from backend.data_processing.utils import (
+        save_image_by_url,
+        save_pdf_by_url,
+        save_text_by_url,
+    )
 
     ensure_parsed_dirs(path_settings)
     preliminary = OptimizedRemNoteParser(
@@ -78,7 +90,9 @@ def prepare_external_artifacts(
         parsed_roots=parsed_roots_from_settings(path_settings),
     ).run()
     unresolved_resources = [
-        resource for resource in preliminary.external_resources if resource.parse_status == "not_resolved"
+        resource
+        for resource in preliminary.external_resources
+        if resource.parse_status == "not_resolved"
     ]
     if not unresolved_resources:
         return 0
@@ -88,8 +102,13 @@ def prepare_external_artifacts(
         try:
             response = requests.get(resource.url, timeout=30)
             response.raise_for_status()
-            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
-            artifact_path: Optional[Path] = None
+            content_type = (
+                response.headers.get("Content-Type", "")
+                .split(";", 1)[0]
+                .strip()
+                .casefold()
+            )
+            artifact_path: Path | None = None
 
             if "image" in content_type or resource.content_type_hint == "image":
                 status, saved_file_path = save_image_by_url(
@@ -99,32 +118,40 @@ def prepare_external_artifacts(
                     resource.url,
                     Path(path_settings.parsed_images_dir),
                 )
-                if status in (ImageParsingStatus.file_exists, ImageParsingStatus.success) and not is_bad_artifact_path(
-                    str(saved_file_path)
-                ):
+                if status in (
+                    ImageParsingStatus.file_exists,
+                    ImageParsingStatus.success,
+                ) and not is_bad_artifact_path(str(saved_file_path)):
                     artifact_path = get_ocr_pipeline().parse_image(saved_file_path)
 
-            elif "pdf" in content_type or resource.content_type_hint == "application/pdf":
+            elif (
+                "pdf" in content_type or resource.content_type_hint == "application/pdf"
+            ):
                 status, saved_file_path = save_pdf_by_url(
                     response,
                     resource.label,
                     resource.url,
                     Path(path_settings.parsed_pdfs_dir),
                 )
-                if status in (PDFParsingStatus.file_exists, PDFParsingStatus.success) and not is_bad_artifact_path(
-                    str(saved_file_path)
-                ):
+                if status in (
+                    PDFParsingStatus.file_exists,
+                    PDFParsingStatus.success,
+                ) and not is_bad_artifact_path(str(saved_file_path)):
                     artifact_path = get_ocr_pipeline().parse_pdf(saved_file_path)
 
-            elif content_type.startswith("text/") or content_type in {"application/xhtml+xml", "application/xml"}:
+            elif content_type.startswith("text/") or content_type in {
+                "application/xhtml+xml",
+                "application/xml",
+            }:
                 status, saved_file_path = save_text_by_url(
                     resource.label,
                     resource.url,
                     Path(path_settings.parsed_texts_dir),
                 )
-                if status in (TextParsingStatus.file_exists, TextParsingStatus.success) and not is_bad_artifact_path(
-                    str(saved_file_path)
-                ):
+                if status in (
+                    TextParsingStatus.file_exists,
+                    TextParsingStatus.success,
+                ) and not is_bad_artifact_path(str(saved_file_path)):
                     artifact_path = saved_file_path
 
             if artifact_path and Path(artifact_path).exists():

@@ -73,7 +73,9 @@ class OptimizedParserTest(unittest.TestCase):
                 "Parsed artifact section with enough semantic content to be useful in retrieval. "
                 "It should remain linked to its parent RemNote block and expose the artifact line span."
             )
-            (parsed_images / "Screenshot.md").write_text(artifact_text, encoding="utf-8")
+            (parsed_images / "Screenshot.md").write_text(
+                artifact_text, encoding="utf-8"
+            )
             (raw_dir / "Source.md").write_text(
                 "\n".join(
                     [
@@ -120,7 +122,11 @@ class OptimizedParserTest(unittest.TestCase):
             self.assertIsInstance(chunk.line_start, int)
             self.assertIsInstance(chunk.line_end, int)
 
-        artifact_chunks = [chunk for chunk in result.retrieval_chunks if chunk.chunk_type == "external_artifact"]
+        artifact_chunks = [
+            chunk
+            for chunk in result.retrieval_chunks
+            if chunk.chunk_type == "external_artifact"
+        ]
         self.assertEqual(len(artifact_chunks), 1)
         self.assertIsNotNone(artifact_chunks[0].artifact_path)
         self.assertIsNotNone(artifact_chunks[0].artifact_line_start)
@@ -148,7 +154,9 @@ class OptimizedParserTest(unittest.TestCase):
 
             result = OptimizedRemNoteParser(raw_dir).run()
 
-        chunks_with_example = [chunk for chunk in result.retrieval_chunks if "6. Example" in chunk.text]
+        chunks_with_example = [
+            chunk for chunk in result.retrieval_chunks if "6. Example" in chunk.text
+        ]
         self.assertEqual(len(chunks_with_example), 1)
         example_chunk = chunks_with_example[0]
         self.assertIn("5. Variants", example_chunk.text)
@@ -187,9 +195,10 @@ class OptimizedParserTest(unittest.TestCase):
         self.assertEqual(result.summary["mixed_source_retrieval_chunk_count"], 0)
         self.assertTrue(result.summary["success_criteria"]["no_mixed_source_chunks"])
         for chunk in result.retrieval_chunks:
-            block_sources = {blocks_by_id[block_id].source for block_id in chunk.source_block_ids}
+            block_sources = {
+                blocks_by_id[block_id].source for block_id in chunk.source_block_ids
+            }
             self.assertEqual(block_sources, {chunk.source})
-
 
     def test_code_fence_markers_are_removed_but_code_remains(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,8 +227,12 @@ class OptimizedParserTest(unittest.TestCase):
             result = OptimizedRemNoteParser(raw_dir).run()
 
         chunk_text = "\n".join(chunk.text for chunk in result.retrieval_chunks)
-        embedded_text = "\n".join(chunk.embedding_text or "" for chunk in result.retrieval_chunks)
-        display_text = "\n".join(chunk.display_text or "" for chunk in result.retrieval_chunks)
+        embedded_text = "\n".join(
+            chunk.embedding_text or "" for chunk in result.retrieval_chunks
+        )
+        display_text = "\n".join(
+            chunk.display_text or "" for chunk in result.retrieval_chunks
+        )
         self.assertIn("CREATE TABLE users", chunk_text)
         self.assertIn("id SERIAL PRIMARY KEY", chunk_text)
         self.assertNotIn("```sql", chunk_text)
@@ -229,7 +242,9 @@ class OptimizedParserTest(unittest.TestCase):
         self.assertNotIn("```sql", display_text)
         self.assertNotIn("```", display_text)
         self.assertEqual(result.summary["code_fence_marker_line_count"], 0)
-        self.assertTrue(result.summary["success_criteria"]["no_code_fence_marker_lines"])
+        self.assertTrue(
+            result.summary["success_criteria"]["no_code_fence_marker_lines"]
+        )
 
     def test_deterministic_external_artifact_gates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -278,12 +293,16 @@ class OptimizedParserTest(unittest.TestCase):
             )
 
             (parsed_texts / "AG_News.md").write_text(dataset_text, encoding="utf-8")
-            (parsed_texts / "Yahoo_Answers.md").write_text(mismatch_text, encoding="utf-8")
+            (parsed_texts / "Yahoo_Answers.md").write_text(
+                mismatch_text, encoding="utf-8"
+            )
             (parsed_texts / "Good_One.md").write_text(useful_text, encoding="utf-8")
             (parsed_texts / "Good_Two.md").write_text(useful_text, encoding="utf-8")
             (parsed_images / "BadOCR.md").write_text(bad_ocr, encoding="utf-8")
             (parsed_images / "Formula.md").write_text(formula_ocr, encoding="utf-8")
-            (parsed_images / "ValidEnglish.md").write_text(valid_english_ocr, encoding="utf-8")
+            (parsed_images / "ValidEnglish.md").write_text(
+                valid_english_ocr, encoding="utf-8"
+            )
 
             (raw_dir / "English Source.md").write_text(
                 "\n".join(
@@ -307,16 +326,23 @@ class OptimizedParserTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            result = OptimizedRemNoteParser(raw_dir, parsed_roots=[parsed_texts, parsed_images]).run()
+            result = OptimizedRemNoteParser(
+                raw_dir, parsed_roots=[parsed_texts, parsed_images]
+            ).run()
 
-        decisions = {Path(decision.artifact_path).name: decision for decision in result.artifact_gate_decisions}
+        decisions = {
+            Path(decision.artifact_path).name: decision
+            for decision in result.artifact_gate_decisions
+        }
         self.assertEqual(decisions["AG_News.md"].policy, "metadata_only")
         self.assertIn("dataset_artifact", decisions["AG_News.md"].reason_codes)
         self.assertEqual(decisions["AG_News.md"].emitted_chunk_count, 0)
 
         self.assertEqual(decisions["Yahoo_Answers.md"].policy, "quarantine")
         self.assertIn("url_mismatch", decisions["Yahoo_Answers.md"].reason_codes)
-        self.assertIn("generic_navigation_artifact", decisions["Yahoo_Answers.md"].reason_codes)
+        self.assertIn(
+            "generic_navigation_artifact", decisions["Yahoo_Answers.md"].reason_codes
+        )
         self.assertEqual(decisions["Yahoo_Answers.md"].emitted_chunk_count, 0)
 
         self.assertEqual(decisions["Good_One.md"].policy, "embed_full")
@@ -352,12 +378,15 @@ class OptimizedParserTest(unittest.TestCase):
         self.assertEqual(result.summary["duplicate_artifact_metadata_only_count"], 1)
         self.assertEqual(result.summary["low_quality_ocr_quarantine_count"], 1)
         self.assertTrue(result.summary["success_criteria"]["no_embedded_dataset_dumps"])
-        self.assertTrue(result.summary["success_criteria"]["no_embedded_url_mismatch_artifacts"])
-        self.assertTrue(result.summary["success_criteria"]["no_embedded_duplicate_artifacts"])
-        self.assertTrue(result.summary["success_criteria"]["no_embedded_low_quality_ocr"])
-
-
-
+        self.assertTrue(
+            result.summary["success_criteria"]["no_embedded_url_mismatch_artifacts"]
+        )
+        self.assertTrue(
+            result.summary["success_criteria"]["no_embedded_duplicate_artifacts"]
+        )
+        self.assertTrue(
+            result.summary["success_criteria"]["no_embedded_low_quality_ocr"]
+        )
 
     def test_external_artifact_chunks_inherit_remnote_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -390,7 +419,10 @@ class OptimizedParserTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (raw_dir / "Tutorial 1- MySQL With Python And Data Science- MySQL Installation Steps - YouTube 4.md").write_text(
+            (
+                raw_dir
+                / "Tutorial 1- MySQL With Python And Data Science- MySQL Installation Steps - YouTube 4.md"
+            ).write_text(
                 "\n".join(
                     [
                         "### Stored procedures",
@@ -445,10 +477,20 @@ class OptimizedParserTest(unittest.TestCase):
         self.assertNotIn("Типа функции видимо", proc_next_chunk.embedding_text or "")
 
         self.assertEqual(result.summary["external_artifact_chunk_count"], 3)
-        self.assertEqual(result.summary["external_artifact_chunks_with_context_count"], 3)
-        self.assertEqual(result.summary["external_artifact_chunks_without_context_count"], 0)
-        self.assertEqual(result.summary["external_artifact_embedding_support_label_count"], 0)
-        self.assertTrue(result.summary["success_criteria"]["no_external_artifact_embedding_support_labels"])
+        self.assertEqual(
+            result.summary["external_artifact_chunks_with_context_count"], 3
+        )
+        self.assertEqual(
+            result.summary["external_artifact_chunks_without_context_count"], 0
+        )
+        self.assertEqual(
+            result.summary["external_artifact_embedding_support_label_count"], 0
+        )
+        self.assertTrue(
+            result.summary["success_criteria"][
+                "no_external_artifact_embedding_support_labels"
+            ]
+        )
 
     def test_image_url_prefers_parsed_markdown_sibling_over_binary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -458,7 +500,9 @@ class OptimizedParserTest(unittest.TestCase):
             raw_dir.mkdir(parents=True)
             parsed_images.mkdir(parents=True)
 
-            full_image_name = "prefix_that_gets_trimmed_" + "A" * 90 + "_CorrectOCRArtifact.png"
+            full_image_name = (
+                "prefix_that_gets_trimmed_" + "A" * 90 + "_CorrectOCRArtifact.png"
+            )
             image_name = full_image_name[-100:]
             image_url = f"https://remnote-user-data.s3.amazonaws.com/{full_image_name}"
             parsed_text = (
@@ -468,7 +512,9 @@ class OptimizedParserTest(unittest.TestCase):
                 "artifact instead of being hidden behind the binary image file."
             )
             (parsed_images / image_name).write_bytes(b"fake image bytes")
-            (parsed_images / Path(image_name).with_suffix(".md").name).write_text(parsed_text, encoding="utf-8")
+            (parsed_images / Path(image_name).with_suffix(".md").name).write_text(
+                parsed_text, encoding="utf-8"
+            )
             (raw_dir / "Text Classification.md").write_text(
                 f"6. **Example (Gaussian Naive Bayes classifier)**\n    - ![]({image_url})\n",
                 encoding="utf-8",
@@ -479,18 +525,28 @@ class OptimizedParserTest(unittest.TestCase):
         resource = result.external_resources[0]
         self.assertEqual(resource.artifact_type, "markdown")
         self.assertTrue(resource.artifact_path.endswith("CorrectOCRArtifact.md"))
-        self.assertEqual(result.summary["image_binary_selected_despite_md_sibling_count"], 0)
-        self.assertTrue(
-            result.summary["success_criteria"]["no_image_binary_selected_when_md_sibling_exists"]
+        self.assertEqual(
+            result.summary["image_binary_selected_despite_md_sibling_count"], 0
         )
-        artifact_chunks = [chunk for chunk in result.retrieval_chunks if chunk.chunk_type == "external_artifact"]
+        self.assertTrue(
+            result.summary["success_criteria"][
+                "no_image_binary_selected_when_md_sibling_exists"
+            ]
+        )
+        artifact_chunks = [
+            chunk
+            for chunk in result.retrieval_chunks
+            if chunk.chunk_type == "external_artifact"
+        ]
         self.assertEqual(len(artifact_chunks), 1)
-        self.assertTrue(artifact_chunks[0].artifact_path.endswith("CorrectOCRArtifact.md"))
+        self.assertTrue(
+            artifact_chunks[0].artifact_path.endswith("CorrectOCRArtifact.md")
+        )
         self.assertIn("Gaussian Naive Bayes", artifact_chunks[0].text)
 
-
-
-    def test_drop_in_wrapper_accepts_original_constructor_args_without_llamaindex_import(self) -> None:
+    def test_drop_in_wrapper_accepts_original_constructor_args_without_llamaindex_import(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path_settings = SimpleNamespace(
@@ -500,7 +556,9 @@ class OptimizedParserTest(unittest.TestCase):
                 parsed_texts_dir=root / "parsed_texts",
                 local_storage_dir=root / "storage",
             )
-            storage_settings = SimpleNamespace(document_storage=SimpleNamespace(storage_type="local"))
+            storage_settings = SimpleNamespace(
+                document_storage=SimpleNamespace(storage_type="local")
+            )
 
             parser = RemNoteParserOptimized(
                 path_settings,
@@ -518,17 +576,23 @@ class OptimizedParserTest(unittest.TestCase):
         self.assertFalse(parser.write_ir)
         self.assertIsNone(parser.kg_storage)
 
-    def test_copy_existing_artifacts_copies_only_markdown_to_isolated_cache(self) -> None:
+    def test_copy_existing_artifacts_copies_only_markdown_to_isolated_cache(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source_dir = root / "reviewed_parsed_images"
             target_dir = root / "isolated" / "parsed_images"
             source_dir.mkdir(parents=True)
             target_dir.mkdir(parents=True)
-            (source_dir / "copy-me.md").write_text("parsed image text", encoding="utf-8")
+            (source_dir / "copy-me.md").write_text(
+                "parsed image text", encoding="utf-8"
+            )
             (source_dir / "ignore.png").write_bytes(b"image bytes")
             (source_dir / "nested").mkdir()
-            (source_dir / "nested" / "copy-nested.md").write_text("nested parsed image text", encoding="utf-8")
+            (source_dir / "nested" / "copy-nested.md").write_text(
+                "nested parsed image text", encoding="utf-8"
+            )
             (target_dir / "already.md").write_text("keep this target", encoding="utf-8")
             (source_dir / "already.md").write_text("do not overwrite", encoding="utf-8")
 
@@ -539,7 +603,9 @@ class OptimizedParserTest(unittest.TestCase):
                 parsed_texts_dir=root / "isolated" / "parsed_texts",
                 local_storage_dir=root / "isolated" / "storage",
             )
-            storage_settings = SimpleNamespace(document_storage=SimpleNamespace(storage_type="local"))
+            storage_settings = SimpleNamespace(
+                document_storage=SimpleNamespace(storage_type="local")
+            )
             parser = RemNoteParserOptimized(
                 path_settings,
                 storage_settings,
@@ -556,7 +622,10 @@ class OptimizedParserTest(unittest.TestCase):
             self.assertTrue((target_dir / "copy-me.md").exists())
             self.assertTrue((target_dir / "nested" / "copy-nested.md").exists())
             self.assertFalse((target_dir / "ignore.png").exists())
-            self.assertEqual((target_dir / "already.md").read_text(encoding="utf-8"), "keep this target")
+            self.assertEqual(
+                (target_dir / "already.md").read_text(encoding="utf-8"),
+                "keep this target",
+            )
 
     def test_default_artifact_copy_ignores_unrelated_raw_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -569,7 +638,9 @@ class OptimizedParserTest(unittest.TestCase):
                 parsed_texts_dir=root / "parsed_texts",
                 local_storage_dir=root / "storage",
             )
-            storage_settings = SimpleNamespace(document_storage=SimpleNamespace(storage_type="local"))
+            storage_settings = SimpleNamespace(
+                document_storage=SimpleNamespace(storage_type="local")
+            )
             parser = RemNoteParserOptimized(
                 path_settings,
                 storage_settings,
@@ -606,9 +677,17 @@ class OptimizedParserTest(unittest.TestCase):
                 RETRIEVAL_CHUNKS_FILENAME,
                 COMPARISON_FILENAME,
             }
-            self.assertEqual({path.name for path in output_dir.iterdir()}, expected_files)
-            summary = json.loads((output_dir / SUMMARY_FILENAME).read_text(encoding="utf-8"))
-            chunks = (output_dir / RETRIEVAL_CHUNKS_FILENAME).read_text(encoding="utf-8").splitlines()
+            self.assertEqual(
+                {path.name for path in output_dir.iterdir()}, expected_files
+            )
+            summary = json.loads(
+                (output_dir / SUMMARY_FILENAME).read_text(encoding="utf-8")
+            )
+            chunks = (
+                (output_dir / RETRIEVAL_CHUNKS_FILENAME)
+                .read_text(encoding="utf-8")
+                .splitlines()
+            )
             self.assertEqual(summary["retrieval_chunk_count"], len(chunks))
 
     def test_three_source_regression_preserves_core_parser_contract(self) -> None:
@@ -687,24 +766,37 @@ class OptimizedParserTest(unittest.TestCase):
         self.assertEqual(result.summary["raw_url_occurrences"], 3)
         self.assertEqual(result.summary["parser_visible_url_resources"], 3)
         self.assertEqual(result.summary["parsed_artifact_count"], 3)
-        self.assertTrue(result.summary["success_criteria"]["raw_url_count_equals_parser_visible"])
-        self.assertTrue(result.summary["success_criteria"]["all_chunks_have_provenance"])
+        self.assertTrue(
+            result.summary["success_criteria"]["raw_url_count_equals_parser_visible"]
+        )
+        self.assertTrue(
+            result.summary["success_criteria"]["all_chunks_have_provenance"]
+        )
         self.assertTrue(result.summary["success_criteria"]["no_mixed_source_chunks"])
         self.assertEqual(result.summary["placeholder_only_chunk_count"], 0)
         self.assertEqual(result.summary["resource_only_chunk_count"], 0)
         self.assertEqual(result.summary["header_only_chunk_count"], 0)
         self.assertEqual(result.summary["external_artifact_chunk_count"], 3)
-        self.assertTrue(any("Дерево решений" in chunk.text for chunk in result.retrieval_chunks))
         self.assertTrue(
-            any("Деревья решений" in " ".join(chunk.path) for chunk in result.retrieval_chunks)
+            any("Дерево решений" in chunk.text for chunk in result.retrieval_chunks)
         )
-        artifact_paths = {Path(artifact.artifact_path).name for artifact in result.parsed_artifacts}
+        self.assertTrue(
+            any(
+                "Деревья решений" in " ".join(chunk.path)
+                for chunk in result.retrieval_chunks
+            )
+        )
+        artifact_paths = {
+            Path(artifact.artifact_path).name for artifact in result.parsed_artifacts
+        }
         self.assertEqual(
             artifact_paths,
             {"Alice_paper.md", "Embedding_Diagram.md", "Decision_tree_notes.md"},
         )
 
-    @unittest.skipUnless(LLAMA_INDEX_AVAILABLE, "LlamaIndex is not installed in this environment")
+    @unittest.skipUnless(
+        LLAMA_INDEX_AVAILABLE, "LlamaIndex is not installed in this environment"
+    )
     def test_drop_in_wrapper_writes_retrieval_chunks_to_local_docstore(self) -> None:
         from backend.configs.paths import PathSettings
         from backend.configs.storage import LocalStorageSettings, StorageSettings
@@ -731,7 +823,9 @@ class OptimizedParserTest(unittest.TestCase):
             )
 
             storage_dir = root / "storage"
-            local_storage = LocalStorageSettings(storage_type="local", storage_path=storage_dir)
+            local_storage = LocalStorageSettings(
+                storage_type="local", storage_path=storage_dir
+            )
             storage_settings = StorageSettings(
                 document_storage=local_storage,
                 index_storage=local_storage,
@@ -764,19 +858,30 @@ class OptimizedParserTest(unittest.TestCase):
                 self.assertIn(chunk.id, docs)
                 node = docs[chunk.id]
                 self.assertEqual(node.text, chunk.embedding_text or chunk.text)
-                self.assertEqual(set(node.excluded_embed_metadata_keys), set(node.metadata.keys()))
+                self.assertEqual(
+                    set(node.excluded_embed_metadata_keys), set(node.metadata.keys())
+                )
                 self.assertNotIn("external:", node.text)
                 self.assertNotIn("Parsed external content:", node.text)
                 self.assertNotIn("RemNote context:", node.text)
 
-            artifact_nodes = [node for node in docs.values() if node.metadata["chunk_type"] == "external_artifact"]
+            artifact_nodes = [
+                node
+                for node in docs.values()
+                if node.metadata["chunk_type"] == "external_artifact"
+            ]
             self.assertEqual(len(artifact_nodes), 1)
             artifact_node = artifact_nodes[0]
-            self.assertTrue(artifact_node.metadata["artifact_path"].endswith("Diagram.md"))
+            self.assertTrue(
+                artifact_node.metadata["artifact_path"].endswith("Diagram.md")
+            )
             self.assertIn("#### Neural Networks", artifact_node.metadata["path"])
-            self.assertIn("#### Neural Networks", artifact_node.metadata["context_text"])
-            self.assertTrue((root / "optimized_parser_ir" / "retrieval_chunks.jsonl").exists())
-
+            self.assertIn(
+                "#### Neural Networks", artifact_node.metadata["context_text"]
+            )
+            self.assertTrue(
+                (root / "optimized_parser_ir" / "retrieval_chunks.jsonl").exists()
+            )
 
 
 if __name__ == "__main__":

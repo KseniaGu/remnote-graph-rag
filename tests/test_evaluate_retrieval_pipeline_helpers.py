@@ -3,7 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.evaluate_retrieval_pipeline import load_embedded_source_ids, load_source_metadata_by_id
+from scripts.evaluate_retrieval_pipeline import (
+    load_embedded_source_ids,
+    load_source_metadata_by_id,
+)
 
 
 class EvaluateRetrievalPipelineHelperTests(unittest.TestCase):
