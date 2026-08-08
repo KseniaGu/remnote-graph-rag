@@ -1,7 +1,5 @@
 import os
-
 from pathlib import Path
-
 
 # BASE
 ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
