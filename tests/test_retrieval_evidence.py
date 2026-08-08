@@ -185,6 +185,21 @@ class RetrievalEvidenceTests(unittest.TestCase):
         output = format_search_results([QueryEvidenceResult(query="missing", items=[])])
         self.assertEqual("No relevant information found.", output)
 
+    def test_search_tool_recovers_stringified_query_list(self) -> None:
+        query = "optimizers machine learning gradient descent"
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {query: [FakeNodeWithScore(FakeNode("Optimizer source"), 0.9)]}
+            )
+        )
+
+        output = tool.invoke({"queries": f"[{query}]"})
+        query_schema = tool.args_schema.model_json_schema()["properties"]["queries"]
+
+        self.assertIn("Optimizer source", output)
+        self.assertEqual("array", query_schema["type"])
+        self.assertEqual(3, query_schema["maxItems"])
+
     def test_search_tool_uses_reranker_exception_fallback(self) -> None:
         nodes = [
             FakeNodeWithScore(FakeNode(f"Result {idx}", node_id=f"node_{idx}"), 0.9)

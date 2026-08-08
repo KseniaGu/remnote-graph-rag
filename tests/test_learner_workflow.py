@@ -135,7 +135,7 @@ def test_visualizer_node_returns_terminal_empty_signal_for_empty_graph_result() 
     assert result["context"] == VISUALIZATION_EMPTY_CONTEXT
 
 
-def test_kb_search_tool_uses_optimized_analyst_pipeline_by_default() -> None:
+def test_kb_search_tool_can_use_optimized_analyst_pipeline() -> None:
     settings = KnowledgeGraphSearchSettings(analyst_retrieval_mode="optimized")
     indexer = FakeIndexer(settings, FakeRetriever({}))
     workflow = make_workflow(indexer)

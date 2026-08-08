@@ -26,6 +26,9 @@ SIDEBAR_TITLE_MAX_CHARS = 48
 
 
 _MATH_SPAN_RE = re.compile(r"\$\$.*?\$\$|\$.*?\$", flags=re.DOTALL)
+_TABLE_ROW_BOUNDARY_RE = re.compile(r"(?<!\\)\|\s+(?<!\\)\|")
+_TABLE_CELL_BOUNDARY_RE = re.compile(r"(?<!\\)\|")
+_TABLE_SEPARATOR_CELL_RE = re.compile(r":?-{3,}:?")
 
 
 def _demote_display_math_to_inline(text: str) -> str:
@@ -76,12 +79,68 @@ def _replace_math_pipes(text: str) -> str:
     return _MATH_SPAN_RE.sub(replace_in_span, text)
 
 
+def _escape_math_hashes(text: str) -> str:
+    """Escapes literal hashes that KaTeX treats as macro parameter characters."""
+
+    def replace_in_span(match: re.Match[str]) -> str:
+        return re.sub(r"(?<!\\)#", r"\\#", match.group(0))
+
+    return _MATH_SPAN_RE.sub(replace_in_span, text)
+
+
+def _markdown_table_cells(row: str) -> list[str]:
+    stripped = row.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return []
+    return [cell.strip() for cell in _TABLE_CELL_BOUNDARY_RE.split(stripped[1:-1])]
+
+
+def _repair_concatenated_markdown_tables(text: str) -> str:
+    """Splits table rows that an LLM concatenated onto one physical line."""
+    repaired_lines: list[str] = []
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            repaired_lines.append(line)
+            continue
+
+        segments = _TABLE_ROW_BOUNDARY_RE.split(stripped)
+        candidate_rows: list[str] = []
+        for segment in segments:
+            row = segment.strip()
+            if not row.startswith("|"):
+                row = f"| {row}"
+            if not row.endswith("|"):
+                row = f"{row} |"
+            candidate_rows.append(row)
+
+        candidate_cells = [_markdown_table_cells(row) for row in candidate_rows]
+        column_count = len(candidate_cells[0]) if candidate_cells else 0
+        has_separator = len(candidate_cells) > 1 and all(
+            _TABLE_SEPARATOR_CELL_RE.fullmatch(cell)
+            for cell in candidate_cells[1]
+        )
+        has_consistent_columns = column_count >= 2 and all(
+            len(cells) == column_count for cells in candidate_cells
+        )
+
+        if has_separator and has_consistent_columns:
+            repaired_lines.extend(candidate_rows)
+        else:
+            repaired_lines.append(line)
+
+    return "\n".join(repaired_lines)
+
+
 def _normalize_math_delimiters(text: str) -> str:
     """Normalizes LLM Markdown/LaTeX into forms supported by the chat renderer."""
     text = re.sub(r"\\\[(.+?)\\\]", r"$$\1$$", text, flags=re.DOTALL)
     text = re.sub(r"\\\((.+?)\\\)", r"$\1$", text, flags=re.DOTALL)
     text = _collapse_table_display_math(text)
-    return _replace_math_pipes(text)
+    text = _replace_math_pipes(text)
+    text = _repair_concatenated_markdown_tables(text)
+    return _escape_math_hashes(text)
 
 
 def _sidebar_title(text: str, max_chars: int = SIDEBAR_TITLE_MAX_CHARS) -> str:

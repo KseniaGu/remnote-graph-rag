@@ -1,5 +1,10 @@
 from backend.configs.enums import LLMProviderType, ModelRoleType
-from backend.configs.models import OllamaSettings, OpenAISettings, RerankerSettings
+from backend.configs.models import (
+    ModelSettings,
+    OllamaSettings,
+    OpenAISettings,
+    RerankerSettings,
+)
 
 
 def test_ollama_chat_params_are_constructor_only_fields() -> None:
@@ -13,6 +18,7 @@ def test_ollama_chat_params_are_constructor_only_fields() -> None:
         base_url="https://ollama.example",
         num_ctx=16384,
         prompt_version="v99",
+        reasoning=True,
     )
 
     assert settings.ollama_chat_params() == {
@@ -22,6 +28,7 @@ def test_ollama_chat_params_are_constructor_only_fields() -> None:
         "num_predict": 2048,
         "base_url": "https://ollama.example",
         "num_ctx": 16384,
+        "reasoning": True,
     }
 
 
@@ -47,6 +54,19 @@ def test_openai_style_chat_params_are_provider_specific() -> None:
         "max_tokens": 512,
         "base_url": "https://vllm.example",
     }
+
+
+def test_default_analyst_uses_v6_educational_cloud_configuration() -> None:
+    analyst = ModelSettings().analyst
+
+    assert analyst.model_name == "nemotron-3-super:cloud"
+    assert analyst.prompt_version == "v6"
+    assert analyst.num_predict == 8192
+    assert analyst.num_ctx == 32768
+    assert analyst.ollama_chat_params()["reasoning"] is False
+
+    researcher = ModelSettings().researcher.structured
+    assert "reasoning" not in researcher.ollama_chat_params()
 
 
 def test_graph_index_ollama_params_include_model_and_indexing_generation_fields() -> (

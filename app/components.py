@@ -725,9 +725,11 @@ def streaming_bubble() -> rx.Component:
                         COLORS["accent_blue"],
                         animated=True,
                     ),
-                    rx.markdown(
+                    rx.text(
                         AppState.streaming_content + " ▍",
-                        class_name="markdown-content",
+                        white_space="pre-wrap",
+                        overflow_wrap="anywhere",
+                        class_name="streaming-content",
                     ),
                     class_name=rx.cond(
                         AppState.streaming_agent == "analyst",

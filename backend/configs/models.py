@@ -34,7 +34,7 @@ class BaseLLMSettings(BaseSettings):
         return SettingsConfigDict(**cls.model_config) | {"env_prefix": prefix}
 
     def ollama_chat_params(self) -> dict[str, Any]:
-        return self.model_dump(
+        params = self.model_dump(
             include={
                 "temperature",
                 "top_k",
@@ -44,6 +44,9 @@ class BaseLLMSettings(BaseSettings):
                 "num_ctx",
             }
         )
+        if "reasoning" in self.model_fields_set:
+            params["reasoning"] = self.reasoning
+        return params
 
     def vllm_chat_params(self) -> dict[str, Any]:
         return self.model_dump(include={"temperature", "top_p", "max_tokens"})
@@ -194,7 +197,7 @@ class ResearcherModelSettings(BaseSettings):
         top_p=1.0,
         num_predict=4096,
     )
-    prompt_version: str = "v3"
+    prompt_version: str = "v4"
 
 
 class ModelSettings(BaseSettings):
@@ -227,21 +230,22 @@ class ModelSettings(BaseSettings):
         top_k=20,
         top_p=0.3,
         num_predict=512,
-        prompt_version="v4",
+        prompt_version="v5",
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
 
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (Q4) on port 8002, provider=LLMProviderType.vllm, base_url="http://<VLLM_HOST>:8002/v1"
     analyst: LocalModelSettings | BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.analyst,
-        model_name="nemotron-3-super:cloud",
-        temperature=0.15,
+        model_name="qwen3.5:cloud",
+        # model_name="nemotron-3-super:cloud",
+        temperature=0.1,
         num_ctx=32768,
-        top_k=40,
-        top_p=0.9,
+        top_k=20,
+        top_p=0.8,
         num_predict=8192,
-        reasoning=True,
-        prompt_version="v4",
+        reasoning=False,
+        prompt_version="v6",
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (same instance as analyst)
     mentor: LocalModelSettings | BaseLLMSettings = OllamaSettings(

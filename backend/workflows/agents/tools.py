@@ -1,6 +1,8 @@
+import json
 from typing import Any
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field, field_validator
 
 from backend.configs.constants import MIN_RELEVANCE_SCORE, WORKFLOW_LOGGING
 from backend.utils.helpers import get_logger
@@ -14,10 +16,65 @@ from backend.workflows.agents.retrieval_evidence import (
 logger = get_logger(WORKFLOW_LOGGING)
 
 
+class QueryListInput(BaseModel):
+    """Validated query-list arguments shared by knowledge retrieval tools."""
+
+    queries: list[str] = Field(
+        min_length=1,
+        max_length=3,
+        description=(
+            "A native JSON array containing 1 to 3 distinct semantic search queries. "
+            "Do not encode the array as a string."
+        ),
+    )
+
+    @field_validator("queries", mode="before")
+    @classmethod
+    def normalize_stringified_queries(cls, value: Any) -> Any:
+        """Recovers common stringified-list tool calls while preserving array schema."""
+        if not isinstance(value, str):
+            return value
+
+        raw_value = value.strip()
+        if not raw_value:
+            return []
+
+        if raw_value.startswith("[") and raw_value.endswith("]"):
+            try:
+                decoded = json.loads(raw_value)
+            except json.JSONDecodeError:
+                inner = raw_value[1:-1].strip()
+                if not inner:
+                    return []
+                if "," in inner:
+                    return [
+                        part.strip().strip("'\"")
+                        for part in inner.split(",")
+                        if part.strip().strip("'\"")
+                    ]
+                return [inner.strip("'\"")]
+            else:
+                return decoded
+
+        return [raw_value]
+
+    @field_validator("queries")
+    @classmethod
+    def normalize_query_text(cls, queries: list[str]) -> list[str]:
+        normalized = list(
+            dict.fromkeys(query.strip() for query in queries if query.strip())
+        )
+        if not normalized:
+            raise ValueError("at least one non-empty query is required")
+        if any(len(query) > 256 for query in normalized):
+            raise ValueError("each query must contain at most 256 characters")
+        return normalized
+
+
 def search_knowledge_base(
     retriever: Any = None, reranker: Any = None, analyst_pipeline: Any = None
 ):
-    @tool("search_knowledge_base")
+    @tool("search_knowledge_base", args_schema=QueryListInput)
     def _search_knowledge_base(queries: list[str]):
         """Searches the knowledge base using advanced graph and vector retrieval.
 
@@ -142,7 +199,7 @@ def deep_web_research(search_engine: Any):
 
 
 def get_subgraphs_to_visualize(retriever: Any = None, visualizer_pipeline: Any = None):
-    @tool("get_subgraphs_to_visualize")
+    @tool("get_subgraphs_to_visualize", args_schema=QueryListInput)
     def _get_subgraphs_to_visualize(queries: list[str]):
         """Retrieves subgraphs for visualization based on multiple search queries.
 
