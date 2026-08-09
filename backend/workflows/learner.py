@@ -26,11 +26,19 @@ from backend.configs.search import KnowledgeGraphSearchSettings, TavilySettings
 from backend.configs.storage import StorageSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
+from backend.utils.chat_errors import (
+    AIRequestRejected,
+    AIResponseInvalid,
+    AIServiceCapacity,
+    AIServiceConfiguration,
+    AIServiceUnavailable,
+    UserFacingChatError,
+)
 from backend.utils.chat_limits import (
-    ChatLimitError,
     get_chat_limit_service,
     get_current_chat_turn,
     is_transient_provider_error,
+    provider_status_code,
 )
 from backend.utils.helpers import add_trace_metadata
 from backend.utils.prompt_engine import PromptEngine
@@ -476,7 +484,7 @@ class LearnerWorkflow:
                 )
                 self.chat_limit_service.record_model_usage(context, response)
                 return response
-            except ChatLimitError:
+            except UserFacingChatError:
                 raise
             except Exception as exc:
                 should_retry = (
@@ -501,7 +509,7 @@ class LearnerWorkflow:
                     role=role_type.name,
                     error_type=err_type,
                 )
-                return None
+                raise self._user_facing_model_error(exc, err_type) from exc
 
     @staticmethod
     def _classify_error(exc: BaseException) -> str:
@@ -524,6 +532,24 @@ class LearnerWorkflow:
             return "connection_error"
         return f"unexpected:{name}"
 
+    @staticmethod
+    def _user_facing_model_error(
+        exc: BaseException, error_type: str
+    ) -> UserFacingChatError:
+        """Maps provider failures to stable public error categories."""
+        status = provider_status_code(exc)
+        if status == 429:
+            return AIServiceCapacity()
+        if status in {401, 403, 404}:
+            return AIServiceConfiguration()
+        if status in {400, 422}:
+            return AIRequestRejected()
+        if error_type == "structured_output_parse_error":
+            return AIResponseInvalid()
+        if error_type == "unicode_encode_error":
+            return AIRequestRejected()
+        return AIServiceUnavailable()
+
     @traceable(run_type="chain", name="call_tools")
     async def call_tools(self, response: Any) -> dict[str, Any]:
         """Executes at most the first recognized tool call."""
@@ -543,7 +569,7 @@ class LearnerWorkflow:
         try:
             logger.info("Executing tool", tool_name=tool_name)
             result = await self.tools[tool_name].ainvoke(tool_call.get("args", {}))
-        except ChatLimitError:
+        except UserFacingChatError:
             raise
         except Exception as exc:
             logger.error(

@@ -8,12 +8,18 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.configs.chat_limits import ChatLimitsSettings
 from backend.configs.constants import MIN_RELEVANCE_SCORE, WORKFLOW_LOGGING
+from backend.utils.chat_errors import (
+    KnowledgeBaseUnavailable,
+    UserFacingChatError,
+    WebSearchCapacity,
+    WebSearchUnavailable,
+)
 from backend.utils.chat_limits import (
-    ChatLimitError,
     ChatLimitService,
     get_chat_limit_service,
     get_current_chat_turn,
     is_transient_provider_error,
+    provider_status_code,
     truncate_text,
 )
 from backend.utils.helpers import get_logger
@@ -136,7 +142,17 @@ def search_knowledge_base(
             [SOURCE PATH] CV History > Classical Era > Feature Extraction
         """
         if analyst_pipeline is not None:
-            return truncate_text(analyst_pipeline.search(queries), context_limit)
+            try:
+                result = analyst_pipeline.search(queries)
+            except UserFacingChatError:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Optimized knowledge retrieval failed",
+                    error_type=type(exc).__name__,
+                )
+                raise KnowledgeBaseUnavailable() from exc
+            return truncate_text(result, context_limit)
 
         if retriever is None:
             return "No relevant information found."
@@ -144,7 +160,16 @@ def search_knowledge_base(
         query_results: list[QueryEvidenceResult] = []
 
         for query in queries:
-            nodes = retriever.retrieve(query)
+            try:
+                nodes = retriever.retrieve(query)
+            except UserFacingChatError:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Knowledge retrieval failed",
+                    error_type=type(exc).__name__,
+                )
+                raise KnowledgeBaseUnavailable() from exc
             if reranker is not None:
                 try:
                     nodes = reranker.postprocess_nodes(nodes, query_str=query)
@@ -220,20 +245,31 @@ def deep_web_research(
                     timeout=chat_settings.tavily_timeout_seconds,
                 )
                 break
-            except ChatLimitError:
+            except UserFacingChatError:
                 raise
             except Exception as exc:
-                if (
-                    attempt_number != 1
-                    or not is_transient_provider_error(exc)
-                    or not limits.claim_retry(context)
-                ):
-                    raise
-                logger.warning(
-                    "Retrying transient Tavily failure",
-                    error_type=type(exc).__name__,
+                should_retry = (
+                    attempt_number == 1
+                    and is_transient_provider_error(exc)
+                    and limits.claim_retry(context)
                 )
-                await asyncio.sleep(1.0 + random.uniform(0.0, 0.25))
+                if should_retry:
+                    logger.warning(
+                        "Retrying transient Tavily failure",
+                        error_type=type(exc).__name__,
+                    )
+                    await asyncio.sleep(1.0 + random.uniform(0.0, 0.25))
+                    continue
+
+                status = provider_status_code(exc)
+                logger.error(
+                    "Tavily search failed",
+                    error_type=type(exc).__name__,
+                    status_code=status,
+                )
+                if status == 429:
+                    raise WebSearchCapacity() from exc
+                raise WebSearchUnavailable() from exc
 
         results = response.get("results", [])[: chat_settings.tavily_max_results]
 
@@ -297,7 +333,16 @@ def get_subgraphs_to_visualize(retriever: Any = None, visualizer_pipeline: Any =
             Returns: (['node1', 'node2', ...], [('ML', 'USES', 'Neural Networks'), ...])
         """
         if visualizer_pipeline is not None:
-            return visualizer_pipeline.visualize(queries)
+            try:
+                return visualizer_pipeline.visualize(queries)
+            except UserFacingChatError:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Optimized graph visualization retrieval failed",
+                    error_type=type(exc).__name__,
+                )
+                raise KnowledgeBaseUnavailable() from exc
 
         if retriever is None:
             return [], [], queries
@@ -305,7 +350,16 @@ def get_subgraphs_to_visualize(retriever: Any = None, visualizer_pipeline: Any =
         query_results: list[QueryEvidenceResult] = []
 
         for query in queries:
-            retrieved_nodes = retriever.retrieve(query)
+            try:
+                retrieved_nodes = retriever.retrieve(query)
+            except UserFacingChatError:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Graph visualization retrieval failed",
+                    error_type=type(exc).__name__,
+                )
+                raise KnowledgeBaseUnavailable() from exc
             evidence_items = []
 
             for rank, node in enumerate(retrieved_nodes, start=1):

@@ -25,10 +25,11 @@ from backend.configs.messages import (
     ERROR_WORKFLOW_TIMEOUT,
 )
 from backend.configs.storage import StorageSettings
+from backend.utils.chat_errors import UserFacingChatError
 from backend.utils.helpers import logger
 
 
-class ChatLimitError(RuntimeError):
+class ChatLimitError(UserFacingChatError):
     """Base exception for a user-safe chat restriction failure."""
 
     user_message = ERROR_WORKFLOW_BUDGET

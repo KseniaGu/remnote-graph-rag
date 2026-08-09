@@ -19,9 +19,9 @@ from backend.configs.constants import (
 from backend.configs.enums import WorkflowEventType
 from backend.configs.messages import ERROR_MESSAGE_TOO_LONG
 from backend.utils.cache import get_quick_action_cache, normalize_quick_action_prompt
+from backend.utils.chat_errors import UserFacingChatError
 from backend.utils.chat_limits import (
     ChatAdmission,
-    ChatLimitError,
     WorkflowTimeoutExceeded,
     get_chat_limit_service,
 )
@@ -935,7 +935,7 @@ class AppState(rx.State):
                 admission = await limit_service.admit_expensive_turn(
                     visitor_id, session_id
                 )
-        except ChatLimitError as exc:
+        except UserFacingChatError as exc:
             async with self:
                 self.error_message = exc.user_message
                 self.is_processing = False
@@ -1137,7 +1137,7 @@ class AppState(rx.State):
             async with self:
                 self.error_message = WorkflowTimeoutExceeded.user_message
             await self._persist_current_session_snapshot(session_id)
-        except ChatLimitError as exc:
+        except UserFacingChatError as exc:
             turn_status = exc.reason
             async with self:
                 self.error_message = exc.user_message

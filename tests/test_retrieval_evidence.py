@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from backend.utils.chat_errors import KnowledgeBaseUnavailable
 from backend.workflows.agents.retrieval_evidence import (
     FACT_BLOCK_HEADER,
     QueryEvidenceResult,
@@ -37,6 +38,11 @@ class FakeRetriever:
 
     def retrieve(self, query: str) -> list:
         return list(self.results_by_query.get(query, []))
+
+
+class RaisingRetriever:
+    def retrieve(self, query: str) -> list:
+        raise ConnectionError("mongodb://user:secret@example.test")
 
 
 class IdentityReranker:
@@ -212,6 +218,18 @@ class RetrievalEvidenceTests(unittest.TestCase):
         self.assertIn("Result 0", output)
         self.assertIn("Result 9", output)
         self.assertNotIn("Result 10", output)
+
+    def test_retrieval_failure_is_not_reported_as_no_results(self) -> None:
+        tool = search_knowledge_base(RaisingRetriever())
+
+        with self.assertRaises(KnowledgeBaseUnavailable) as raised:
+            tool.invoke({"queries": ["q"]})
+
+        self.assertEqual(
+            "I couldn't access the knowledge base right now. Please try again shortly.",
+            raised.exception.user_message,
+        )
+        self.assertNotIn("secret", str(raised.exception))
 
     def test_visualization_formatter_returns_ordered_unique_results(self) -> None:
         result = QueryEvidenceResult(

@@ -22,8 +22,11 @@ from backend.configs.observability import LangSmithSettings
 from backend.configs.paths import PathSettings
 from backend.configs.search import KnowledgeGraphSearchSettings, TavilySettings
 from backend.configs.storage import StorageSettings
+from backend.utils.chat_errors import (
+    UserFacingChatError,
+    WorkflowInitializationUnavailable,
+)
 from backend.utils.chat_limits import (
-    ChatLimitError,
     ChatTurnContext,
     reset_current_chat_turn,
     set_current_chat_turn,
@@ -76,11 +79,11 @@ class ReflexLearnerWorkflow:
                 logger.info("ReflexLearnerWorkflow initialized successfully")
 
             except Exception as exc:
-                logger.error(
+                logger.exception(
                     "Failed to initialize ReflexLearnerWorkflow",
                     error_type=type(exc).__name__,
                 )
-                raise RuntimeError("Workflow initialization failed") from exc
+                raise WorkflowInitializationUnavailable() from exc
 
     @staticmethod
     def _get_fallback_message(context: str) -> str:
@@ -194,6 +197,13 @@ class ReflexLearnerWorkflow:
                     data={"next_step": result.get("next_step", "__end__")},
                 )
 
+        except UserFacingChatError as exc:
+            logger.warning("Workflow stopped", reason=exc.reason)
+            yield WorkflowEvent(
+                type=WorkflowEventType.ERROR,
+                data={"message": exc.user_message, "reason": exc.reason},
+            )
+
         except GraphRecursionError as e:
             logger.error(f"Workflow exceeded recursion limit: {e}")
             yield WorkflowEvent(
@@ -296,6 +306,13 @@ class ReflexLearnerWorkflow:
 
             yield WorkflowEvent(
                 type=WorkflowEventType.COMPLETE, data={"status": "success"}
+            )
+
+        except UserFacingChatError as exc:
+            logger.warning("Workflow stream stopped", reason=exc.reason)
+            yield WorkflowEvent(
+                type=WorkflowEventType.ERROR,
+                data={"message": exc.user_message, "reason": exc.reason},
             )
 
         except GraphRecursionError as e:
@@ -451,8 +468,8 @@ class ReflexLearnerWorkflow:
                 type=WorkflowEventType.COMPLETE, data={"status": "success"}
             )
 
-        except ChatLimitError as exc:
-            logger.warning("Workflow stopped by chat limit", reason=exc.reason)
+        except UserFacingChatError as exc:
+            logger.warning("Workflow token stream stopped", reason=exc.reason)
             yield WorkflowEvent(
                 type=WorkflowEventType.ERROR,
                 data={"message": exc.user_message, "reason": exc.reason},

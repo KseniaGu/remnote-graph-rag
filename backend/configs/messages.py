@@ -65,3 +65,38 @@ ERROR_QUOTA_STORAGE_UNAVAILABLE = (
 ERROR_WORKFLOW_FAILED = (
     "I encountered an error while processing your request. Please try again."
 )
+
+# External runtime dependencies. These messages deliberately describe only the
+# user-actionable boundary; detailed provider and infrastructure errors remain
+# in server logs.
+ERROR_WORKFLOW_INITIALIZATION = (
+    "The assistant is temporarily unavailable because a required service or model "
+    "could not be loaded. Please try again later."
+)
+ERROR_AI_SERVICE_UNAVAILABLE = (
+    "The AI service did not respond. Please try again in a moment."
+)
+ERROR_AI_SERVICE_CAPACITY = (
+    "The AI service is temporarily at capacity. Please try again later."
+)
+ERROR_AI_SERVICE_CONFIGURATION = (
+    "The AI service is temporarily unavailable because of a service configuration "
+    "problem. Please try again later."
+)
+ERROR_AI_REQUEST_REJECTED = (
+    "The AI service could not process this request. Please rephrase it and try again."
+)
+ERROR_AI_RESPONSE_INVALID = (
+    "The AI service returned a response that could not be processed. Please try again."
+)
+ERROR_KNOWLEDGE_BASE_UNAVAILABLE = (
+    "I couldn't access the knowledge base right now. Please try again shortly."
+)
+ERROR_WEB_SEARCH_UNAVAILABLE = (
+    "Web search is temporarily unavailable. Please try again shortly or continue "
+    "without web research."
+)
+ERROR_WEB_SEARCH_CAPACITY = (
+    "Web search is temporarily at capacity. Please try again later or continue "
+    "without web research."
+)
