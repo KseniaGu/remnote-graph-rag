@@ -11,6 +11,7 @@ from backend.configs.constants import RECURSION_LIMIT, VISUALIZATION_EMPTY_CONTE
 from backend.configs.enums import WorkflowEventType
 from backend.configs.messages import (
     ERROR_RECURSION_LIMIT,
+    ERROR_WORKFLOW_FAILED,
     FALLBACK_ALL_SOURCES_EXHAUSTED,
     FALLBACK_DEFAULT,
     FALLBACK_NO_RESULTS,
@@ -21,6 +22,12 @@ from backend.configs.observability import LangSmithSettings
 from backend.configs.paths import PathSettings
 from backend.configs.search import KnowledgeGraphSearchSettings, TavilySettings
 from backend.configs.storage import StorageSettings
+from backend.utils.chat_limits import (
+    ChatLimitError,
+    ChatTurnContext,
+    reset_current_chat_turn,
+    set_current_chat_turn,
+)
 from backend.utils.helpers import logger
 from backend.workflows.learner import LearnerWorkflow
 
@@ -68,9 +75,12 @@ class ReflexLearnerWorkflow:
                 self._graph = self._workflow.run()
                 logger.info("ReflexLearnerWorkflow initialized successfully")
 
-            except Exception as e:
-                logger.error(f"Failed to initialize ReflexLearnerWorkflow: {e}")
-                raise RuntimeError(f"Workflow initialization failed: {e!s}")
+            except Exception as exc:
+                logger.error(
+                    "Failed to initialize ReflexLearnerWorkflow",
+                    error_type=type(exc).__name__,
+                )
+                raise RuntimeError("Workflow initialization failed") from exc
 
     @staticmethod
     def _get_fallback_message(context: str) -> str:
@@ -190,9 +200,12 @@ class ReflexLearnerWorkflow:
                 type=WorkflowEventType.ERROR, data={"message": ERROR_RECURSION_LIMIT}
             )
 
-        except Exception as e:
-            logger.error(f"Workflow error: {e}")
-            yield WorkflowEvent(type=WorkflowEventType.ERROR, data={"message": str(e)})
+        except Exception as exc:
+            logger.error("Workflow error", error_type=type(exc).__name__)
+            yield WorkflowEvent(
+                type=WorkflowEventType.ERROR,
+                data={"message": ERROR_WORKFLOW_FAILED},
+            )
 
     async def stream_with_status(
         self,
@@ -291,9 +304,12 @@ class ReflexLearnerWorkflow:
                 type=WorkflowEventType.ERROR, data={"message": ERROR_RECURSION_LIMIT}
             )
 
-        except Exception as e:
-            logger.error(f"Workflow stream error: {e}")
-            yield WorkflowEvent(type=WorkflowEventType.ERROR, data={"message": str(e)})
+        except Exception as exc:
+            logger.error("Workflow stream error", error_type=type(exc).__name__)
+            yield WorkflowEvent(
+                type=WorkflowEventType.ERROR,
+                data={"message": ERROR_WORKFLOW_FAILED},
+            )
 
     async def stream_with_tokens(
         self,
@@ -302,6 +318,7 @@ class ReflexLearnerWorkflow:
         recursion_limit: int = RECURSION_LIMIT,
         session_id: str = "",
         session_summary: str = "",
+        turn_context: ChatTurnContext | None = None,
     ) -> AsyncGenerator[WorkflowEvent, None]:
         """Streams workflow execution with per-token updates for analyst/mentor responses.
 
@@ -335,6 +352,7 @@ class ReflexLearnerWorkflow:
         accumulated: dict[str, str] = {}
         final_state: dict = {}
 
+        turn_token = set_current_chat_turn(turn_context)
         try:
             async for event in self._graph.astream_events(
                 initial_state, config=config, version="v2"
@@ -433,15 +451,27 @@ class ReflexLearnerWorkflow:
                 type=WorkflowEventType.COMPLETE, data={"status": "success"}
             )
 
+        except ChatLimitError as exc:
+            logger.warning("Workflow stopped by chat limit", reason=exc.reason)
+            yield WorkflowEvent(
+                type=WorkflowEventType.ERROR,
+                data={"message": exc.user_message, "reason": exc.reason},
+            )
+
         except GraphRecursionError as e:
             logger.error(f"Workflow exceeded recursion limit: {e}")
             yield WorkflowEvent(
                 type=WorkflowEventType.ERROR, data={"message": ERROR_RECURSION_LIMIT}
             )
 
-        except Exception as e:
-            logger.error(f"Workflow token stream error: {e}")
-            yield WorkflowEvent(type=WorkflowEventType.ERROR, data={"message": str(e)})
+        except Exception as exc:
+            logger.error("Workflow token stream error", error_type=type(exc).__name__)
+            yield WorkflowEvent(
+                type=WorkflowEventType.ERROR,
+                data={"message": ERROR_WORKFLOW_FAILED},
+            )
+        finally:
+            reset_current_chat_turn(turn_token)
 
 
 @lru_cache(maxsize=1)

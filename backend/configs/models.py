@@ -186,6 +186,7 @@ class ResearcherModelSettings(BaseSettings):
         top_k=20,
         top_p=0.3,
         num_predict=1024,
+        request_timeout=120.0,
     )
     # vLLM self-hosted alternative: Qwen3.5-9B (same instance as with_tools)
     structured: BaseLLMSettings = OllamaSettings(
@@ -196,6 +197,7 @@ class ResearcherModelSettings(BaseSettings):
         top_k=50,
         top_p=1.0,
         num_predict=4096,
+        request_timeout=120.0,
     )
     prompt_version: str = "v4"
 
@@ -219,6 +221,7 @@ class ModelSettings(BaseSettings):
         top_k=10,
         top_p=1.0,
         num_predict=2048,
+        request_timeout=120.0,
         prompt_version={"graph_index": "v2", "routing": "v4"},
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B (same instance as orchestrator)
@@ -230,6 +233,7 @@ class ModelSettings(BaseSettings):
         top_k=20,
         top_p=0.3,
         num_predict=512,
+        request_timeout=120.0,
         prompt_version="v5",
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
@@ -245,6 +249,7 @@ class ModelSettings(BaseSettings):
         top_p=0.8,
         num_predict=8192,
         reasoning=False,
+        request_timeout=120.0,
         prompt_version="v6",
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (same instance as analyst)
@@ -255,8 +260,9 @@ class ModelSettings(BaseSettings):
         num_ctx=8192,
         top_k=40,
         top_p=0.8,
-        num_predict=8192,
+        num_predict=4096,
         reasoning=True,
+        request_timeout=120.0,
         prompt_version="v4",
     )
 
@@ -327,7 +333,7 @@ def _vllm_models() -> ModelSettings:
             model_name=vllm_model_path,
             base_url=generation_url,
             temperature=0.7,
-            max_tokens=8192,
+            max_tokens=4096,
             prompt_version="v4",
         ),
     )

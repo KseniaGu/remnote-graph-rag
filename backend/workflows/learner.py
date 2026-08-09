@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import re
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -10,7 +11,6 @@ from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from ollama._types import ResponseError
 from pymongo import MongoClient
 from tavily import TavilyClient
 
@@ -26,6 +26,12 @@ from backend.configs.search import KnowledgeGraphSearchSettings, TavilySettings
 from backend.configs.storage import StorageSettings
 from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 from backend.knowledge_graph.storage import KnowledgeGraphStorage
+from backend.utils.chat_limits import (
+    ChatLimitError,
+    get_chat_limit_service,
+    get_current_chat_turn,
+    is_transient_provider_error,
+)
 from backend.utils.helpers import add_trace_metadata
 from backend.utils.prompt_engine import PromptEngine
 from backend.utils.session_memory import compress_text
@@ -66,6 +72,8 @@ class LearnerWorkflow:
         self.models_settings = models_settings
         self.path_settings = path_settings
         self.storage_settings = storage_settings
+        self.chat_limit_service = get_chat_limit_service()
+        self.chat_limits_settings = self.chat_limit_service.settings
 
         self.workflow = StateGraph(State)
 
@@ -130,6 +138,11 @@ class LearnerWorkflow:
         try:
             self.knowledge_graph_indexer.load_index()
         except ValueError:
+            if self.chat_limits_settings.shared_quotas_enabled:
+                raise RuntimeError(
+                    "Production retrieval storage is missing or invalid; "
+                    "runtime graph construction is disabled."
+                ) from None
             logger.info(
                 "No existing index found. Building new knowledge graph index..."
             )
@@ -166,7 +179,10 @@ class LearnerWorkflow:
         """
         # Initialize tools
         base_kb_search_tool = self._build_kb_search_tool()
-        web_search_tool = deep_web_research(self.search_engine)
+        limit_service = (
+            getattr(self, "chat_limit_service", None) or get_chat_limit_service()
+        )
+        web_search_tool = deep_web_research(self.search_engine, limit_service)
         visualizer_kb_search_tool = self._build_visualizer_tool()
         self.tools = {
             tool.name: tool
@@ -207,13 +223,11 @@ class LearnerWorkflow:
                 self.researcher_structured = AgentsFactory.get_llm_by_role(
                     model_settings.structured
                 )
-                self.researcher_with_tools = AgentsFactory.add_retry(
-                    self.researcher_with_tools.bind_tools([web_search_tool]),
-                    provider=model_settings.with_tools.provider,
+                self.researcher_with_tools = self.researcher_with_tools.bind_tools(
+                    [web_search_tool]
                 )
-                self.researcher_structured = AgentsFactory.add_retry(
-                    self.researcher_structured.with_structured_output(ResearchResult),
-                    provider=model_settings.structured.provider,
+                self.researcher_structured = (
+                    self.researcher_structured.with_structured_output(ResearchResult)
                 )
                 continue
             else:
@@ -227,11 +241,7 @@ class LearnerWorkflow:
                         [base_kb_search_tool, visualizer_kb_search_tool]
                     )
 
-            setattr(
-                self,
-                role_type.name,
-                AgentsFactory.add_retry(model, provider=model_settings.provider),
-            )
+            setattr(self, role_type.name, model)
 
     def _build_kb_search_tool(self):
         mode = self.knowledge_graph_indexer.kg_search_settings.analyst_retrieval_mode
@@ -239,6 +249,18 @@ class LearnerWorkflow:
             reranker_settings = getattr(
                 getattr(self, "models_settings", None), "reranker", None
             )
+            if (
+                self.knowledge_graph_indexer.kg_search_settings.analyst_reranker_mode
+                == "ollama_llm_rerank"
+                and getattr(
+                    getattr(self, "chat_limits_settings", None),
+                    "shared_quotas_enabled",
+                    False,
+                )
+            ):
+                raise ValueError(
+                    "ollama_llm_rerank is not supported while shared chat quotas are enabled"
+                )
             analyst_retrieval_pipeline = AnalystRetrievalPipeline(
                 self.knowledge_graph_indexer,
                 reranker_settings=reranker_settings,
@@ -425,38 +447,61 @@ class LearnerWorkflow:
     async def call_model(
         self, messages_to_pass: list, role_type: ModelRoleType, **kwargs
     ) -> AIMessage | None:
-        """Invokes an agent model with error handling.
-
-        Args:
-            messages_to_pass: Formatted messages for model input.
-            role_type: Type of agent to invoke.
-            **kwargs: Additional arguments (e.g., model_type for researcher variants).
-
-        Returns:
-            Model response or None if invocation failed.
-        """
+        """Invokes one chat agent with bounded, status-aware retry behavior."""
         if role_type == ModelRoleType.researcher:
             model_type = kwargs.get("model_type")
             model = getattr(self, role_type.name + model_type)
             run_name = f"{role_type.name}{model_type}"
+            provider_settings = getattr(
+                self.models_settings.researcher, model_type.lstrip("_")
+            )
         else:
             model = getattr(self, role_type.name)
             run_name = role_type.name
-        try:
-            return await model.ainvoke(messages_to_pass, config={"run_name": run_name})
-        except ResponseError as e:
-            add_trace_metadata("error_type", "ollama_service_error")
-            add_trace_metadata("error_role", role_type.name)
-            logger.error(
-                f"[{role_type.name.upper()}] Service error after retries exhausted: {e.status_code}"
+            provider_settings = getattr(self.models_settings, role_type.name)
+
+        context = get_current_chat_turn()
+        self.chat_limit_service.begin_llm_call(context, role_type.name)
+        attempt_number = 0
+        while True:
+            attempt_number += 1
+            await self.chat_limit_service.reserve_llm_attempt(
+                context,
+                getattr(provider_settings, "provider", "ollama"),
+                role_type.name,
             )
-        except Exception as e:
-            err_type = self._classify_error(e)
-            add_trace_metadata("error_type", err_type)
-            add_trace_metadata("error_role", role_type.name)
-            add_trace_metadata("error_message", str(e)[:500])
-            logger.error(f"[{role_type.name.upper()}] {err_type}: {str(e)[:500]}")
-        return None
+            try:
+                response = await model.ainvoke(
+                    messages_to_pass, config={"run_name": run_name}
+                )
+                self.chat_limit_service.record_model_usage(context, response)
+                return response
+            except ChatLimitError:
+                raise
+            except Exception as exc:
+                should_retry = (
+                    attempt_number == 1
+                    and is_transient_provider_error(exc)
+                    and self.chat_limit_service.claim_retry(context)
+                )
+                if should_retry:
+                    logger.warning(
+                        "Retrying transient chat-model failure",
+                        role=role_type.name,
+                        error_type=type(exc).__name__,
+                    )
+                    await asyncio.sleep(1.0 + random.uniform(0.0, 0.25))
+                    continue
+
+                err_type = self._classify_error(exc)
+                add_trace_metadata("error_type", err_type)
+                add_trace_metadata("error_role", role_type.name)
+                logger.error(
+                    "Chat-model invocation failed",
+                    role=role_type.name,
+                    error_type=err_type,
+                )
+                return None
 
     @staticmethod
     def _classify_error(exc: BaseException) -> str:
@@ -481,27 +526,33 @@ class LearnerWorkflow:
 
     @traceable(run_type="chain", name="call_tools")
     async def call_tools(self, response: Any) -> dict[str, Any]:
-        """Executes tool calls from agent response in parallel.
+        """Executes at most the first recognized tool call."""
+        tool_calls = list(getattr(response, "tool_calls", []) or [])
+        recognized = [call for call in tool_calls if call.get("name") in self.tools]
+        if len(tool_calls) > 1:
+            logger.warning(
+                "Discarding excess model tool calls",
+                returned_count=len(tool_calls),
+                executed_count=min(1, len(recognized)),
+            )
+        if not recognized:
+            return {}
 
-        Args:
-            response: Agent response containing tool_calls.
-
-        Returns:
-            Dictionary mapping tool names to their results.
-        """
-
-        async def _invoke_one(tool_call: dict) -> tuple[str, Any]:
-            tool_name = tool_call["name"]
-            try:
-                logger.info(f"Executing tool: {tool_name}")
-                result = await self.tools[tool_name].ainvoke(tool_call["args"])
-                return tool_name, result
-            except Exception as e:
-                logger.error(f"{tool_name} failed. Error: {e!s}")
-                return tool_name, None
-
-        results = await asyncio.gather(*[_invoke_one(tc) for tc in response.tool_calls])
-        return {name: result for name, result in results if result is not None}
+        tool_call = recognized[0]
+        tool_name = tool_call["name"]
+        try:
+            logger.info("Executing tool", tool_name=tool_name)
+            result = await self.tools[tool_name].ainvoke(tool_call.get("args", {}))
+        except ChatLimitError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "Workflow tool failed",
+                tool_name=tool_name,
+                error_type=type(exc).__name__,
+            )
+            return {}
+        return {tool_name: result} if result is not None else {}
 
     @staticmethod
     def _deterministic_route(state: State) -> str | None:

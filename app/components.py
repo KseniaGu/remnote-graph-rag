@@ -1,6 +1,12 @@
 import reflex as rx
 
-from app.state import AppState, Message, RecentMapItem, SessionHistoryItem
+from app.state import (
+    CHAT_MESSAGE_MAX_CHARS,
+    AppState,
+    Message,
+    RecentMapItem,
+    SessionHistoryItem,
+)
 from app.strings import (
     APP_NAME,
     APP_TAGLINE,
@@ -725,11 +731,9 @@ def streaming_bubble() -> rx.Component:
                         COLORS["accent_blue"],
                         animated=True,
                     ),
-                    rx.text(
+                    rx.markdown(
                         AppState.streaming_content + " ▍",
-                        white_space="pre-wrap",
-                        overflow_wrap="anywhere",
-                        class_name="streaming-content",
+                        class_name="markdown-content",
                     ),
                     class_name=rx.cond(
                         AppState.streaming_agent == "analyst",
@@ -875,6 +879,7 @@ def composer_inner() -> rx.Component:
                         value=AppState.current_input,
                         on_change=AppState.set_input,
                         disabled=AppState.is_processing,
+                        max_length=CHAT_MESSAGE_MAX_CHARS,
                         rows="1",
                         style={
                             **INPUT_STYLE,

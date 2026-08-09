@@ -34,3 +34,34 @@ FALLBACK_DEFAULT = (
 ERROR_RECURSION_LIMIT = (
     "The workflow exceeded the maximum number of steps. Please try a simpler query."
 )
+
+ERROR_MESSAGE_TOO_LONG = (
+    "Your message is too long. Please keep it under 4,000 characters."
+)
+ERROR_CHAT_COOLDOWN = "Please wait a few seconds before sending another message."
+ERROR_VISITOR_DAILY_LIMIT = (
+    "You have reached the demo's daily message limit. Please try again after 00:00 UTC."
+)
+ERROR_VISITOR_ACTIVE_TURN = (
+    "Another message is already being processed for this browser."
+)
+ERROR_GLOBAL_CHAT_BUSY = (
+    "The demo is currently busy. Please wait a moment and try again."
+)
+ERROR_OLLAMA_DAILY_LIMIT = "The demo's daily AI usage limit has been reached. Please try again after 00:00 UTC."
+ERROR_TAVILY_DAILY_LIMIT = (
+    "The demo's web-research limit has been reached. Please try again later."
+)
+ERROR_WORKFLOW_BUDGET = (
+    "This request required too many processing steps. Please try a simpler question."
+)
+ERROR_WORKFLOW_TIMEOUT = (
+    "This request took too long to complete. Please try a narrower question."
+)
+ERROR_QUOTA_STORAGE_UNAVAILABLE = (
+    "The demo is temporarily unavailable because usage limits cannot be verified. "
+    "Please try again shortly."
+)
+ERROR_WORKFLOW_FAILED = (
+    "I encountered an error while processing your request. Please try again."
+)

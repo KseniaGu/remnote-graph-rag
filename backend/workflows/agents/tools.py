@@ -1,10 +1,21 @@
+import asyncio
 import json
+import random
 from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
+from backend.configs.chat_limits import ChatLimitsSettings
 from backend.configs.constants import MIN_RELEVANCE_SCORE, WORKFLOW_LOGGING
+from backend.utils.chat_limits import (
+    ChatLimitError,
+    ChatLimitService,
+    get_chat_limit_service,
+    get_current_chat_turn,
+    is_transient_provider_error,
+    truncate_text,
+)
 from backend.utils.helpers import get_logger
 from backend.workflows.agents.retrieval_evidence import (
     QueryEvidenceResult,
@@ -71,9 +82,31 @@ class QueryListInput(BaseModel):
         return normalized
 
 
+class WebResearchInput(BaseModel):
+    """Validated arguments for one Tavily search."""
+
+    topic: str = Field(min_length=1, max_length=256)
+
+    @field_validator("topic")
+    @classmethod
+    def normalize_topic(cls, topic: str) -> str:
+        """Rejects whitespace-only topics and searches the normalized value."""
+        topic = topic.strip()
+        if not topic:
+            raise ValueError("a non-empty research topic is required")
+        return topic
+
+
 def search_knowledge_base(
-    retriever: Any = None, reranker: Any = None, analyst_pipeline: Any = None
+    retriever: Any = None,
+    reranker: Any = None,
+    analyst_pipeline: Any = None,
+    max_context_chars: int | None = None,
 ):
+    context_limit = (
+        max_context_chars or ChatLimitsSettings().retrieval_context_max_chars
+    )
+
     @tool("search_knowledge_base", args_schema=QueryListInput)
     def _search_knowledge_base(queries: list[str]):
         """Searches the knowledge base using advanced graph and vector retrieval.
@@ -103,7 +136,7 @@ def search_knowledge_base(
             [SOURCE PATH] CV History > Classical Era > Feature Extraction
         """
         if analyst_pipeline is not None:
-            return analyst_pipeline.search(queries)
+            return truncate_text(analyst_pipeline.search(queries), context_limit)
 
         if retriever is None:
             return "No relevant information found."
@@ -139,17 +172,25 @@ def search_knowledge_base(
 
             query_results.append(QueryEvidenceResult(query=query, items=evidence_items))
 
-        return format_search_results(query_results)
+        return truncate_text(format_search_results(query_results), context_limit)
 
     return _search_knowledge_base
 
 
-def deep_web_research(search_engine: Any):
-    @tool("deep_web_research")
-    def _deep_web_research(topic: str):
+def deep_web_research(
+    search_engine: Any,
+    limit_service: ChatLimitService | None = None,
+    settings: ChatLimitsSettings | None = None,
+):
+    limits = limit_service or get_chat_limit_service()
+    chat_settings = settings or limits.settings
+
+    @tool("deep_web_research", args_schema=WebResearchInput)
+    async def _deep_web_research(topic: str):
         """Performs comprehensive web research on the given topic using advanced search capabilities.
 
-        This tool conducts deep web research using advanced search to gather comprehensive, up-to-date information about any topic. It analyzes multiple sources and provides a synthesized summary.
+        This tool conducts deep web research using advanced search to gather
+        comprehensive, up-to-date information about any topic.
 
         Use this when:
         - The knowledge base has no relevant information
@@ -163,19 +204,48 @@ def deep_web_research(search_engine: Any):
         Returns:
             str: Formatted search results with content snippets and source metadata for synthesis
         """
-        response = search_engine.search(topic, depth="advanced")
+        topic = topic.strip()
+        context = get_current_chat_turn()
+        limits.begin_tavily_search(context)
+        attempt_number = 0
+        while True:
+            attempt_number += 1
+            await limits.reserve_tavily_attempt(context)
+            try:
+                response = await asyncio.to_thread(
+                    search_engine.search,
+                    query=topic,
+                    search_depth="advanced",
+                    max_results=chat_settings.tavily_max_results,
+                    timeout=chat_settings.tavily_timeout_seconds,
+                )
+                break
+            except ChatLimitError:
+                raise
+            except Exception as exc:
+                if (
+                    attempt_number != 1
+                    or not is_transient_provider_error(exc)
+                    or not limits.claim_retry(context)
+                ):
+                    raise
+                logger.warning(
+                    "Retrying transient Tavily failure",
+                    error_type=type(exc).__name__,
+                )
+                await asyncio.sleep(1.0 + random.uniform(0.0, 0.25))
 
-        # Extract results
-        results = response.get("results", [])
+        results = response.get("results", [])[: chat_settings.tavily_max_results]
 
         if not results:
             return f"No web search results found for topic: '{topic}'"
 
-        # Format results for LLM consumption
         formatted_output = [f"Web Search Results for: '{topic}'", "=" * 80, ""]
 
         for idx, result in enumerate(results, 1):
-            content = result.get("content", "No content available")
+            content = str(result.get("content", "No content available"))[
+                : chat_settings.tavily_result_max_chars
+            ]
             title = result.get("title", "Unknown Title")
             url = result.get("url", "No URL")
             score = result.get("score", 0.0)
@@ -193,7 +263,8 @@ def deep_web_research(search_engine: Any):
         formatted_output.append(f"\nTotal sources found: {len(results)}")
 
         joined = "\n".join(formatted_output)
-        return joined.encode("utf-8", "ignore").decode("utf-8")
+        joined = joined.encode("utf-8", "ignore").decode("utf-8")
+        return truncate_text(joined, chat_settings.tavily_context_max_chars)
 
     return _deep_web_research
 

@@ -61,11 +61,13 @@ class AgentsFactory:
         )
 
         if provider == LLMProviderType.ollama:
+            client_kwargs: dict[str, Any] = {"timeout": model_settings.request_timeout}
+            if api_key:
+                client_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
             return ChatOllama(
                 model=model_settings.model_name,
-                client_kwargs={"headers": {"Authorization": f"Bearer {api_key}"}}
-                if api_key
-                else {},
+                client_kwargs=client_kwargs,
+                async_client_kwargs=client_kwargs,
                 **model_settings.ollama_chat_params(),
             )
 

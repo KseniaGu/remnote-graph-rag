@@ -9,6 +9,7 @@ import reflex as rx
 from pydantic import BaseModel
 
 from app.strings import AGENT_DESCRIPTIONS, QUICK_ACTION_CACHE_POLICIES, QUICK_ACTIONS
+from backend.configs.chat_limits import ChatLimitsSettings
 from backend.configs.constants import (
     CACHED_AGENT_REPLAY_LATENCY,
     CACHED_TOKENS_REPLAY_LATENCY,
@@ -16,7 +17,14 @@ from backend.configs.constants import (
     RECURSION_LIMIT,
 )
 from backend.configs.enums import WorkflowEventType
+from backend.configs.messages import ERROR_MESSAGE_TOO_LONG
 from backend.utils.cache import get_quick_action_cache, normalize_quick_action_prompt
+from backend.utils.chat_limits import (
+    ChatAdmission,
+    ChatLimitError,
+    WorkflowTimeoutExceeded,
+    get_chat_limit_service,
+)
 from backend.utils.helpers import logger
 from backend.utils.session_memory import get_session_memory_store
 from backend.workflows.learner_reflex import get_workflow
@@ -25,6 +33,8 @@ MAX_SIDEBAR_HISTORY_ITEMS = 10
 SIDEBAR_TITLE_MAX_CHARS = 48
 
 
+CHAT_LIMITS_SETTINGS = ChatLimitsSettings()
+CHAT_MESSAGE_MAX_CHARS = CHAT_LIMITS_SETTINGS.message_max_chars
 _MATH_SPAN_RE = re.compile(r"\$\$.*?\$\$|\$.*?\$", flags=re.DOTALL)
 _TABLE_ROW_BOUNDARY_RE = re.compile(r"(?<!\\)\|\s+(?<!\\)\|")
 _TABLE_CELL_BOUNDARY_RE = re.compile(r"(?<!\\)\|")
@@ -118,8 +128,7 @@ def _repair_concatenated_markdown_tables(text: str) -> str:
         candidate_cells = [_markdown_table_cells(row) for row in candidate_rows]
         column_count = len(candidate_cells[0]) if candidate_cells else 0
         has_separator = len(candidate_cells) > 1 and all(
-            _TABLE_SEPARATOR_CELL_RE.fullmatch(cell)
-            for cell in candidate_cells[1]
+            _TABLE_SEPARATOR_CELL_RE.fullmatch(cell) for cell in candidate_cells[1]
         )
         has_consistent_columns = column_count >= 2 and all(
             len(cells) == column_count for cells in candidate_cells
@@ -197,6 +206,26 @@ QUICK_ACTION_POLICY_BY_PROMPT = _build_quick_action_policy_map()
 
 def _get_quick_action_cache_policy(prompt: str) -> dict[str, Any] | None:
     return QUICK_ACTION_POLICY_BY_PROMPT.get(normalize_quick_action_prompt(prompt))
+
+
+def _canonical_visitor_id(value: str) -> str:
+    """Returns a canonical anonymous UUID, or an empty string when invalid."""
+    try:
+        return str(uuid.UUID(value.strip()))
+    except (AttributeError, ValueError):
+        return ""
+
+
+async def _events_with_timeout(events, timeout_seconds: float):
+    """Yields workflow events under one wall-clock timeout."""
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            async for event in events:
+                yield event
+    finally:
+        close = getattr(events, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _submitted_message_from_form(form_data: dict) -> str:
@@ -429,6 +458,7 @@ class AppState(rx.State):
     session_history: list[SessionHistoryItem] = []
     recent_maps: list[RecentMapItem] = []
     selected_session_history_id: str = ""
+    visitor_id: str = rx.LocalStorage("", name="ai_practice_visitor_id", sync=True)
     selected_recent_map_id: str = ""
     scroll_target_message_dom_id: str = ""
     scroll_request_nonce: int = 0
@@ -574,8 +604,13 @@ class AppState(rx.State):
     async def initialize_session(self):
         """Hydrates the current browser-tab session from best-effort Mongo memory."""
         async with self:
-            if not self.session_id:
-                self.session_id = str(uuid.uuid4())
+            canonical_visitor_id = _canonical_visitor_id(self.visitor_id)
+            if not canonical_visitor_id:
+                canonical_visitor_id = str(uuid.uuid4())
+            self.visitor_id = canonical_visitor_id
+            canonical_session_id = _canonical_visitor_id(self.session_id)
+            self.session_id = canonical_session_id or str(uuid.uuid4())
+            if not canonical_session_id:
                 return
             session_id = self.session_id
             should_hydrate = (
@@ -846,6 +881,12 @@ class AppState(rx.State):
 
     async def _process_message(self, user_message: str):
         """Sends a captured user message through the workflow."""
+        if len(user_message) > CHAT_MESSAGE_MAX_CHARS:
+            async with self:
+                self.error_message = ERROR_MESSAGE_TOO_LONG
+                self.is_processing = False
+            return
+
         async with self:
             existing_message_count = len(self.messages)
         quick_action_policy = _get_quick_action_cache_policy(user_message)
@@ -858,11 +899,48 @@ class AppState(rx.State):
             else user_message
         )
         graph_updated_this_run = False
+        limit_service = get_chat_limit_service()
+        admission: ChatAdmission | None = None
+        turn_status = "success"
+        cached = None
 
         async with self:
-            if not self.session_id:
-                self.session_id = str(uuid.uuid4())
+            canonical_session_id = _canonical_visitor_id(self.session_id)
+            if not canonical_session_id:
+                canonical_session_id = str(uuid.uuid4())
+            self.session_id = canonical_session_id
             session_id = self.session_id
+            visitor_id = _canonical_visitor_id(self.visitor_id)
+            if not visitor_id:
+                visitor_id = str(uuid.uuid4())
+                self.visitor_id = visitor_id
+
+        if should_cache_quick_action:
+            try:
+                cached = await asyncio.to_thread(
+                    lambda: get_quick_action_cache().get(cache_prompt)
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Quick-action cache lookup failed",
+                    error_type=type(exc).__name__,
+                )
+
+        try:
+            if cached:
+                admission = await limit_service.admit_cached_turn(
+                    visitor_id, session_id
+                )
+            else:
+                admission = await limit_service.admit_expensive_turn(
+                    visitor_id, session_id
+                )
+        except ChatLimitError as exc:
+            async with self:
+                self.error_message = exc.user_message
+                self.is_processing = False
+            logger.info("Chat turn rejected", reason=exc.reason)
+            return
 
         async with self:
             self.is_processing = True
@@ -888,13 +966,6 @@ class AppState(rx.State):
 
         try:
             if should_cache_quick_action:
-                try:
-                    cached = await asyncio.to_thread(
-                        lambda: get_quick_action_cache().get(cache_prompt)
-                    )
-                except Exception as e:
-                    logger.warning(f"Quick-action cache lookup failed: {e}")
-                    cached = None
                 if cached:
                     cached_responses = cached.get("responses", [])
                     cached_visual_artifacts = cached.get("visual_artifacts", [])
@@ -942,16 +1013,21 @@ class AppState(rx.State):
                 session_summary = ""
 
             # Stream through workflow with per-token updates
-            async for event in workflow.stream_with_tokens(
-                user_message=user_message,
-                message_history=message_history,
-                recursion_limit=RECURSION_LIMIT,
-                session_id=session_id,
-                session_summary=session_summary,
+            async for event in _events_with_timeout(
+                workflow.stream_with_tokens(
+                    user_message=user_message,
+                    message_history=message_history,
+                    recursion_limit=RECURSION_LIMIT,
+                    session_id=session_id,
+                    session_summary=session_summary,
+                    turn_context=admission.context,
+                ),
+                limit_service.settings.workflow_timeout_seconds,
             ):
                 async with self:
                     if event.type == WorkflowEventType.AGENT_START:
                         self.active_agent = event.data["agent"]
+                        admission.context.agents.add(event.data["agent"])
                         if event.data["agent"] not in self.agent_history:
                             self.agent_history = self.agent_history + [
                                 event.data["agent"]
@@ -1009,6 +1085,7 @@ class AppState(rx.State):
 
                     elif event.type == WorkflowEventType.ERROR:
                         cache_error = True
+                        turn_status = event.data.get("reason", "workflow_error")
                         self.error_message = event.data.get(
                             "message", "Unknown error occurred"
                         )
@@ -1055,20 +1132,28 @@ class AppState(rx.State):
 
             await self._persist_current_session_snapshot(session_id)
 
-        except Exception as e:
+        except TimeoutError:
+            turn_status = WorkflowTimeoutExceeded.reason
             async with self:
-                self.error_message = f"Error processing request: {e!s}"
-                self.messages = self.messages + [
-                    Message(
-                        content="I encountered an error while processing your request. Please try again.",
-                        role="assistant",
-                        agent="system",
-                        timestamp=datetime.now().strftime("%H:%M"),
-                        dom_id=f"message-{uuid.uuid4().hex}",
-                    )
-                ]
+                self.error_message = WorkflowTimeoutExceeded.user_message
+            await self._persist_current_session_snapshot(session_id)
+        except ChatLimitError as exc:
+            turn_status = exc.reason
+            async with self:
+                self.error_message = exc.user_message
+            await self._persist_current_session_snapshot(session_id)
+        except Exception as exc:
+            turn_status = "workflow_error"
+            logger.error(
+                "Chat request processing failed",
+                error_type=type(exc).__name__,
+            )
+            async with self:
+                self.error_message = "I encountered an error while processing your request. Please try again."
             await self._persist_current_session_snapshot(session_id)
         finally:
+            if admission is not None:
+                await limit_service.finish_turn(admission, turn_status)
             async with self:
                 self.is_processing = False
                 self.active_agent = ""

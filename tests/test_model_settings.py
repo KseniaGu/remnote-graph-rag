@@ -62,8 +62,10 @@ def test_default_analyst_uses_v6_educational_cloud_configuration() -> None:
     assert analyst.model_name == "qwen3.5:cloud"
     assert analyst.prompt_version == "v6"
     assert analyst.num_predict == 8192
+    assert analyst.request_timeout == 120.0
     assert analyst.num_ctx == 32768
     assert analyst.ollama_chat_params()["reasoning"] is False
+    assert ModelSettings().mentor.num_predict == 4096
 
     researcher = ModelSettings().researcher.structured
     assert "reasoning" not in researcher.ollama_chat_params()
