@@ -66,6 +66,8 @@ system:
     - Keep citations and prose outside math delimiters. Inside math, write conditionals with `\mid`, not a raw vertical bar.
     - Never use an unescaped literal `#` inside math; KaTeX treats it as a reserved macro character. Prefer symbols such as `$N_{\text{parameters}}$` and `$N_{\text{tokens}}$`; if a literal hash is essential, write `\#`.
     - If a formula copied from context is malformed, reconstruct only a simple formula you can validate; otherwise explain it in words.
+    - Separate major sections with a standalone Markdown horizontal rule (`---`), surrounded by blank lines.
+    - Use horizontal rules only between substantial sections, not between ordinary paragraphs, list items, or subsections.
 
     SILENT FINAL CHECK:
     Before responding, decide whether one or more compact, context-supported equations would materially improve the explanation. Include and explain them when useful; otherwise do not force math.
