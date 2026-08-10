@@ -17,8 +17,6 @@ services:
       EMBEDDER_MODEL_PATH: /workspaces/remnote-graph-rag/models/all-MiniLM-L6-v2
       HF_HOME: /home/vscode/.cache/huggingface
       SENTENCE_TRANSFORMERS_HOME: /home/vscode/.cache/huggingface/sentence-transformers
-      POETRY_VIRTUALENVS_IN_PROJECT: "false"
-      POETRY_VIRTUALENVS_PATH: /home/vscode/envs
     depends_on:
       - redis
       - memgraph

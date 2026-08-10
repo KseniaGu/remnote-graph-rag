@@ -1,35 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export POETRY_REQUESTS_TIMEOUT="${POETRY_REQUESTS_TIMEOUT:-120}"
-export PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-120}"
-export POETRY_KEYRING_ENABLED=false
-
-export POETRY_CACHE_DIR="${POETRY_CACHE_DIR:-/home/vscode/.cache/pypoetry}"
-export POETRY_VIRTUALENVS_PATH="${POETRY_VIRTUALENVS_PATH:-/home/vscode/envs}"
+export UV_LINK_MODE="${UV_LINK_MODE:-copy}"
+export UV_PYTHON_DOWNLOADS="${UV_PYTHON_DOWNLOADS:-never}"
 export HF_HOME="${HF_HOME:-/home/vscode/.cache/huggingface}"
 
 mkdir -p \
     "/home/vscode/.cache" \
-    "${HF_HOME}" \
-    "${POETRY_CACHE_DIR}" \
-    "${POETRY_VIRTUALENVS_PATH}"
+    "${HF_HOME}"
 
-command -v poetry >/dev/null 2>&1 || {
-    echo "Poetry is not installed or is unavailable on PATH." >&2
+command -v uv >/dev/null 2>&1 || {
+    echo "uv is not installed or is unavailable on PATH." >&2
     exit 1
 }
 
-poetry --version
+uv --version
+uv sync --locked
 
-poetry config virtualenvs.in-project false
-poetry config virtualenvs.path "${POETRY_VIRTUALENVS_PATH}"
-poetry config keyring.enabled false
-poetry config installer.parallel false
-
-poetry sync --only main --no-root
-
-poetry run python -c \
+uv run --locked python -c \
     "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/all-MiniLM-L6-v2')"
 
 test -f rxconfig.py || {
@@ -37,4 +25,4 @@ test -f rxconfig.py || {
     exit 1
 }
 
-poetry env info
+uv run --locked python --version

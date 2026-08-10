@@ -1,68 +1,67 @@
-[tool.poetry]
+[project]
 name = "remnote-graph-rag"
 version = "0.1.0"
 description = "A Graph RAG system based on RemNote knowledge base."
-authors = ["Fuku Ro <keguryanova@gmail.com>"]
+authors = [{ name = "Fuku Ro", email = "keguryanova@gmail.com" }]
 readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "pydantic-settings>=2.12.0,<3.0.0",
+    "ollama>=0.6.1,<0.7.0",
+    "llama-index>=0.14.12,<0.15.0",
+    "llama-index-storage-docstore-redis>=0.4.1,<0.5.0",
+    "llama-index-storage-index-store-redis>=0.5.1,<0.6.0",
+    "llama-index-embeddings-huggingface>=0.6.1,<0.7.0",
+    "llama-index-graph-stores-neo4j>=0.5.1,<0.6.0",
+    "llama-index-graph-stores-memgraph>=0.5.0,<0.6.0",
+    "llama-index-llms-ollama>=0.9.1,<0.10.0",
+    "llama-index-embeddings-ollama>=0.8.6,<0.9.0",
+    "llama-index-postprocessor-cohere-rerank>=0.5.1,<0.6.0",
+    "llama-index-vector-stores-pinecone>=0.7.1,<0.8.0",
+    "llama-index-vector-stores-redis>=0.8.0,<0.9.0",
+    "langchain>=1.2.0,<2.0.0",
+    "langchain-ollama>=1.0.1,<2.0.0",
+    "langchain-openai>=1.1.0,<2.0.0",
+    "langchain-google-genai>=4.2.0,<5.0.0",
+    "langsmith>=0.7.0,<0.8.0",
+    "sentence-transformers>=5.5.1,<6.0.0",
+    "tenacity>=9.1.0,<10.0.0",
+    "structlog>=24.0.0,<25.0.0",
+    "tavily-python>=0.7.17,<0.8.0",
+    "reflex>=0.8.26,<0.9.0",
+    "plotly>=6.5.2,<7.0.0",
+    "pymupdf>=1.26.7,<2.0.0",
+    "neo4j==5.28.2",
+    "langgraph-checkpoint-mongodb>=0.3.1,<0.4.0",
+    "torch>=2.13.0,<3.0.0",
+]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1,<10.0.0",
+    "ruff>=0.16.1,<0.17.0",
+]
+scripts = [
+    "paddleocr>=3.6.0,<4.0.0",
+    "paddlex[ocr]>=3.6.1,<4.0.0",
+    "paddlepaddle>=3.2.2,<4.0.0",
+    "trafilatura>=2.1.0,<3.0.0",
+    "huggingface-hub>=1.20.1,<2.0.0",
+    "networkx>=3.6.1,<4.0.0",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.11, <3.14"
-pydantic-settings = "^2.12.0"
-ollama = "^0.6.1"
-llama-index = "^0.14.12"
-llama-index-storage-docstore-redis = "^0.4.1"
-llama-index-storage-index-store-redis = "^0.5.1"
-llama-index-embeddings-huggingface = "^0.6.1"
-llama-index-graph-stores-neo4j = "^0.5.1"
-llama-index-graph-stores-memgraph = "^0.5.0"
-llama-index-llms-ollama = "^0.9.1"
-llama-index-embeddings-ollama = "^0.8.6"
-llama-index-postprocessor-cohere-rerank = "^0.5.1"
-llama-index-vector-stores-pinecone = "^0.7.1"
-llama-index-vector-stores-redis = "^0.8.0"
-langchain = "^1.2.0"
-langchain-ollama = "^1.0.1"
-langchain-openai = "^1.1.0"
-langchain-google-genai = "^4.2.0"
-langsmith = "^0.7.0"
-sentence-transformers = "^5.5.1"
-tenacity = "^9.1.0"
-structlog = "^24.0.0"
-tavily-python = "^0.7.17"
-reflex = "^0.8.26"
-plotly = "^6.5.2"
-pymupdf = "^1.26.7"
-neo4j = "5.28.2"
-langgraph-checkpoint-mongodb = "^0.3.1"
+[tool.uv]
+package = false
+required-version = "==0.12.3"
+default-groups = ["dev"]
 
-torch = { version = "^2.13.0", source = "pytorch-cpu" }
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
-
-[[tool.poetry.source]]
+[[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
-priority = "explicit"
-
-
-[tool.poetry.group.dev]
-optional = true
-
-[tool.poetry.group.dev.dependencies]
-ruff = "^0.16.1"
-
-
-[tool.poetry.group.scripts]
-optional = true
-
-[tool.poetry.group.scripts.dependencies]
-paddleocr = "^3.6.0"
-paddlex = { extras = ["ocr"], version = "^3.6.1" }
-paddlepaddle = "^3.2.2" # To use GPU: install paddlepaddle-gpu instead
-trafilatura = "^2.1.0"
-huggingface-hub = "^1.20.1"
-networkx = "^3.6.1"
-
+explicit = true
 
 [tool.ruff]
 target-version = "py311"
@@ -120,11 +119,5 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
 
-
 [tool.pytest.ini_options]
 pythonpath = ["."]
-
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"

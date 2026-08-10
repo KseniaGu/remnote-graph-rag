@@ -1,14 +1,12 @@
+FROM ghcr.io/astral-sh/uv:0.12.3 AS uv
 FROM mcr.microsoft.com/devcontainers/python:3.11
 
-ARG POETRY_VERSION=2.4.1
-
-ENV POETRY_HOME=/home/vscode/.local/share/pypoetry \
-    POETRY_VIRTUALENVS_IN_PROJECT=false \
-    POETRY_VIRTUALENVS_PATH=/home/vscode/envs \
+ENV UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1
 
-ENV PATH="${POETRY_HOME}/bin:/home/vscode/.local/bin:${PATH}"
+COPY --from=uv /uv /uvx /usr/local/bin/
 
 USER root
 
@@ -23,19 +21,12 @@ RUN apt-get update \
         unzip \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p \
-        /home/vscode/.local/bin \
-        "${POETRY_HOME}" \
+        /home/vscode/.cache/huggingface \
         /home/vscode/.local/share/reflex \
-        "${POETRY_VIRTUALENVS_PATH}" \
     && chown -R vscode:vscode \
-        /home/vscode/.local \
-        "${POETRY_VIRTUALENVS_PATH}"
+        /home/vscode/.cache \
+        /home/vscode/.local
 
 USER vscode
 
-RUN curl --fail --show-error --silent --location \
-        https://install.python-poetry.org \
-        --output /tmp/install-poetry.py \
-    && python3 /tmp/install-poetry.py --version "${POETRY_VERSION}" \
-    && rm /tmp/install-poetry.py \
-    && poetry --version
+RUN uv --version

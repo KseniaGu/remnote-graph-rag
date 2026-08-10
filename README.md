@@ -45,7 +45,7 @@ Web interface built with [Reflex](https://github.com/reflex-dev/reflex) framewor
 ## Prerequisites
 
 1. **Python 3.11+**
-2. **Poetry** for dependency management
+2. **uv 0.12.3** for dependency management
 3. **Required services:**
     - [Ollama](https://ollama.com/library?sort=newest) server (for local LLM inference, but Ollama Cloud can also be
       used)
@@ -54,11 +54,19 @@ Web interface built with [Reflex](https://github.com/reflex-dev/reflex) framewor
     - [Cohere](https://docs.cohere.com/docs/rerank) API key for Reranker model
     - [MongoDB](https://www.mongodb.com/) instance (for LangGraph workflow state persistence)
 
+## Install dependencies
+
+```bash
+uv sync --locked
+```
+
+The default environment contains runtime and development dependencies. Offline parsing and OCR tools are installed on demand with the `scripts` dependency group.
+
 ## Prepare environment
 
 1. **Ingest**: Place RemNote Markdown exports in `data.raw`.
-2. **Parse**: `python scripts/parse_data.py`
-3. **Index**: `python scripts/build_graph_index.py`
+2. **Parse**: `uv run --locked --group scripts python scripts/parse_data.py`
+3. **Index**: `uv run --locked --group scripts python scripts/build_graph_index.py`
 
 Both scripts will save the data to the local storage by default (the path is specified in the
 `backend.configs.paths.PathSettings.local_storage_dir` parameter). See the comments in the scripts to use non-local
@@ -68,13 +76,13 @@ storage (Redis and Memgraph/Neo4j).
 
 ```bash
 # Initialize Reflex (first time only)
-reflex init
+uv run --locked reflex init
 
 # Start the Reflex development server
-reflex run
+uv run --locked reflex run
 
 # For production deployment
-reflex run --env prod
+uv run --locked reflex run --env prod
 ```
 
 The application will be available at `http://localhost:3000`

@@ -1,8 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.11-slim as builder
+FROM ghcr.io/astral-sh/uv:0.12.3 AS uv
+FROM python:3.11-slim AS builder
 
-ENV HF_HOME=/home/appuser/.cache/huggingface
+ENV HF_HOME=/home/appuser/.cache/huggingface \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -12,13 +16,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-RUN pip install poetry==1.8.0
-
-COPY pyproject.toml poetry.lock* ./
-RUN poetry config virtualenvs.create false \
-    && poetry install --only main --no-root --no-interaction --no-ansi
+COPY --from=uv /uv /uvx /usr/local/bin/
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev
 
 COPY . .
+
+ENV PATH="/app/.venv/bin:${PATH}"
 
 RUN reflex init
 
@@ -31,17 +36,16 @@ ENV TRANSFORMERS_OFFLINE=1
 ENV PYTHONUNBUFFERED=1
 ENV EMBEDDER_MODEL_PATH=/app/models/all-MiniLM-L6-v2
 ENV RERANKER_MODEL_PATH=/app/models/Qwen3-Reranker-0.6B
+ENV PATH="/app/.venv/bin:${PATH}"
 
 RUN adduser --disabled-password --no-create-home appuser
 
 WORKDIR /app
 
 COPY --from=model-cache / /app/models/
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.local/share/reflex /home/appuser/.local/share/reflex
-
 COPY --from=builder /app /app
+
 RUN mkdir -p /app/storage
 COPY --from=runtime-storage /docstore.json /app/storage/docstore.json
 COPY --from=runtime-storage /property_graph_store.json /app/storage/property_graph_store.json

@@ -39,7 +39,6 @@ storage/
 
 # Environment
 .env
-poetry.lock
 credentials.json
 secrets.yml
 .venv/

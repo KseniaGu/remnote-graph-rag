@@ -1,5 +1,5 @@
 {
-  "name": "Python + Poetry + GCloud Runner",
+  "name": "Python + uv + GCloud Runner",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
 
   "features": {
@@ -13,16 +13,15 @@
   ],
 
   "containerEnv": {
-    "POETRY_HOME": "/home/vscode/.local/share/pypoetry",
-    "POETRY_VIRTUALENVS_IN_PROJECT": "false",
-    "POETRY_VIRTUALENVS_PATH": "/home/vscode/.cache/pypoetry/virtualenvs"
+    "UV_LINK_MODE": "copy",
+    "UV_PYTHON_DOWNLOADS": "never"
   },
 
   "remoteEnv": {
-    "PATH": "${containerEnv:PATH}:/home/vscode/.local/share/pypoetry/bin"
+    "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin"
   },
 
-  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postCreateCommand": "bash .devcontainer/gcloud-script-runner/post-create.sh",
 
   "customizations": {
     "vscode": {

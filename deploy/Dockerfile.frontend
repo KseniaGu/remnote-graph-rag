@@ -1,4 +1,10 @@
-FROM python:3.11-slim as builder
+# syntax=docker/dockerfile:1.7
+
+FROM ghcr.io/astral-sh/uv:0.12.3 AS uv
+FROM python:3.11-slim AS builder
+
+ENV UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -8,13 +14,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-RUN pip install poetry==1.8.0
-
-COPY pyproject.toml poetry.lock* ./
-RUN poetry config virtualenvs.create false \
-    && poetry install --only main --no-root --no-interaction --no-ansi
+COPY --from=uv /uv /uvx /usr/local/bin/
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev
 
 COPY . .
+
+ENV PATH="/app/.venv/bin:${PATH}"
 
 RUN reflex init
 

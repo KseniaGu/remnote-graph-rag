@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-POETRY_HOME="${POETRY_HOME:-/home/vscode/.local/share/pypoetry}"
-POETRY_BIN="${POETRY_HOME}/bin/poetry"
+UV_VERSION="0.12.3"
+UV_INSTALL_DIR="${UV_INSTALL_DIR:-/home/vscode/.local/bin}"
+UV_BIN="${UV_INSTALL_DIR}/uv"
 
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
@@ -25,10 +26,18 @@ echo \
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends google-cloud-cli
 
-if [ ! -x "${POETRY_BIN}" ]; then
-    curl -sSL https://install.python-poetry.org \
-        | POETRY_HOME="${POETRY_HOME}" python3 -
+if [ ! -x "${UV_BIN}" ]; then
+    curl --fail --show-error --silent --location \
+        "https://astral.sh/uv/${UV_VERSION}/install.sh" \
+        --output /tmp/install-uv.sh
+    UV_INSTALL_DIR="${UV_INSTALL_DIR}" UV_NO_MODIFY_PATH=1 sh /tmp/install-uv.sh
+    rm /tmp/install-uv.sh
 fi
 
-"${POETRY_BIN}" --version
-"${POETRY_BIN}" install --no-root
+export PATH="${UV_INSTALL_DIR}:${PATH}"
+export UV_LINK_MODE="${UV_LINK_MODE:-copy}"
+export UV_PYTHON_DOWNLOADS="${UV_PYTHON_DOWNLOADS:-never}"
+
+"${UV_BIN}" --version
+"${UV_BIN}" sync --locked --no-dev
+"${UV_BIN}" run --locked --no-dev python --version

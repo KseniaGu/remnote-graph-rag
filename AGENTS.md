@@ -67,6 +67,6 @@ def run_postprocess_pass(...) -> PostprocessPassResult:
 
 Consider using Context7 when code review, refactoring, feature development, or another task depends on the current or version-specific behavior of an external library.
 
-It is especially useful for checking API contracts, return types, configuration options, deprecations, and recommended framework usage. When practical, identify the installed dependency version from `pyproject.toml` or `poetry.lock` and prefer matching documentation.
+It is especially useful for checking API contracts, return types, configuration options, deprecations, and recommended framework usage. When practical, identify the installed dependency version from `pyproject.toml` or `uv.lock` and prefer matching documentation.
 
 Use repository evidence, tests, and runtime behavior as the primary source of truth. Context7 should support decisions, not override established project patterns or justify unnecessary changes.

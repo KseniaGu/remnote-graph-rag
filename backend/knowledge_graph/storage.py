@@ -42,7 +42,7 @@ def _get_redis_vector_schema(embedding_dim: int) -> Any:
     """Build the Redis vector-store schema without depending on LlamaIndex internals."""
     if IndexSchema is None:
         raise ImportError(
-            "Redis vector storage requires redisvl. Run `poetry install --only main --no-root`."
+            "Redis vector storage requires redisvl. Run `uv sync --locked --no-dev`."
         )
 
     schema = {
@@ -261,7 +261,7 @@ class KnowledgeGraphStorage:
             if RedisVectorStore is None:
                 raise ImportError(
                     "Redis vector storage requires llama-index-vector-stores-redis. "
-                    "Run `poetry install --only main --no-root`."
+                    "Run `uv sync --locked --no-dev`."
                 )
             embedding_dim = kwargs.get("embedding_dim", DEFAULT_EMBEDDING_DIM)
             schema = _get_redis_vector_schema(embedding_dim)
