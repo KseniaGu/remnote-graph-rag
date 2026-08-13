@@ -4,7 +4,7 @@ _meta:
   model_settings:
     model: "qwen3.5:cloud"  # vLLM: Qwen/Qwen3.5-27B
     temperature: 0.15
-    num_predict: 4096
+    num_predict: 8192
     top_k: 40
     top_p: 0.9
     num_ctx: 32768

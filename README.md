@@ -46,13 +46,16 @@ Web interface built with [Reflex](https://github.com/reflex-dev/reflex) framewor
 
 1. **Python 3.11+**
 2. **uv 0.12.3** for dependency management
-3. **Required services:**
-    - [Ollama](https://ollama.com/library?sort=newest) server (for local LLM inference, but Ollama Cloud can also be
-      used)
-    - [Memgraph](https://memgraph.com/) database (default graph storage; Neo4j is still supported as a fallback)
-    - [Redis](https://redis.io/) server (for vector/document storage)
-    - [Cohere](https://docs.cohere.com/docs/rerank) API key for Reranker model
-    - [MongoDB](https://www.mongodb.com/) instance (for LangGraph workflow state persistence)
+3. **Default runtime dependencies:**
+    - an [Ollama](https://ollama.com/library?sort=newest)-compatible endpoint
+      (local Ollama or Ollama Cloud);
+    - prepared local document and property-graph files under `storage`;
+    - [Redis](https://redis.io/) for index storage;
+    - [Pinecone](https://www.pinecone.io/) for vector storage;
+    - [MongoDB](https://www.mongodb.com/) for checkpoints and session services;
+    - a Tavily API key when web-research fallback is required.
+
+[Memgraph](https://memgraph.com/), [Neo4j](https://neo4j.com/), local/Redis vector storage, and optimized Analyst retrieval are supported alternatives, but they are not the current code defaults.
 
 ## Install dependencies
 
@@ -64,13 +67,15 @@ The default environment contains runtime and development dependencies. Offline p
 
 ## Prepare environment
 
-1. **Ingest**: Place RemNote Markdown exports in `data.raw`.
-2. **Parse**: `uv run --locked --group scripts python scripts/parse_data.py`
-3. **Index**: `uv run --locked --group scripts python scripts/build_graph_index.py`
+Prepare retrieval storage before starting the application. The current parser,
+post-processing, final-storage build, deterministic retrieval benchmark, and
+migration commands are documented in
+[`docs/optimized_pipeline_runbook.md`](docs/optimized_pipeline_runbook.md).
 
-Both scripts will save the data to the local storage by default (the path is specified in the
-`backend.configs.paths.PathSettings.local_storage_dir` parameter). See the comments in the scripts to use non-local
-storage (Redis and Memgraph/Neo4j).
+The application does not build or repair retrieval storage at startup. Keep
+`REDIS_INIT_FROM_LOCAL`, `PINECONE_INIT_FROM_LOCAL`,
+`NEO4J_INIT_FROM_LOCAL`, and `MEMGRAPH_INIT_FROM_LOCAL` disabled for runtime
+serving; enable the relevant flags only for an intentional migration command.
 
 ## Running the application locally
 
@@ -109,7 +114,7 @@ configurations are also possible.
     - Create Pinecone account, create an index, and note `PINECONE_API_KEY`, `PINECONE_ENVIRONMENT`,
       `PINECONE_INDEX_NAME`
     - Create Neo4j or Memgraph instance and note `<db>_URI`, `<db>_USERNAME`, `<db>_PASSWORD`, `<db>_DATABASE`, where <db> is one of `(NEO4J, MEMGRAPH)`
-    - Create MongoDB instance and note `MONGODB_URI`, `MONGODB_DB_NAME` 
+    - Create MongoDB instance and note `MONGODB_URI`, `MONGODB_DB_NAME`
 
 2. **Migrate local data to cloud databases:**
     - Update the `.env` file with your cloud database credentials. Set `REDIS_INIT_FROM_LOCAL=true`,

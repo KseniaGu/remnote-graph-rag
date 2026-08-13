@@ -100,15 +100,30 @@ class LearnerWorkflow:
         kg_search_settings: KnowledgeGraphSearchSettings,
         storage_settings: StorageSettings,
     ):
-        """Initializes the knowledge graph indexer with embeddings and reranking.
+        """Initializes the knowledge graph indexer from prepared runtime storage.
 
-        Sets up the knowledge graph storage, embedder, reranker, and attempts to load existing index.
-        If no index exists, builds a new one using the orchestrator agent.
+        Runtime storage is load-only. Index construction, embedding backfill, and
+        local-to-remote migration must be performed by the dedicated offline scripts.
 
         Args:
             kg_search_settings: Knowledge graph search configuration.
             storage_settings: Storage backend settings.
         """
+
+        runtime_storage_backends = (
+            storage_settings.document_storage,
+            storage_settings.index_storage,
+            storage_settings.vector_storage,
+            storage_settings.property_graph_storage,
+        )
+        if any(
+            getattr(backend, "init_from_local", False)
+            for backend in runtime_storage_backends
+        ) or getattr(storage_settings.vector_storage, "overwrite_index", False):
+            raise RuntimeError(
+                "Runtime retrieval storage must be load-only; disable "
+                "init_from_local and vector-store overwrite settings."
+            )
 
         def _create_embedder():
             return HuggingFaceEmbedding(
@@ -142,35 +157,14 @@ class LearnerWorkflow:
         )
         logger.info("Knowledge graph indexer initialized")
 
-        # Attempt to load existing index, build new one if not found
+        # Runtime serving must never construct or repair retrieval storage.
         try:
             self.knowledge_graph_indexer.load_index()
-        except ValueError:
-            if self.chat_limits_settings.shared_quotas_enabled:
-                raise RuntimeError(
-                    "Production retrieval storage is missing or invalid; "
-                    "runtime graph construction is disabled."
-                ) from None
-            logger.info(
-                "No existing index found. Building new knowledge graph index..."
-            )
-            role_settings = getattr(
-                self.models_settings, ModelRoleType.orchestrator.name
-            )
-            prompt_version = role_settings.prompt_version["graph_index"]
-            graph_index_prompt, graph_index_system_prompt = self.prompt_engine.render(
-                PromptType.learner_workflow,
-                ModelRoleType.orchestrator,
-                prompt_version,
-                "graph_index",
-            )
-            self.knowledge_graph_indexer.build_index(
-                llm=role_settings.graph_index_ollama_params(),
-                graph_index_prompt=graph_index_system_prompt["system_instruction"]
-                + "\n"
-                + graph_index_prompt,
-            )
-            logger.info("Knowledge graph index built successfully")
+        except ValueError as exc:
+            raise RuntimeError(
+                "Runtime retrieval storage is missing or invalid; build or migrate "
+                "prepared storage before starting the application."
+            ) from exc
 
     def _init_agents(self):
         """Initializes all agent models and tools.

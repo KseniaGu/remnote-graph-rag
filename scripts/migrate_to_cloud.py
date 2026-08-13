@@ -205,8 +205,8 @@ def main():
         embedder,
         None,
     )
-    # Here embeddings will be generated and pushed to
-    knowledge_graph_indexer.load_index()
+    # Generate and push missing embeddings as part of this explicit migration.
+    knowledge_graph_indexer.load_index(ensure_embeddings=True)
     logger.info("Migration complete!")
 
 
