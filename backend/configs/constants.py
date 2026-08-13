@@ -72,6 +72,9 @@ TEST_SOURCES = [
 MIN_RELEVANCE_SCORE = (
     0.1  # Retriever's threshold that is applied on the scores generated with Reranker
 )
+RETRIEVAL_NO_RESULTS = "No relevant information found."
+RETRIEVAL_BELOW_THRESHOLD = "Retrieval results were below the relevance threshold."
+RETRIEVAL_TOPIC_MISMATCH = "Retrieved evidence did not cover the required topics."
 MAX_SOURCE_CHARS = 1200
 RELATION_DROP_SCORE = 0.30
 

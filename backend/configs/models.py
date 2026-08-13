@@ -199,7 +199,7 @@ class ResearcherModelSettings(BaseSettings):
         num_predict=4096,
         request_timeout=120.0,
     )
-    prompt_version: str = "v4"
+    prompt_version: str = "v5"
 
 
 class ModelSettings(BaseSettings):
@@ -222,7 +222,7 @@ class ModelSettings(BaseSettings):
         top_p=1.0,
         num_predict=2048,
         request_timeout=120.0,
-        prompt_version={"graph_index": "v2", "routing": "v4"},
+        prompt_version={"graph_index": "v2", "routing": "v5"},
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B (same instance as orchestrator)
     retriever: LocalModelSettings | BaseLLMSettings = OllamaSettings(
@@ -234,7 +234,7 @@ class ModelSettings(BaseSettings):
         top_p=0.3,
         num_predict=512,
         request_timeout=120.0,
-        prompt_version="v5",
+        prompt_version="v6",
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
 
@@ -289,7 +289,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.0,
             max_tokens=2048,
-            prompt_version={"graph_index": "v2", "routing": "v4"},
+            prompt_version={"graph_index": "v2", "routing": "v5"},
         ),
         retriever=OpenAISettings(
             role=ModelRoleType.retriever,
@@ -298,7 +298,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.0,
             max_tokens=512,
-            prompt_version="v3",
+            prompt_version="v6",
         ),
         researcher=ResearcherModelSettings(
             with_tools=OpenAISettings(

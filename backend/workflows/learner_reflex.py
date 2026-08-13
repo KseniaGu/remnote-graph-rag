@@ -15,6 +15,7 @@ from backend.configs.messages import (
     FALLBACK_ALL_SOURCES_EXHAUSTED,
     FALLBACK_DEFAULT,
     FALLBACK_NO_RESULTS,
+    FALLBACK_OUT_OF_SCOPE,
     FALLBACK_VISUALIZATION_FAILED,
 )
 from backend.configs.models import get_model_settings
@@ -86,13 +87,15 @@ class ReflexLearnerWorkflow:
                 raise WorkflowInitializationUnavailable() from exc
 
     @staticmethod
-    def _get_fallback_message(context: str) -> str:
-        """Returns a user-facing fallback message based on the workflow context."""
-        if '"all_sources_exhausted": true' in context:
+    def _get_fallback_message(final_state: dict) -> str:
+        """Returns a user-facing fallback selected from explicit workflow state."""
+        if final_state.get("request_scope") == "out_of_scope":
+            return FALLBACK_OUT_OF_SCOPE
+        if final_state.get("sources_exhausted"):
             return FALLBACK_ALL_SOURCES_EXHAUSTED
-        if VISUALIZATION_EMPTY_CONTEXT in context:
-            return FALLBACK_VISUALIZATION_FAILED
-        if "Visualization failed" in context:
+
+        context = str(final_state.get("context", ""))
+        if VISUALIZATION_EMPTY_CONTEXT in context or "Visualization failed" in context:
             return FALLBACK_VISUALIZATION_FAILED
         if '"no_results": true' in context:
             return FALLBACK_NO_RESULTS
@@ -141,7 +144,14 @@ class ReflexLearnerWorkflow:
         if session_id:
             configurable["checkpoint_ns"] = session_id
         config = {"recursion_limit": recursion_limit, "configurable": configurable}
-        initial_state = {"messages": messages, "session_summary": session_summary}
+        initial_state = {
+            "messages": messages,
+            "session_summary": session_summary,
+            "request_scope": "unclassified",
+            "retrieval_status": "not_run",
+            "retriever_empty": False,
+            "sources_exhausted": False,
+        }
 
         try:
             # Track which agents are being called
@@ -186,7 +196,7 @@ class ReflexLearnerWorkflow:
 
                 if not response_emitted:
                     context = result.get("context", "")
-                    fallback = self._get_fallback_message(context)
+                    fallback = self._get_fallback_message(result)
                     yield WorkflowEvent(
                         type=WorkflowEventType.RESPONSE,
                         data={"content": fallback, "agent": "system"},
@@ -240,7 +250,14 @@ class ReflexLearnerWorkflow:
         if session_id:
             configurable["checkpoint_ns"] = session_id
         config = {"recursion_limit": recursion_limit, "configurable": configurable}
-        initial_state = {"messages": messages, "session_summary": session_summary}
+        initial_state = {
+            "messages": messages,
+            "session_summary": session_summary,
+            "request_scope": "unclassified",
+            "retrieval_status": "not_run",
+            "retriever_empty": False,
+            "sources_exhausted": False,
+        }
 
         try:
             final_state = {}
@@ -298,7 +315,7 @@ class ReflexLearnerWorkflow:
 
                 if not response_emitted:
                     context = final_state.get("context", "")
-                    fallback = self._get_fallback_message(context)
+                    fallback = self._get_fallback_message(final_state)
                     yield WorkflowEvent(
                         type=WorkflowEventType.RESPONSE,
                         data={"content": fallback, "agent": "system"},
@@ -354,7 +371,14 @@ class ReflexLearnerWorkflow:
         if session_id:
             configurable["checkpoint_ns"] = session_id
         config = {"recursion_limit": recursion_limit, "configurable": configurable}
-        initial_state = {"messages": messages, "session_summary": session_summary}
+        initial_state = {
+            "messages": messages,
+            "session_summary": session_summary,
+            "request_scope": "unclassified",
+            "retrieval_status": "not_run",
+            "retriever_empty": False,
+            "sources_exhausted": False,
+        }
 
         _AGENT_NODES = {
             "orchestrator",
@@ -458,7 +482,7 @@ class ReflexLearnerWorkflow:
                                 )
 
             if not response_emitted:
-                fallback = self._get_fallback_message(context)
+                fallback = self._get_fallback_message(final_state)
                 yield WorkflowEvent(
                     type=WorkflowEventType.RESPONSE,
                     data={"content": fallback, "agent": "system"},

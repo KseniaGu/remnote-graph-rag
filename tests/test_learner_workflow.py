@@ -1,11 +1,25 @@
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
-from backend.configs.constants import VISUALIZATION_EMPTY_CONTEXT
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.graph import StateGraph
+
+from backend.configs.constants import (
+    RETRIEVAL_BELOW_THRESHOLD,
+    RETRIEVAL_TOPIC_MISMATCH,
+    VISUALIZATION_EMPTY_CONTEXT,
+)
+from backend.configs.enums import ModelRoleType
+from backend.configs.messages import (
+    FALLBACK_ALL_SOURCES_EXHAUSTED,
+    FALLBACK_OUT_OF_SCOPE,
+    FALLBACK_VISUALIZATION_FAILED,
+)
 from backend.configs.models import ModelSettings
 from backend.configs.search import KnowledgeGraphSearchSettings
-from backend.workflows.agents.schemas import State
+from backend.workflows.agents.schemas import ResearchResult, RoutingDecision, State
 from backend.workflows.learner import LearnerWorkflow
+from backend.workflows.learner_reflex import ReflexLearnerWorkflow
 
 
 class FakeNode:
@@ -89,34 +103,383 @@ def make_workflow(indexer: FakeIndexer):
     return workflow
 
 
-def test_kb_results_empty_accepts_useful_scored_sources() -> None:
+def test_retrieval_assessment_accepts_useful_scored_sources() -> None:
     output = (
         "RETRIEVER RESULTS:\n\n"
         "QUERY: How is BERT related to FastText?\n"
         "[SOURCE] [S1] (Score: 0.82; Chunk: chunk_1) BERT and FastText are text models."
     )
 
-    assert LearnerWorkflow._kb_results_empty({"search_knowledge_base": output}) is False
-
-
-def test_kb_results_empty_rejects_empty_sentinel() -> None:
     assert (
-        LearnerWorkflow._kb_results_empty(
-            {"search_knowledge_base": "No relevant information found."}
-        )
-        is True
+        LearnerWorkflow._assess_retrieval_results({"search_knowledge_base": output})
+        == "adequate"
     )
 
 
-def test_kb_results_empty_preserves_empty_visualizer_result_for_terminal_handling() -> (
+def test_retrieval_assessment_distinguishes_empty_sentinel() -> None:
+    assert (
+        LearnerWorkflow._assess_retrieval_results(
+            {"search_knowledge_base": "No relevant information found."}
+        )
+        == "no_results"
+    )
+
+
+def test_retrieval_assessment_preserves_visualizer_result_for_terminal_handling() -> (
     None
 ):
     assert (
-        LearnerWorkflow._kb_results_empty(
+        LearnerWorkflow._assess_retrieval_results(
             {"get_subgraphs_to_visualize": ([], [], ["BERT"])}
         )
-        is False
+        == "adequate"
     )
+
+
+def test_retrieval_assessment_distinguishes_inadequate_statuses() -> None:
+    assert (
+        LearnerWorkflow._assess_retrieval_results(
+            {"search_knowledge_base": RETRIEVAL_BELOW_THRESHOLD}
+        )
+        == "below_threshold"
+    )
+    assert (
+        LearnerWorkflow._assess_retrieval_results(
+            {"search_knowledge_base": RETRIEVAL_TOPIC_MISMATCH}
+        )
+        == "topic_mismatch"
+    )
+
+
+def test_inadequate_retrieval_routes_to_researcher_without_reset() -> None:
+    workflow = object.__new__(LearnerWorkflow)
+    workflow.call_model = AsyncMock()
+    state = State(
+        messages=[HumanMessage(content="Tell me about RetNet")],
+        retriever_empty=True,
+        retrieval_status="topic_mismatch",
+        request_scope="in_scope",
+    )
+
+    result = asyncio.run(workflow.orchestrator_node(state))
+
+    assert result["next_step"] == "researcher"
+    workflow.call_model.assert_not_awaited()
+
+
+def test_out_of_scope_decision_overrides_model_route() -> None:
+    workflow = object.__new__(LearnerWorkflow)
+    workflow.create_messages_to_pass = Mock(return_value=[])
+    workflow.call_model = AsyncMock(
+        return_value=RoutingDecision(
+            request_scope="out_of_scope",
+            next_step="researcher",
+            reasoning="Clearly unrelated request.",
+        )
+    )
+    state = State(messages=[HumanMessage(content="Tell me about cats")])
+
+    result = asyncio.run(workflow.orchestrator_node(state))
+
+    assert result == {"next_step": "__end__", "request_scope": "out_of_scope"}
+    workflow.call_model.assert_awaited_once()
+
+
+def test_researcher_no_relevant_info_exhausts_sources_without_analyst_marker() -> None:
+    workflow = object.__new__(LearnerWorkflow)
+    workflow.create_messages_to_pass = Mock(return_value=[])
+    workflow.call_tools = AsyncMock(
+        return_value={"deep_web_research": "Only unrelated search results."}
+    )
+    workflow.call_model = AsyncMock(
+        side_effect=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "deep_web_research",
+                        "args": {"topic": "EAGLT"},
+                        "id": "research-1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            ResearchResult(
+                key_findings="No relevant technical identity was established.",
+                sources=[],
+                confidence_level="low",
+                status="no_relevant_info",
+                gap_analysis="Only unrelated names were returned.",
+            ),
+        ]
+    )
+    state = State(
+        messages=[HumanMessage(content="Tell me about EAGLT")],
+        retriever_empty=True,
+        retrieval_status="topic_mismatch",
+        request_scope="ambiguous",
+    )
+
+    result = asyncio.run(workflow.researcher_node(state))
+
+    assert result["sources_exhausted"] is True
+    assert result["context"] == ""
+    assert "RESEARCH_COMPLETE" not in result["context"]
+
+
+def test_fallback_selection_uses_explicit_state_priority() -> None:
+    visual_context = {"context": VISUALIZATION_EMPTY_CONTEXT}
+
+    assert (
+        ReflexLearnerWorkflow._get_fallback_message(
+            {
+                "request_scope": "out_of_scope",
+                "sources_exhausted": True,
+                **visual_context,
+            }
+        )
+        == FALLBACK_OUT_OF_SCOPE
+    )
+    assert (
+        ReflexLearnerWorkflow._get_fallback_message(
+            {"sources_exhausted": True, **visual_context}
+        )
+        == FALLBACK_ALL_SOURCES_EXHAUSTED
+    )
+    assert (
+        ReflexLearnerWorkflow._get_fallback_message(visual_context)
+        == FALLBACK_VISUALIZATION_FAILED
+    )
+
+
+def make_mocked_runtime_graph(call_model, call_tools):
+    workflow = object.__new__(LearnerWorkflow)
+    workflow.workflow = StateGraph(State)
+    workflow.create_messages_to_pass = Mock(return_value=[])
+    workflow.call_model = call_model
+    workflow.call_tools = call_tools
+    workflow._init_nodes()
+    return workflow.workflow.compile()
+
+
+def test_out_of_scope_graph_trajectory_uses_only_orchestrator() -> None:
+    roles = []
+
+    async def call_model(_messages, role_type, **_kwargs):
+        roles.append(role_type)
+        return RoutingDecision(
+            request_scope="out_of_scope",
+            next_step="researcher",
+            reasoning="Clearly unrelated request.",
+        )
+
+    call_tools = AsyncMock()
+    graph = make_mocked_runtime_graph(call_model, call_tools)
+
+    result = asyncio.run(
+        graph.ainvoke({"messages": [HumanMessage(content="Tell me about cats")]})
+    )
+
+    assert roles == [ModelRoleType.orchestrator]
+    assert result["next_step"] == "__end__"
+    assert result["request_scope"] == "out_of_scope"
+    call_tools.assert_not_awaited()
+
+
+def test_adequate_local_graph_trajectory_reaches_analyst() -> None:
+    roles = []
+
+    async def call_model(_messages, role_type, **_kwargs):
+        roles.append(role_type)
+        if role_type == ModelRoleType.orchestrator:
+            return RoutingDecision(
+                request_scope="in_scope",
+                next_step="retriever",
+                reasoning="Technical lookup.",
+            )
+        if role_type == ModelRoleType.retriever:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_knowledge_base",
+                        "args": {
+                            "queries": ["RetNet"],
+                            "required_topics": [["RetNet"]],
+                        },
+                        "id": "retrieve-1",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        return AIMessage(content="RetNet is supported by the retrieved evidence.")
+
+    call_tools = AsyncMock(
+        return_value={
+            "search_knowledge_base": (
+                "RETRIEVER RESULTS:\n\nQUERY: RetNet\n"
+                "[SOURCE] (Score: 0.90) RetNet is a sequence model."
+            )
+        }
+    )
+    graph = make_mocked_runtime_graph(call_model, call_tools)
+
+    result = asyncio.run(
+        graph.ainvoke({"messages": [HumanMessage(content="Tell me about RetNet")]})
+    )
+
+    assert roles == [
+        ModelRoleType.orchestrator,
+        ModelRoleType.retriever,
+        ModelRoleType.analyst,
+    ]
+    assert result["retrieval_status"] == "adequate"
+    assert result["messages"][-1].additional_kwargs["agent"] == "[ANALYST]"
+
+
+def test_topic_mismatch_graph_trajectory_uses_web_and_five_logical_calls() -> None:
+    roles = []
+
+    async def call_model(_messages, role_type, **kwargs):
+        roles.append(role_type)
+        if role_type == ModelRoleType.orchestrator:
+            return RoutingDecision(
+                request_scope="in_scope",
+                next_step="retriever",
+                reasoning="Technical lookup.",
+            )
+        if role_type == ModelRoleType.retriever:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_knowledge_base",
+                        "args": {"queries": ["RetNet"]},
+                        "id": "retrieve-1",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        if (
+            role_type == ModelRoleType.researcher
+            and kwargs.get("model_type") == "_with_tools"
+        ):
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "deep_web_research",
+                        "args": {"topic": "RetNet"},
+                        "id": "research-1",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        if role_type == ModelRoleType.researcher:
+            return ResearchResult(
+                key_findings="RetNet is established by web evidence.",
+                sources=[
+                    {
+                        "title": "RetNet paper",
+                        "url": "https://example.test",
+                        "type": "paper",
+                    }
+                ],
+                confidence_level="high",
+                status="success",
+                gap_analysis=None,
+            )
+        return AIMessage(content="RetNet answer grounded in web evidence.")
+
+    async def call_tools(response):
+        name = response.tool_calls[0]["name"]
+        if name == "search_knowledge_base":
+            return {name: RETRIEVAL_TOPIC_MISMATCH}
+        return {name: "Authoritative RetNet web result."}
+
+    graph = make_mocked_runtime_graph(call_model, call_tools)
+    result = asyncio.run(
+        graph.ainvoke({"messages": [HumanMessage(content="Tell me about RetNet")]})
+    )
+
+    assert roles == [
+        ModelRoleType.orchestrator,
+        ModelRoleType.retriever,
+        ModelRoleType.researcher,
+        ModelRoleType.researcher,
+        ModelRoleType.analyst,
+    ]
+    assert len(roles) == 5
+    assert result["retrieval_status"] == "topic_mismatch"
+    assert result["sources_exhausted"] is False
+
+
+def test_web_no_relevant_info_graph_trajectory_never_invokes_analyst() -> None:
+    roles = []
+
+    async def call_model(_messages, role_type, **kwargs):
+        roles.append(role_type)
+        if role_type == ModelRoleType.orchestrator:
+            return RoutingDecision(
+                request_scope="ambiguous",
+                next_step="retriever",
+                reasoning="Unknown technical-looking term.",
+            )
+        if role_type == ModelRoleType.retriever:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_knowledge_base",
+                        "args": {"queries": ["EAGLT"]},
+                        "id": "retrieve-1",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        if (
+            role_type == ModelRoleType.researcher
+            and kwargs.get("model_type") == "_with_tools"
+        ):
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "deep_web_research",
+                        "args": {"topic": "EAGLT"},
+                        "id": "research-1",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        return ResearchResult(
+            key_findings="No exact identity was established.",
+            sources=[],
+            confidence_level="low",
+            status="no_relevant_info",
+            gap_analysis="Only unrelated acronyms were returned.",
+        )
+
+    async def call_tools(response):
+        name = response.tool_calls[0]["name"]
+        if name == "search_knowledge_base":
+            return {name: RETRIEVAL_TOPIC_MISMATCH}
+        return {name: "Unrelated web results."}
+
+    graph = make_mocked_runtime_graph(call_model, call_tools)
+    result = asyncio.run(
+        graph.ainvoke({"messages": [HumanMessage(content="Tell me about EAGLT")]})
+    )
+
+    assert roles == [
+        ModelRoleType.orchestrator,
+        ModelRoleType.retriever,
+        ModelRoleType.researcher,
+        ModelRoleType.researcher,
+    ]
+    assert ModelRoleType.analyst not in roles
+    assert result["sources_exhausted"] is True
+    assert result["context"] == ""
 
 
 def test_deterministic_route_ends_after_empty_visualization_signal() -> None:

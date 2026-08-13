@@ -1,6 +1,12 @@
 import unittest
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
+from backend.configs.constants import (
+    RETRIEVAL_BELOW_THRESHOLD,
+    RETRIEVAL_TOPIC_MISMATCH,
+)
 from backend.utils.chat_errors import KnowledgeBaseUnavailable
 from backend.workflows.agents.retrieval_evidence import (
     FACT_BLOCK_HEADER,
@@ -12,6 +18,7 @@ from backend.workflows.agents.retrieval_evidence import (
     format_visualization_results,
 )
 from backend.workflows.agents.tools import (
+    KnowledgeSearchInput,
     get_subgraphs_to_visualize,
     search_knowledge_base,
 )
@@ -205,6 +212,230 @@ class RetrievalEvidenceTests(unittest.TestCase):
         self.assertIn("Optimizer source", output)
         self.assertEqual("array", query_schema["type"])
         self.assertEqual(3, query_schema["maxItems"])
+
+    def test_required_topics_are_normalized_and_deduplicated(self) -> None:
+        value = KnowledgeSearchInput(
+            queries=["RetNet"],
+            required_topics=[[" RetNet ", "retnet", "Retentive   Network"]],
+        )
+
+        self.assertEqual([["RetNet", "Retentive Network"]], value.required_topics)
+
+    def test_required_topic_contract_rejects_invalid_groups(self) -> None:
+        invalid_topics = [
+            [[]],
+            [["a", "b", "c", "d"]],
+            [["x" * 81]],
+            [["a"], ["b"], ["c"], ["d"]],
+        ]
+
+        for required_topics in invalid_topics:
+            with self.subTest(required_topics=required_topics):
+                with self.assertRaises(ValidationError):
+                    KnowledgeSearchInput(
+                        queries=["topic"], required_topics=required_topics
+                    )
+
+    def test_retnet_requirement_is_not_satisfied_by_resnet_or_query_header(
+        self,
+    ) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {
+                    "RetNet architecture": [
+                        FakeNodeWithScore(
+                            FakeNode("ResNet is a residual convolutional network."),
+                            0.9,
+                        )
+                    ]
+                }
+            )
+        )
+
+        output = tool.invoke(
+            {
+                "queries": ["RetNet architecture"],
+                "required_topics": [["RetNet", "Retentive Network"]],
+            }
+        )
+
+        self.assertEqual(RETRIEVAL_TOPIC_MISMATCH, output)
+
+    def test_mla_requirement_is_not_satisfied_by_multi_head_attention(self) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {
+                    "MLA": [
+                        FakeNodeWithScore(
+                            FakeNode("Multi-Head Attention projects queries and keys."),
+                            0.9,
+                        )
+                    ]
+                }
+            )
+        )
+
+        output = tool.invoke(
+            {
+                "queries": ["MLA"],
+                "required_topics": [["Multi-Head Latent Attention", "MLA"]],
+            }
+        )
+
+        self.assertEqual(RETRIEVAL_TOPIC_MISMATCH, output)
+
+    def test_unknown_acronym_requires_exact_evidence_identity(self) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {
+                    "EAGLT": [
+                        FakeNodeWithScore(FakeNode("EAGLE is a decoding method."), 0.9)
+                    ]
+                }
+            )
+        )
+
+        output = tool.invoke({"queries": ["EAGLT"], "required_topics": [["EAGLT"]]})
+
+        self.assertEqual(RETRIEVAL_TOPIC_MISMATCH, output)
+
+    def test_hyphen_space_and_case_variants_satisfy_exact_token_sequence(self) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {
+                    "MLA": [
+                        FakeNodeWithScore(
+                            FakeNode(
+                                "MULTI HEAD LATENT ATTENTION compresses key-value states."
+                            ),
+                            0.9,
+                        )
+                    ]
+                }
+            )
+        )
+
+        output = tool.invoke(
+            {
+                "queries": ["MLA"],
+                "required_topics": [["Multi-Head Latent Attention"]],
+            }
+        )
+
+        self.assertIn("MULTI HEAD LATENT ATTENTION", output)
+
+    def test_source_paths_count_as_required_topic_evidence(self) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {
+                    "retentive models": [
+                        FakeNodeWithScore(
+                            FakeNode(
+                                "The architecture supports parallel and recurrent forms.",
+                                metadata={"path": ["RetNet", "Architecture"]},
+                            ),
+                            0.9,
+                        )
+                    ]
+                }
+            )
+        )
+
+        output = tool.invoke(
+            {
+                "queries": ["retentive models"],
+                "required_topics": [["RetNet"]],
+            }
+        )
+
+        self.assertIn("[SOURCE PATH] RetNet > Architecture", output)
+
+    def test_relation_text_counts_as_required_topic_evidence(self) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {
+                    "retentive model": [
+                        FakeNodeWithScore(
+                            FakeNode("RetNet -> IS_A -> Sequence Model"), 0.9
+                        )
+                    ]
+                }
+            )
+        )
+
+        output = tool.invoke(
+            {
+                "queries": ["retentive model"],
+                "required_topics": [["RetNet"]],
+            }
+        )
+
+        self.assertIn("[RELATION] RetNet -> IS_A -> Sequence Model", output)
+
+    def test_optimized_formatted_output_uses_same_topic_coverage_check(self) -> None:
+        class FakeAnalystPipeline:
+            def search(self, queries: list[str]) -> str:
+                return (
+                    "RETRIEVER RESULTS:\n\nQUERY: "
+                    f"{queries[0]}\n[SOURCE] (Score: 0.90) ResNet is a CNN."
+                )
+
+        tool = search_knowledge_base(analyst_pipeline=FakeAnalystPipeline())
+
+        output = tool.invoke(
+            {
+                "queries": ["RetNet"],
+                "required_topics": [["RetNet", "Retentive Network"]],
+            }
+        )
+
+        self.assertEqual(RETRIEVAL_TOPIC_MISMATCH, output)
+
+    def test_every_comparison_group_must_be_covered(self) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {
+                    "RetNet versus Mamba": [
+                        FakeNodeWithScore(FakeNode("RetNet is a sequence model."), 0.9)
+                    ]
+                }
+            )
+        )
+
+        output = tool.invoke(
+            {
+                "queries": ["RetNet versus Mamba"],
+                "required_topics": [["RetNet"], ["Mamba"]],
+            }
+        )
+
+        self.assertEqual(RETRIEVAL_TOPIC_MISMATCH, output)
+
+    def test_empty_requirements_preserve_broad_query_behavior(self) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {
+                    "optimizers": [
+                        FakeNodeWithScore(FakeNode("Adam uses adaptive moments."), 0.9)
+                    ]
+                }
+            )
+        )
+
+        output = tool.invoke({"queries": ["optimizers"], "required_topics": []})
+
+        self.assertIn("Adam uses adaptive moments", output)
+
+    def test_all_raw_results_below_tool_threshold_have_dedicated_sentinel(self) -> None:
+        tool = search_knowledge_base(
+            FakeRetriever(
+                {"RetNet": [FakeNodeWithScore(FakeNode("RetNet details."), 0.05)]}
+            )
+        )
+
+        output = tool.invoke({"queries": ["RetNet"], "required_topics": [["RetNet"]]})
+
+        self.assertEqual(RETRIEVAL_BELOW_THRESHOLD, output)
 
     def test_search_tool_uses_reranker_exception_fallback(self) -> None:
         nodes = [

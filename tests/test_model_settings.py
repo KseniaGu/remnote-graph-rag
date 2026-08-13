@@ -4,6 +4,7 @@ from backend.configs.models import (
     OllamaSettings,
     OpenAISettings,
     RerankerSettings,
+    _vllm_models,
 )
 
 
@@ -69,6 +70,21 @@ def test_default_analyst_uses_v6_educational_cloud_configuration() -> None:
 
     researcher = ModelSettings().researcher.structured
     assert "reasoning" not in researcher.ollama_chat_params()
+
+
+def test_runtime_routing_prompt_versions_are_current(monkeypatch) -> None:
+    default = ModelSettings()
+    assert default.orchestrator.prompt_version["routing"] == "v5"
+    assert default.retriever.prompt_version == "v6"
+    assert default.researcher.prompt_version == "v5"
+
+    monkeypatch.setenv("VLLM_ROUTING_URL", "https://vllm.example")
+    monkeypatch.setenv("VLLM_GENERATION_URL", "https://vllm-generation.example")
+    monkeypatch.setenv("VLLM_MODEL_PATH", "test-model")
+    vllm = _vllm_models()
+    assert vllm.orchestrator.prompt_version["routing"] == "v5"
+    assert vllm.retriever.prompt_version == "v6"
+    assert vllm.researcher.prompt_version == "v5"
 
 
 def test_graph_index_ollama_params_include_model_and_indexing_generation_fields() -> (

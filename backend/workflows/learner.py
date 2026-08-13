@@ -16,6 +16,9 @@ from tavily import TavilyClient
 
 from backend.configs.constants import (
     DEFAULT_RECENT_MESSAGE_LIMIT,
+    RETRIEVAL_BELOW_THRESHOLD,
+    RETRIEVAL_NO_RESULTS,
+    RETRIEVAL_TOPIC_MISMATCH,
     TITLE_MAX_LENGTH,
     VISUALIZATION_EMPTY_CONTEXT,
 )
@@ -582,8 +585,8 @@ class LearnerWorkflow:
         """
         ctx = state.context or ""
 
-        # Priority 0: terminal signals set by nodes earlier in this turn.
-        if state.sources_exhausted:
+        # Priority 0: terminal signals set earlier in this turn.
+        if state.request_scope == "out_of_scope" or state.sources_exhausted:
             return "__end__"
         if "[RESEARCH_COMPLETE]" in ctx:
             return ModelRoleType.analyst.name
@@ -644,26 +647,10 @@ class LearnerWorkflow:
         ctx = state.context or ""
         add_trace_metadata("context", ctx)
 
-        last_is_human = (
-            bool(state.messages)
-            and getattr(state.messages[-1], "type", None) == "human"
-        )
-        fresh_turn_reset = {}
-        if (
-            last_is_human
-            and not ctx
-            and (state.retriever_empty or state.sources_exhausted)
-        ):
-            logger.info(
-                "[ORCHESTRATOR] New user turn detected; clearing retriever_empty/sources_exhausted."
-            )
-            fresh_turn_reset = {"retriever_empty": False, "sources_exhausted": False}
-            state = state.model_copy(update=fresh_turn_reset)
-
         deterministic = self._deterministic_route(state)
         if deterministic is not None:
             logger.info(f"[ORCHESTRATOR] Routing to: {deterministic} (deterministic)")
-            return {"next_step": deterministic, **fresh_turn_reset}
+            return {"next_step": deterministic}
 
         messages_to_pass = self.create_messages_to_pass(
             ModelRoleType.orchestrator,
@@ -673,7 +660,10 @@ class LearnerWorkflow:
         response = await self.call_model(messages_to_pass, ModelRoleType.orchestrator)
 
         if response:
+            request_scope = response.request_scope
             next_step = response.next_step
+            if request_scope == "out_of_scope":
+                next_step = "__end__"
 
             # Safety: don't route to visualizer without graph data (first attempt only).
             if next_step == "visualizer" and "get_subgraphs_to_visualize" not in ctx:
@@ -682,14 +672,23 @@ class LearnerWorkflow:
                 )
                 next_step = ModelRoleType.retriever.name
 
-            logger.info(f"[ORCHESTRATOR] Routing to: {next_step}")
-            logger.info(f"[ORCHESTRATOR] Reasoning: {response.reasoning}")
-            return {"next_step": next_step, **fresh_turn_reset}
+            add_trace_metadata("request_scope", request_scope)
+            logger.info(
+                "[ORCHESTRATOR] Routing decision",
+                next_step=next_step,
+                request_scope=request_scope,
+                reasoning=response.reasoning,
+            )
+            return {"next_step": next_step, "request_scope": request_scope}
 
         logger.warning(
             "[ORCHESTRATOR] LLM failed on ambiguous input; defaulting to retriever."
         )
-        return {"next_step": ModelRoleType.retriever.name, **fresh_turn_reset}
+        add_trace_metadata("request_scope", "ambiguous")
+        return {
+            "next_step": ModelRoleType.retriever.name,
+            "request_scope": "ambiguous",
+        }
 
     async def retriever_node(self, state: State) -> dict[str, str]:
         """Retriever agent: fetches information from knowledge base or prepares visualization data.
@@ -715,62 +714,61 @@ class LearnerWorkflow:
         response = await self.call_model(messages_to_pass, ModelRoleType.retriever)
         if response and response.tool_calls:
             tool_results = await self.call_tools(response)
-            all_empty = self._kb_results_empty(tool_results)
-            if all_empty:
-                logger.warning(
-                    f"[{model_name}] All KB results below relevance threshold; marking retriever_empty."
-                )
-                return {"context": "", "retriever_empty": True}
+            retrieval_status = self._assess_retrieval_results(tool_results)
+        else:
+            tool_results = {}
+            retrieval_status = "no_results"
+
+        add_trace_metadata("retrieval_status", retrieval_status)
+        logger.info(
+            f"[{model_name}] Retrieval assessed",
+            retrieval_status=retrieval_status,
+        )
+        if retrieval_status != "adequate":
             return {
-                "context": json.dumps(tool_results, ensure_ascii=False),
-                "retriever_empty": False,
+                "context": "",
+                "retriever_empty": True,
+                "retrieval_status": retrieval_status,
             }
+        return {
+            "context": json.dumps(tool_results, ensure_ascii=False),
+            "retriever_empty": False,
+            "retrieval_status": retrieval_status,
+        }
 
-        logger.warning(f"[{model_name}] Nothing retrieved; marking retriever_empty.")
-        return {"context": "", "retriever_empty": True}
-
-    # Minimum score a retrieved item must have for us to treat the retrieval as "useful".
-    # Below this, results are overwhelmingly metadata/noise per log analysis.
+    # Minimum score a retrieved item must have for us to treat the retrieval as useful.
     _KB_MIN_USEFUL_SCORE = 0.30
 
     @classmethod
-    def _kb_results_empty(cls, tool_results: dict[str, Any] | None) -> bool:
-        """Return True if every search_knowledge_base result lacks usable content.
-
-        Three tolerant checks, any one of which declares a result "non-empty":
-          1. The output is not the literal `No relevant information found.` sentinel.
-          2. The output contains `[RELATION]` or `[SOURCE]` markers.
-          3. At least one marker has a score ≥ `_KB_MIN_USEFUL_SCORE` (or is unscored).
-
-        Catches the log's observed pathology where a single query returns zero hits and
-        the formatter emits a bare `QUERY: X` section with nothing under it — and the
-        subtler case where every hit has a near-zero score (metadata-only matches).
-        """
+    def _assess_retrieval_results(cls, tool_results: dict[str, Any] | None) -> str:
+        """Classifies retrieval output without conflating distinct failure modes."""
         if not tool_results:
-            return True
-        for k, v in tool_results.items():
-            if k == "search_knowledge_base":
-                if not isinstance(v, str):
-                    continue
-                v = v.strip()
-                if not v or v == "No relevant information found.":
-                    continue
-                if "[RELATION]" not in v and "[SOURCE]" not in v:
-                    continue
-                # At least one scored marker must meet the useful-score threshold.
-                scores = re.findall(r"\(Score:\s*([\d.]+)\)", v)
-                if not scores:
-                    # Scoreless outputs (node.text without score) are considered useful by default.
-                    return False
-                if any(float(s) >= cls._KB_MIN_USEFUL_SCORE for s in scores):
-                    return False
-            elif k == "get_subgraphs_to_visualize":
-                # Visualization retrieval is a terminal workflow path even when
-                # no focused subgraph exists. Preserve the tool result so the
-                # Visualizer node can emit a clean no-graph outcome instead of
-                # treating the request as an empty KB search and retrying.
-                return False
-        return True
+            return "no_results"
+
+        for tool_name, value in tool_results.items():
+            if tool_name == "get_subgraphs_to_visualize":
+                return "adequate"
+            if tool_name != "search_knowledge_base" or not isinstance(value, str):
+                continue
+
+            result = value.strip()
+            if not result or result == RETRIEVAL_NO_RESULTS:
+                return "no_results"
+            if result == RETRIEVAL_BELOW_THRESHOLD:
+                return "below_threshold"
+            if result == RETRIEVAL_TOPIC_MISMATCH:
+                return "topic_mismatch"
+            if "[RELATION]" not in result and "[SOURCE]" not in result:
+                return "no_results"
+
+            scores = re.findall(r"\(Score:\s*([\d.]+)", result)
+            if scores and not any(
+                float(score) >= cls._KB_MIN_USEFUL_SCORE for score in scores
+            ):
+                return "below_threshold"
+            return "adequate"
+
+        return "no_results"
 
     async def researcher_node(self, state: State) -> dict[str, str]:
         """Researcher agent: conducts web research for information not in knowledge base.
@@ -835,6 +833,20 @@ class LearnerWorkflow:
                         f"[{model_name}] Research status: {research_result.status}, "
                         f"confidence: {research_result.confidence_level}"
                     )
+                    add_trace_metadata("research_status", research_result.status)
+
+                    if (
+                        research_result.status == "no_relevant_info"
+                        or not research_result.key_findings.strip()
+                    ):
+                        logger.warning(
+                            f"[{model_name}] Web evidence did not establish the requested topic; marking sources_exhausted."
+                        )
+                        return {
+                            "context": "",
+                            "retriever_empty": False,
+                            "sources_exhausted": True,
+                        }
 
                     # Format research findings with sources for analyst. Strip any prior
                     # `retriever_empty`-era context so we don't concatenate stale markers.

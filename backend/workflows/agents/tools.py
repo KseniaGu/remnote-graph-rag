@@ -1,13 +1,20 @@
 import asyncio
 import json
 import random
-from typing import Any
+import re
+from typing import Annotated, Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
 from backend.configs.chat_limits import ChatLimitsSettings
-from backend.configs.constants import MIN_RELEVANCE_SCORE, WORKFLOW_LOGGING
+from backend.configs.constants import (
+    MIN_RELEVANCE_SCORE,
+    RETRIEVAL_BELOW_THRESHOLD,
+    RETRIEVAL_NO_RESULTS,
+    RETRIEVAL_TOPIC_MISMATCH,
+    WORKFLOW_LOGGING,
+)
 from backend.utils.chat_errors import (
     KnowledgeBaseUnavailable,
     UserFacingChatError,
@@ -88,6 +95,94 @@ class QueryListInput(BaseModel):
         return normalized
 
 
+TopicAliasGroup = Annotated[list[str], Field(min_length=1, max_length=3)]
+
+
+class KnowledgeSearchInput(QueryListInput):
+    """Knowledge-search arguments with deterministic named-topic requirements."""
+
+    required_topics: list[TopicAliasGroup] = Field(
+        default_factory=list,
+        max_length=3,
+        description=(
+            "Up to three required topic groups. At least one alias in every group "
+            "must occur in retrieved evidence."
+        ),
+    )
+
+    @field_validator("required_topics")
+    @classmethod
+    def normalize_required_topics(
+        cls, required_topics: list[list[str]]
+    ) -> list[list[str]]:
+        normalized_groups: list[list[str]] = []
+        for group in required_topics:
+            if len(group) > 3:
+                raise ValueError(
+                    "each required topic group may contain at most 3 aliases"
+                )
+
+            normalized_aliases: list[str] = []
+            seen_aliases: set[str] = set()
+            for alias in group:
+                alias = " ".join(alias.strip().split())
+                if not alias:
+                    continue
+                if len(alias) > 80:
+                    raise ValueError(
+                        "each required topic alias must contain at most 80 characters"
+                    )
+                dedupe_key = alias.casefold()
+                if dedupe_key not in seen_aliases:
+                    seen_aliases.add(dedupe_key)
+                    normalized_aliases.append(alias)
+
+            if not normalized_aliases:
+                raise ValueError("required topic groups must contain a non-empty alias")
+            normalized_groups.append(normalized_aliases)
+
+        return normalized_groups
+
+
+def _topic_tokens(text: str) -> list[str]:
+    """Normalizes punctuation and case while retaining exact token boundaries."""
+    return re.findall(r"[^\W_]+", text.casefold())
+
+
+def _contains_token_sequence(tokens: list[str], alias_tokens: list[str]) -> bool:
+    if not alias_tokens or len(alias_tokens) > len(tokens):
+        return False
+    width = len(alias_tokens)
+    return any(
+        tokens[index : index + width] == alias_tokens
+        for index in range(len(tokens) - width + 1)
+    )
+
+
+def retrieval_covers_required_topics(
+    formatted_result: str, required_topics: list[list[str]]
+) -> bool:
+    """Checks that formatted evidence covers every required topic group."""
+    if not required_topics:
+        return True
+
+    evidence_lines = []
+    for line in formatted_result.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("QUERY:") or stripped == "RETRIEVER RESULTS:":
+            continue
+        evidence_lines.append(line)
+
+    evidence_tokens = _topic_tokens("\n".join(evidence_lines))
+    return all(
+        any(
+            _contains_token_sequence(evidence_tokens, _topic_tokens(alias))
+            for alias in group
+        )
+        for group in required_topics
+    )
+
+
 class WebResearchInput(BaseModel):
     """Validated arguments for one Tavily search."""
 
@@ -113,8 +208,10 @@ def search_knowledge_base(
         max_context_chars or ChatLimitsSettings().retrieval_context_max_chars
     )
 
-    @tool("search_knowledge_base", args_schema=QueryListInput)
-    def _search_knowledge_base(queries: list[str]):
+    @tool("search_knowledge_base", args_schema=KnowledgeSearchInput)
+    def _search_knowledge_base(
+        queries: list[str], required_topics: list[list[str]] | None = None
+    ):
         """Searches the knowledge base using advanced graph and vector retrieval.
 
         This tool performs semantic search across the entire knowledge base, combining vector similarity search with graph traversal to find relevant information. It retrieves facts, concepts, relationships, and text snippets from stored documents.
@@ -131,16 +228,20 @@ def search_knowledge_base(
         - Source paths: Hierarchical paths showing document structure
 
         Args:
-            queries (list[str]): A list of search queries to find relevant information in the knowledge base.
+            queries: Search queries for relevant knowledge-base information.
+            required_topics: Optional alias groups that must all be covered by the
+                formatted evidence before it can be used for generation.
 
         Returns:
-            str: Formatted search results with relations, sources, and relevance scores. Returns "No relevant information found" if no matches exist.
+            Formatted search results, or a deterministic inadequacy sentinel when
+            results are empty, below threshold, or miss a required topic.
 
         Example output:
             [RELATION] Classical Computer Vision -> FOCUSES_ON -> Handcrafted features (Score: 0.85)
             [SOURCE] Classical computer vision relied on manually engineered features...
             [SOURCE PATH] CV History > Classical Era > Feature Extraction
         """
+        required_topics = required_topics or []
         if analyst_pipeline is not None:
             try:
                 result = analyst_pipeline.search(queries)
@@ -152,12 +253,18 @@ def search_knowledge_base(
                     error_type=type(exc).__name__,
                 )
                 raise KnowledgeBaseUnavailable() from exc
+            if result != RETRIEVAL_NO_RESULTS and not retrieval_covers_required_topics(
+                result, required_topics
+            ):
+                return RETRIEVAL_TOPIC_MISMATCH
             return truncate_text(result, context_limit)
 
         if retriever is None:
-            return "No relevant information found."
+            return RETRIEVAL_NO_RESULTS
 
         query_results: list[QueryEvidenceResult] = []
+        saw_raw_nodes = False
+        saw_threshold_qualified_node = False
 
         for query in queries:
             try:
@@ -181,6 +288,12 @@ def search_knowledge_base(
             else:
                 nodes = nodes[:10]
 
+            saw_raw_nodes = saw_raw_nodes or bool(nodes)
+            saw_threshold_qualified_node = saw_threshold_qualified_node or any(
+                getattr(node, "score", None) is None
+                or node.score >= MIN_RELEVANCE_SCORE
+                for node in nodes
+            )
             nodes = [
                 n
                 for n in nodes
@@ -197,7 +310,19 @@ def search_knowledge_base(
 
             query_results.append(QueryEvidenceResult(query=query, items=evidence_items))
 
-        return truncate_text(format_search_results(query_results), context_limit)
+        formatted_result = format_search_results(query_results)
+        if (
+            formatted_result == RETRIEVAL_NO_RESULTS
+            and saw_raw_nodes
+            and not saw_threshold_qualified_node
+        ):
+            return RETRIEVAL_BELOW_THRESHOLD
+        if (
+            formatted_result != RETRIEVAL_NO_RESULTS
+            and not retrieval_covers_required_topics(formatted_result, required_topics)
+        ):
+            return RETRIEVAL_TOPIC_MISMATCH
+        return truncate_text(formatted_result, context_limit)
 
     return _search_knowledge_base
 

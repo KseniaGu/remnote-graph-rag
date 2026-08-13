@@ -30,6 +30,9 @@ class ResearchResult(BaseModel):
 class RoutingDecision(BaseModel):
     """Determines the next agent to act."""
 
+    request_scope: Literal["in_scope", "out_of_scope", "ambiguous"] = Field(
+        description="Whether the latest request is within the assistant's broad technical scope"
+    )
     next_step: Literal[
         "retriever", "researcher", "analyst", "mentor", "visualizer", "__end__"
     ] = Field(description="The target worker node")
@@ -72,6 +75,18 @@ class State(BaseModel):
     sources_exhausted: bool = Field(
         default=False,
         description="True when both Retriever and Researcher failed this turn (terminal signal for Orchestrator).",
+    )
+    request_scope: Literal["unclassified", "in_scope", "out_of_scope", "ambiguous"] = (
+        Field(
+            default="unclassified",
+            description="Scope classification for the current user turn.",
+        )
+    )
+    retrieval_status: Literal[
+        "not_run", "adequate", "no_results", "below_threshold", "topic_mismatch"
+    ] = Field(
+        default="not_run",
+        description="Deterministic assessment of this turn's retrieval result.",
     )
 
     @classmethod

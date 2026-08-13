@@ -157,13 +157,29 @@ five worker agents:
 - `Visualizer`: converts retrieved graph tuples into Plotly figures.
 
 All worker nodes return to the Orchestrator. The Orchestrator uses deterministic
-fast paths when context already implies the next step, and falls back to a
-structured-output LLM router for ambiguous turns.
+fast paths when context already implies the next step, and falls back to one
+structured-output LLM call for initial routing and broad request-scope
+classification. Clearly unrelated requests terminate at the existing end path;
+AI/ML-adjacent mathematics, statistics, data, programming, and systems requests
+remain in scope. Unknown technical-looking names and acronyms are classified as
+ambiguous and continue to retrieval rather than being rejected.
+
+For knowledge searches, Retriever `v6` can provide up to three named-topic alias
+groups. After either Analyst retrieval mode formats evidence, a deterministic
+exact-token check requires at least one alias from every group. Query and result
+headers are excluded, while source text, source paths, and relations count as
+evidence. Topic mismatch supplements the existing numeric thresholds and routes
+to Researcher through the same `retriever_empty` transition. Broad searches with
+no topic requirements retain their previous behavior.
 
 The workflow state includes messages, retrieved context, a compact older-session
-summary, visual artifacts, routing state, and retrieval failure flags. Empty
-retrieval and exhausted-source flags prevent repeated retriever loops and route
-the turn toward web research or a terminal fallback.
+summary, visual artifacts, routing state, `request_scope`, `retrieval_status`,
+and retrieval failure flags. Retrieval status distinguishes `not_run`,
+`adequate`, `no_results`, `below_threshold`, and `topic_mismatch`. The wrapper
+initializes these turn-scoped fields for every submitted message. Researcher
+`no_relevant_info` or blank findings set `sources_exhausted` and terminate before
+Analyst. Final fallback selection reads state directly, prioritizing out-of-scope,
+all-sources-exhausted, visualization, and no-results outcomes.
 
 ## Frontend And Session Experience
 
@@ -236,7 +252,10 @@ and embedding backfill belong to offline scripts.
 Model configuration is centralized in `backend/configs/models.py`.
 
 - Default LLM pipeline: `LLM_PIPELINE=ollama`.
-- Default chat model: `nemotron-3-super:cloud` via Ollama-compatible APIs.
+- Default routing, retrieval, research, and Mentor model:
+  `nemotron-3-super:cloud` via Ollama-compatible APIs.
+- Default Analyst model: `qwen3.5:cloud` with prompt `v6` and an 8,192-token
+  generation limit.
 - Optional pipeline: `LLM_PIPELINE=vllm`, using OpenAI-compatible endpoints with
   Google Cloud Run ID-token authentication.
 - Embedder: local HuggingFace model configured by `EMBEDDER_MODEL_PATH`.
@@ -248,10 +267,10 @@ Current prompt selections:
 
 | Role / purpose | Default `ollama` pipeline | Optional `vllm` pipeline |
 | --- | --- | --- |
-| Orchestrator routing | `v4` | `v4` |
+| Orchestrator routing | `v5` | `v5` |
 | Orchestrator offline/legacy graph indexing | `v2` | `v2` |
-| Retriever | `v5` | `v3` |
-| Researcher | `v4` | `v4` |
+| Retriever | `v6` | `v6` |
+| Researcher | `v5` | `v5` |
 | Analyst | `v6` | `v4` |
 | Mentor | `v4` | `v4` |
 | LLM postprocess quality/graph | `v1` | `v1` |
@@ -301,7 +320,8 @@ Notable test areas:
 - Embedding passage splitting and parent-chunk mapping for retrieval.
 - Analyst and Visualizer retrieval scoring, grounding, dedupe, budgets, and
   fallback behavior.
-- Workflow routing defaults and optimized-vs-legacy retrieval selection.
+- Workflow scope routing, named-topic adequacy, web exhaustion, fallback
+  priority, and optimized-vs-legacy retrieval selection.
 
 The suite is not a full end-to-end production evaluation harness, but it now
 covers the core contracts that were previously only documented in review notes.
@@ -345,10 +365,13 @@ Important boundaries to preserve:
 - The legacy graph-indexing path remains available to explicit offline scripts,
   but runtime startup fails closed when prepared index storage is missing or
   invalid.
-- Empty local retrieval correctly escalates to the Researcher, but a structured
-  web result with `status=no_relevant_info` is still treated as research-complete.
-  In the separate total-failure path, the wrapper does not yet map the
-  `sources_exhausted` state flag to its specialized user-facing fallback.
+- Scope classification and creation of named-topic requirements rely on the
+  existing Orchestrator and Retriever model calls. Their prompt contracts are
+  tested, but model compliance remains stochastic and should be measured in the
+  future runtime evaluation pipeline.
+- Exact-token adequacy checks intentionally do not infer synonyms. They can only
+  enforce aliases supplied by the Retriever and do not filter broad queries with
+  an empty `required_topics` list.
 - Long-form Analyst and Mentor calls remain the most latency-sensitive runtime
   components.
 - Web research improves the current turn but is not persisted back into the

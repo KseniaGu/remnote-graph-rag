@@ -27,12 +27,20 @@ The backend is built on a multi-agent workflow architecture powered
 by [LangGraph](https://github.com/langchain-ai/langgraph)
 and [LlamaIndex](https://developers.llamaindex.ai/python/framework/). The following agents are currently implemented:
 
-- **Orchestrator**: Routes requests to other specialized agents
-- **Retriever**: Searches for relevant information in a knowledge graph and performs reranking
+- **Orchestrator**: Classifies broad technical request scope and routes requests to specialized agents
+- **Retriever**: Searches the knowledge graph and validates named-topic coverage before generation
 - **Researcher**: Utilizes web search via [Tavily](https://www.tavily.com/) API to expand the existing knowledge base
 - **Analyst**: Synthesizes and summarizes information
 - **Mentor**: Answers questions and facilitates practice
 - **Visualizer**: Creates visual representations of knowledge graphs
+
+The current runtime rejects only clearly unrelated requests. AI/ML, mathematics,
+statistics, data, programming, systems, and ambiguous technical-looking terms
+remain eligible. Named-topic searches carry explicit alias groups; formatted
+local evidence must cover every group with exact normalized token sequences or
+the turn escalates to web research. Web results that cannot establish the exact
+requested identity terminate with the all-sources-exhausted fallback rather than
+being sent to the Analyst.
 
 ### Frontend
 

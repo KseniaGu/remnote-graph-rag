@@ -12,6 +12,12 @@ FALLBACK_ALL_SOURCES_EXHAUSTED = (
     "Try rephrasing your question or adding notes on this topic first."
 )
 
+FALLBACK_OUT_OF_SCOPE = (
+    "This assistant is focused on AI/ML and related technical topics, so I can't help "
+    "with that request. I can help with machine learning, data science, mathematics, "
+    "programming, and systems topics."
+)
+
 FALLBACK_VISUALIZATION_FAILED = (
     "I wasn't able to create a visualization for this topic. "
     "The knowledge graph may not contain enough data about it. "
