@@ -9,10 +9,18 @@ from backend.evaluation.retrieval_benchmark import (
     EvidenceCatalog,
     RelationCatalogEntry,
     RelationEvidence,
+    actual_evidence_from_legacy_results,
     load_benchmark_cases,
     score_case,
     summarize_results,
     validate_benchmark_references,
+)
+from backend.workflows.agents.retrieval_evidence import (
+    NormalizedMetadata,
+    QueryEvidenceResult,
+)
+from backend.workflows.agents.retrieval_evidence import (
+    RelationEvidence as RuntimeRelationEvidence,
 )
 
 
@@ -39,8 +47,7 @@ def make_case_payload(**overrides):
             "relations": [{"predicate": "MENTIONS"}],
         },
         "thresholds": {
-            "source_recall_at_6": 0.5,
-            "source_mrr_at_6": 0.5,
+            "evidence_chunk_recall": 0.5,
             "concept_recall": 1.0,
             "forbidden_evidence_count": 0,
         },
@@ -77,7 +84,7 @@ class RetrievalBenchmarkTests(unittest.TestCase):
             with self.assertRaises(BenchmarkValidationError):
                 load_benchmark_cases(path)
 
-    def test_score_case_uses_source_mrr_recall_concepts_and_forbidden_relations(
+    def test_score_case_uses_shared_recall_and_forbidden_relations(
         self,
     ) -> None:
         case = load_case(
@@ -88,8 +95,7 @@ class RetrievalBenchmarkTests(unittest.TestCase):
                     "required_answer_points": ["ignored"],
                 },
                 thresholds={
-                    "source_recall_at_6": 1.0,
-                    "source_mrr_at_6": 0.5,
+                    "evidence_chunk_recall": 1.0,
                     "concept_recall": 1.0,
                     "forbidden_evidence_count": 0,
                 },
@@ -108,8 +114,8 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         result = score_case(case, actual)
 
         self.assertFalse(result.passed)
-        self.assertEqual(1.0, result.scores["source_recall_at_6"])
-        self.assertEqual(0.5, result.scores["source_mrr_at_6"])
+        self.assertEqual(1.0, result.scores["evidence_chunk_recall"])
+        self.assertNotIn("source_mrr_at_6", result.scores)
         self.assertEqual(1, result.scores["forbidden_evidence_count"])
         self.assertIn("relations", result.forbidden_hits)
 
@@ -165,6 +171,31 @@ class RetrievalBenchmarkTests(unittest.TestCase):
 
         self.assertTrue(result.passed)
         self.assertEqual(1.0, result.scores["relation_recall"])
+
+    def test_legacy_adapter_preserves_stable_graph_and_edge_evidence_ids(
+        self,
+    ) -> None:
+        runtime_relation = RuntimeRelationEvidence(
+            rank=1,
+            subject="CLIP",
+            predicate="USES",
+            object="Contrastive Objective",
+            subject_id="concept_clip",
+            relation_id="rel_uses",
+            object_id="concept_objective",
+            raw_relation="CLIP -> USES -> Contrastive Objective",
+            metadata=NormalizedMetadata(),
+            evidence_chunk_ids=["chunk_grounding"],
+        )
+
+        actual = actual_evidence_from_legacy_results(
+            [QueryEvidenceResult(query="CLIP", items=[runtime_relation])]
+        )
+
+        self.assertEqual(["chunk_grounding"], actual.source_chunk_ids_ranked)
+        self.assertEqual(["concept_clip", "concept_objective"], actual.concept_ids)
+        self.assertEqual(["rel_uses"], actual.relation_ids)
+        self.assertEqual("concept_clip", actual.relations[0].subject_id)
 
     def test_visualizer_shape_thresholds_count_chunk_nodes_and_dangling_edges(
         self,

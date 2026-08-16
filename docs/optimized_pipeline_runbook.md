@@ -143,8 +143,17 @@ uv run --locked --group scripts python scripts/evaluate_retrieval_pipeline.py \
   --raw-data-dir "data/raw/AI Research" \
   --benchmark-file "evals/retrieval/benchmark_cases.jsonl" \
   --output-dir "$RUN_ROOT/retrieval_eval/local_final_storage" \
-  --mode both
+  --mode both \
+  --analyst-variant config \
+  --visualizer-variant config
 ```
+
+`config` resolves the same retrieval modes used by the application: currently
+`legacy_vector_context` for Analyst and `optimized` for Visualizer. Use explicit
+variants for controlled comparisons. For example, add
+`--analyst-variant optimized`, or run the legacy Visualizer with
+`--visualizer-variant legacy_vector_context`. The resolved variant is written to
+the manifest, each case result, and each actual-evidence row.
 
 Use an explicit output directory name when comparing storage builds, for
 example:
@@ -186,20 +195,23 @@ does not require Ragas, LangSmith, or any LLM evaluator. It writes:
 - `actual_evidence.jsonl` for retrieved source, concept, and relation evidence
   used by the scorer.
 
-Current benchmark scoring maps passage-vector hits back to parent source chunk
-IDs before computing source recall and MRR. Reference validation also treats a
-parent chunk as embedded when it has embedded passage children.
+Benchmark gates intentionally use metrics that both retrieval implementations
+can expose truthfully: set-based supporting-chunk recall, concept recall,
+relation recall, forbidden-evidence count, retrieval health, and Visualizer
+dangling-edge/chunk-node constraints. Source rank/MRR, source-path recall, and
+duplicate node/edge recall aliases are not scored. Exact concept ID versus label
+and exact relation ID versus semantic triplet matches are retained as
+per-case diagnostics rather than independent gates.
 
-The current accepted local benchmark run is:
+Optimized passage-vector hits are still mapped back to parent source chunk IDs.
+Legacy relation evidence uses only the relation edge's grounded
+`evidence_chunk_ids`; endpoint concept provenance is not counted as relation
+support. Reference validation treats a parent chunk as embedded when it has
+embedded passage children.
 
-```text
-data/production/full_optimized_pipeline_run/retrieval_eval/local_final_storage_chunk_splitting_relation_updates
-```
-
-At the time this document was updated, that run passed 8 of 12 reviewed cases.
-The remaining misses are useful known gaps, not release blockers for the current
-iteration: VAE relation evidence, diffusion/DDIM source recall, BERT/ModernBERT
-relation selection, and attention/RoPE relation selection.
+Runs created before this metric contract changed are historical artifacts and
+must not be compared numerically with new runs. Establish separate fresh
+baselines for each explicit variant before using changes as regression signals.
 
 Run a smaller subset while reviewing or debugging a failure:
 

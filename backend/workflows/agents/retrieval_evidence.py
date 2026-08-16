@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from backend.configs.constants import MAX_SOURCE_CHARS, RELATION_DROP_SCORE
 
 FACT_BLOCK_HEADER = "Here are some facts extracted from the provided text:"
-PROPERTY_PATTERN = re.compile(r"\(\{.*?\}\)", re.DOTALL)
 
 
 class NormalizedMetadata(BaseModel):
@@ -46,6 +45,9 @@ class RelationEvidence(BaseModel):
     subject: str | None = None
     predicate: str | None = None
     object: str | None = None
+    subject_id: str | None = None
+    relation_id: str | None = None
+    object_id: str | None = None
     raw_relation: str
     relation_category: str = "triplet"
     metadata: NormalizedMetadata
@@ -184,6 +186,7 @@ def format_visualization_results(
                 triplet = evidence.as_triplet()
                 if triplet:
                     all_triplets.append(triplet)
+                    all_nodes.extend((triplet[0], triplet[2]))
             elif evidence.metadata.node_id and not evidence.derived_from_relation_node:
                 all_nodes.append(evidence.metadata.node_id)
 
@@ -220,6 +223,9 @@ def _evidence_from_fact_block(
                 subject=parsed["subject"],
                 predicate=parsed["predicate"],
                 object=parsed["object"],
+                subject_id=parsed["subject_id"],
+                relation_id=parsed["relation_id"],
+                object_id=parsed["object_id"],
                 raw_relation=parsed["raw_relation"],
                 relation_category="fact_block",
                 metadata=metadata,
@@ -283,6 +289,9 @@ def _evidence_from_relation_text(
             subject=parsed["subject"],
             predicate=parsed["predicate"],
             object=parsed["object"],
+            subject_id=parsed["subject_id"],
+            relation_id=parsed["relation_id"],
+            object_id=parsed["object_id"],
             raw_relation=relation_text,
             relation_category="child" if "CHILD" in text else "triplet",
             metadata=metadata,
@@ -302,7 +311,7 @@ def _parse_relation_line(line: str) -> dict[str, Any]:
     relation = line.strip()
     id_to_name: dict[str, str] = {}
 
-    for raw_property in _ordered_unique(PROPERTY_PATTERN.findall(line)):
+    for raw_property in _ordered_unique(_property_literals(line)):
         parsed = _parse_property(raw_property)
         if parsed is None:
             warnings.append("failed to parse relation property")
@@ -326,16 +335,34 @@ def _parse_relation_line(line: str) -> dict[str, Any]:
 
     relation = _normalize_relation_text(relation)
     subject, predicate, object_ = _split_triplet(relation)
+    concept_properties = [
+        prop for prop in properties if prop.get("postprocess_concept_id")
+    ]
+    relation_properties = [
+        prop
+        for prop in properties
+        if prop.get("postprocess_relation_id") or prop.get("postprocess_relation_type")
+    ]
+    evidence_properties = relation_properties or properties
 
     return {
         "subject": subject,
         "predicate": predicate,
         "object": object_,
+        "subject_id": _concept_id(concept_properties[0])
+        if concept_properties
+        else None,
+        "relation_id": _relation_id(relation_properties[0])
+        if relation_properties
+        else None,
+        "object_id": _concept_id(concept_properties[-1])
+        if len(concept_properties) >= 2
+        else None,
         "raw_relation": relation,
         "properties": properties,
         "evidence_chunk_ids": _ordered_unique(
             value
-            for prop in properties
+            for prop in evidence_properties
             for value in _string_list(
                 prop.get("evidence_chunk_ids") or prop.get("source_chunk_ids")
             )
@@ -350,6 +377,57 @@ def _parse_relation_line(line: str) -> dict[str, Any]:
         ),
         "warnings": warnings,
     }
+
+
+def _property_literals(line: str) -> list[str]:
+    """Extracts parenthesized Python dictionaries without truncating quoted text."""
+    literals: list[str] = []
+    index = 0
+    while index < len(line):
+        if line[index] != "(":
+            index += 1
+            continue
+        value_start = index + 1
+        while value_start < len(line) and line[value_start].isspace():
+            value_start += 1
+        if value_start >= len(line) or line[value_start] != "{":
+            index += 1
+            continue
+
+        depth = 1
+        quote: str | None = None
+        escaped = False
+        cursor = value_start + 1
+        while cursor < len(line):
+            char = line[cursor]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = None
+            elif char in {"'", '"'}:
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    literals.append(line[index : cursor + 1])
+                    index = cursor
+                    break
+            cursor += 1
+        index += 1
+    return literals
+
+
+def _concept_id(prop: dict[str, Any]) -> str | None:
+    return _string_or_none(prop.get("postprocess_concept_id"))
+
+
+def _relation_id(prop: dict[str, Any]) -> str | None:
+    return _string_or_none(prop.get("postprocess_relation_id"))
 
 
 def _parse_property(raw_property: str) -> dict[str, Any] | None:

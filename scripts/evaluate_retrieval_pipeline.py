@@ -27,6 +27,7 @@ from backend.evaluation.retrieval_benchmark import (
     EvidenceCatalog,
     ReferenceValidationReport,
     actual_evidence_from_analyst_result,
+    actual_evidence_from_legacy_results,
     actual_evidence_from_visualizer_result,
     load_benchmark_cases,
     render_markdown_summary,
@@ -151,6 +152,24 @@ def parse_args() -> argparse.Namespace:
         choices=["both", "analyst", "visualizer"],
         default="both",
         help="Which retrieval path to run.",
+    )
+    parser.add_argument(
+        "--analyst-variant",
+        choices=["config", "optimized", "legacy_vector_context"],
+        default="config",
+        help=(
+            "Analyst implementation to score. 'config' uses the runtime "
+            "KnowledgeGraphSearchSettings selection."
+        ),
+    )
+    parser.add_argument(
+        "--visualizer-variant",
+        choices=["config", "optimized", "legacy_vector_context"],
+        default="config",
+        help=(
+            "Visualizer implementation to score. 'config' uses the runtime "
+            "KnowledgeGraphSearchSettings selection."
+        ),
     )
     parser.add_argument(
         "--analyst-query",
@@ -856,6 +875,44 @@ def merge_actual_evidence(items: list[ActualEvidence]) -> ActualEvidence:
     )
 
 
+def resolve_benchmark_variant(
+    args: argparse.Namespace, indexer: KnowledgeGraphIndexer, mode: str
+) -> str:
+    requested = getattr(args, f"{mode}_variant")
+    if requested != "config":
+        return requested
+    return str(getattr(indexer.kg_search_settings, f"{mode}_retrieval_mode"))
+
+
+def retrieve_legacy_query_evidence(
+    retriever: Any, queries: list[str], *, analyst: bool
+) -> list[Any]:
+    """Runs the production legacy retrieval boundary and retain structured evidence."""
+    from backend.configs.constants import MIN_RELEVANCE_SCORE
+    from backend.workflows.agents.retrieval_evidence import (
+        QueryEvidenceResult,
+        evidence_from_retrieved_node,
+    )
+
+    query_results: list[QueryEvidenceResult] = []
+    for query in queries:
+        nodes = retriever.retrieve(query)
+        if analyst:
+            nodes = [
+                node
+                for node in nodes[:10]
+                if getattr(node, "score", None) is None
+                or node.score >= MIN_RELEVANCE_SCORE
+            ]
+        evidence_items = []
+        for rank, node in enumerate(nodes, start=1):
+            evidence_items.extend(
+                evidence_from_retrieved_node(node, query=query, rank=rank)
+            )
+        query_results.append(QueryEvidenceResult(query=query, items=evidence_items))
+    return query_results
+
+
 def run_benchmark(
     indexer: KnowledgeGraphIndexer,
     args: argparse.Namespace,
@@ -867,49 +924,111 @@ def run_benchmark(
     reference_report: ReferenceValidationReport | None = None,
 ) -> list[CaseResult]:
     from backend.workflows.agents.analyst_retrieval import AnalystRetrievalPipeline
+    from backend.workflows.agents.retrieval_evidence import (
+        format_visualization_results,
+    )
     from backend.workflows.agents.visualizer_retrieval import (
         VisualizerRetrievalPipeline,
     )
 
     if cases is None or catalog is None:
         cases, catalog = load_benchmark_inputs(args)
-    analyst_pipeline = AnalystRetrievalPipeline(indexer)
-    visualizer_pipeline = VisualizerRetrievalPipeline(indexer)
+
+    case_modes = {case.mode for case in cases}
+    analyst_variant = (
+        resolve_benchmark_variant(args, indexer, "analyst")
+        if "analyst" in case_modes
+        else "not_run"
+    )
+    visualizer_variant = (
+        resolve_benchmark_variant(args, indexer, "visualizer")
+        if "visualizer" in case_modes
+        else "not_run"
+    )
+    analyst_pipeline = (
+        AnalystRetrievalPipeline(indexer)
+        if analyst_variant == "optimized" and "analyst" in case_modes
+        else None
+    )
+    visualizer_pipeline = (
+        VisualizerRetrievalPipeline(indexer)
+        if visualizer_variant == "optimized" and "visualizer" in case_modes
+        else None
+    )
+    analyst_retriever = (
+        indexer.get_retriever(indexer.kg_search_settings.retriever_params)
+        if analyst_variant == "legacy_vector_context" and "analyst" in case_modes
+        else None
+    )
+    visualizer_retriever = (
+        indexer.get_retriever(indexer.kg_search_settings.visualizer_retriever_params)
+        if visualizer_variant == "legacy_vector_context" and "visualizer" in case_modes
+        else None
+    )
 
     results: list[CaseResult] = []
     actual_rows: list[dict[str, Any]] = []
 
     for case in cases:
-        if case.mode == "analyst":
-            query_actuals = [
-                actual_evidence_from_analyst_result(
-                    analyst_pipeline._search_one(query),
-                    catalog,
+        variant = analyst_variant if case.mode == "analyst" else visualizer_variant
+        try:
+            if case.mode == "analyst":
+                if analyst_pipeline is not None:
+                    query_actuals = [
+                        actual_evidence_from_analyst_result(
+                            analyst_pipeline._search_one(query),
+                            catalog,
+                        )
+                        for query in case.queries
+                    ]
+                    actual = merge_actual_evidence(query_actuals)
+                elif analyst_retriever is not None:
+                    query_results = retrieve_legacy_query_evidence(
+                        analyst_retriever, case.queries, analyst=True
+                    )
+                    actual = actual_evidence_from_legacy_results(query_results, catalog)
+                else:
+                    raise BenchmarkValidationError(
+                        f"Unsupported Analyst benchmark variant: {variant}"
+                    )
+            else:
+                if visualizer_pipeline is not None:
+                    nodes, triplets, returned_queries = visualizer_pipeline.visualize(
+                        case.queries
+                    )
+                elif visualizer_retriever is not None:
+                    query_results = retrieve_legacy_query_evidence(
+                        visualizer_retriever, case.queries, analyst=False
+                    )
+                    nodes, triplets, returned_queries = format_visualization_results(
+                        query_results
+                    )
+                else:
+                    raise BenchmarkValidationError(
+                        f"Unsupported Visualizer benchmark variant: {variant}"
+                    )
+                metrics = graph_metrics(nodes, triplets)
+                node_details = describe_graph_nodes(indexer, nodes, triplets, metrics)
+                actual = actual_evidence_from_visualizer_result(
+                    nodes=nodes,
+                    triplets=triplets,
+                    node_details=node_details,
+                    metrics=metrics,
+                    catalog=catalog,
                 )
-                for query in case.queries
-            ]
-            actual = merge_actual_evidence(query_actuals)
-        else:
-            nodes, triplets, returned_queries = visualizer_pipeline.visualize(
-                case.queries
-            )
-            metrics = graph_metrics(nodes, triplets)
-            node_details = describe_graph_nodes(indexer, nodes, triplets, metrics)
-            actual = actual_evidence_from_visualizer_result(
-                nodes=nodes,
-                triplets=triplets,
-                node_details=node_details,
-                metrics=metrics,
-                catalog=catalog,
-            )
-            actual.graph_metrics["returned_queries"] = returned_queries
+                actual.graph_metrics["returned_queries"] = returned_queries
+        except BenchmarkValidationError:
+            raise
+        except Exception as exc:
+            actual = ActualEvidence(retrieval_error=type(exc).__name__)
 
-        result = score_case(case, actual, catalog)
+        result = score_case(case, actual, catalog, variant=variant)
         results.append(result)
         actual_rows.append(
             {
                 "case_id": case.id,
                 "mode": case.mode,
+                "variant": variant,
                 "queries": case.queries,
                 "actual_evidence": actual.compact(),
             }
@@ -924,6 +1043,8 @@ def run_benchmark(
         "benchmark_file": str(args.benchmark_file),
         "mode": args.mode,
         "case_ids": args.case_id or [],
+        "analyst_variant": analyst_variant,
+        "visualizer_variant": visualizer_variant,
         "requested_analyst_reranker_mode": args.analyst_reranker_mode,
         "analyst_reranker_mode": indexer.kg_search_settings.analyst_reranker_mode,
         "effective_search_settings": summarize_search_settings(

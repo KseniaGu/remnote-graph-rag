@@ -53,6 +53,11 @@ class CustomNeo4jPropertyGraphStore(Neo4jPropertyGraphStore):
             WHERE ALL(rel in relationships(p) WHERE type(rel) <> 'MENTIONS')
             UNWIND relationships(p) AS rel
             WITH distinct rel, idx
+            ORDER BY idx,
+                startNode(rel).id,
+                type(rel),
+                endNode(rel).id,
+                coalesce(rel.postprocess_relation_id, '')
             WITH startNode(rel) AS source,
                 type(rel) AS type,
                 rel{{.*}} AS rel_properties,
@@ -184,6 +189,11 @@ class CustomMemgraphPropertyGraphStore(MemgraphPropertyGraphStore):
             WHERE ALL(rel in relationships(p) WHERE type(rel) <> 'MENTIONS')
             UNWIND relationships(p) AS rel
             WITH distinct rel, idx
+            ORDER BY idx,
+                startNode(rel).id,
+                type(rel),
+                endNode(rel).id,
+                coalesce(rel.postprocess_relation_id, '')
             WITH startNode(rel) AS source,
                 type(rel) AS type,
                 rel{{.*}} AS rel_properties,

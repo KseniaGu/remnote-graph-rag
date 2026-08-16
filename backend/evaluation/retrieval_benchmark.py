@@ -182,12 +182,9 @@ class ForbiddenEvidence:
 
 @dataclass
 class Thresholds:
-    source_recall_at_6: float | None = None
-    source_mrr_at_6: float | None = None
+    evidence_chunk_recall: float | None = None
     concept_recall: float | None = None
     relation_recall: float | None = None
-    node_recall: float | None = None
-    edge_recall: float | None = None
     max_dangling_edges: int | None = None
     max_chunk_nodes: int | None = None
     forbidden_evidence_count: int | None = None
@@ -201,12 +198,9 @@ class Thresholds:
         _reject_unknown_keys(
             value,
             {
-                "source_recall_at_6",
-                "source_mrr_at_6",
+                "evidence_chunk_recall",
                 "concept_recall",
                 "relation_recall",
-                "node_recall",
-                "edge_recall",
                 "max_dangling_edges",
                 "max_chunk_nodes",
                 "forbidden_evidence_count",
@@ -214,12 +208,9 @@ class Thresholds:
             "thresholds",
         )
         return cls(
-            source_recall_at_6=_float_or_none(value.get("source_recall_at_6")),
-            source_mrr_at_6=_float_or_none(value.get("source_mrr_at_6")),
+            evidence_chunk_recall=_float_or_none(value.get("evidence_chunk_recall")),
             concept_recall=_float_or_none(value.get("concept_recall")),
             relation_recall=_float_or_none(value.get("relation_recall")),
-            node_recall=_float_or_none(value.get("node_recall")),
-            edge_recall=_float_or_none(value.get("edge_recall")),
             max_dangling_edges=_int_or_none(value.get("max_dangling_edges")),
             max_chunk_nodes=_int_or_none(value.get("max_chunk_nodes")),
             forbidden_evidence_count=_int_or_none(
@@ -314,6 +305,7 @@ class ActualEvidence:
     relation_ids: list[str] = field(default_factory=list)
     relations: list[RelationEvidence] = field(default_factory=list)
     graph_metrics: dict[str, Any] = field(default_factory=dict)
+    retrieval_error: str | None = None
 
     def compact(self) -> dict[str, Any]:
         return _dump_dataclass(self, exclude_none=True)
@@ -407,6 +399,8 @@ class CaseResult:
     mode: str
     passed: bool
     scores: dict[str, float | int | None]
+    variant: str | None = None
+    diagnostics: dict[str, float | int | None] = field(default_factory=dict)
     failures: list[str] = field(default_factory=list)
     missing_required: dict[str, list[Any]] = field(default_factory=dict)
     forbidden_hits: dict[str, list[Any]] = field(default_factory=dict)
@@ -589,10 +583,16 @@ def validate_benchmark_references(
 
 
 def score_case(
-    case: BenchmarkCase, actual: ActualEvidence, catalog: EvidenceCatalog | None = None
+    case: BenchmarkCase,
+    actual: ActualEvidence,
+    catalog: EvidenceCatalog | None = None,
+    *,
+    variant: str | None = None,
 ) -> CaseResult:
+    """Scores one retrieval result using metrics shared by both retrieval modes."""
     catalog = catalog or EvidenceCatalog()
     scores: dict[str, float | int | None] = {}
+    diagnostics: dict[str, float | int | None] = {}
     failures: list[str] = []
     missing_required: dict[str, list[Any]] = {}
 
@@ -602,23 +602,7 @@ def score_case(
         normalize=False,
     )
     _add_missing(missing_required, "source_chunk_ids", source_eval["missing_all"])
-    scores["source_recall"] = source_eval["recall"]
-    scores["source_recall_at_6"] = _recall_at_k(
-        actual.source_chunk_ids_ranked,
-        case.expected_evidence.source_chunk_ids.expected,
-        6,
-    )
-    scores["source_mrr_at_6"] = _mrr_at_k(
-        actual.source_chunk_ids_ranked,
-        case.expected_evidence.source_chunk_ids.expected,
-        6,
-    )
-
-    path_eval = _eval_string_spec(
-        set(actual.source_paths), case.expected_evidence.source_paths, normalize=True
-    )
-    _add_missing(missing_required, "source_paths", path_eval["missing_all"])
-    scores["source_path_recall"] = path_eval["recall"]
+    scores["evidence_chunk_recall"] = source_eval["recall"]
 
     concept_id_eval = _eval_string_spec(
         set(actual.concept_ids), case.expected_evidence.concept_ids, normalize=False
@@ -628,14 +612,16 @@ def score_case(
         case.expected_evidence.concept_labels,
         normalize=True,
     )
-    _add_missing(missing_required, "concept_ids", concept_id_eval["missing_all"])
-    _add_missing(missing_required, "concept_labels", concept_label_eval["missing_all"])
-    scores["concept_id_recall"] = concept_id_eval["recall"]
-    scores["concept_label_recall"] = concept_label_eval["recall"]
-    scores["concept_recall"] = _best_available_score(
-        concept_id_eval["recall"], concept_label_eval["recall"]
-    )
-    scores["node_recall"] = scores["concept_recall"]
+    diagnostics["concept_id_recall"] = concept_id_eval["recall"]
+    diagnostics["concept_label_recall"] = concept_label_eval["recall"]
+    if case.expected_evidence.concept_ids.expected:
+        concept_eval = concept_id_eval
+        concept_field = "concept_ids"
+    else:
+        concept_eval = concept_label_eval
+        concept_field = "concept_labels"
+    _add_missing(missing_required, concept_field, concept_eval["missing_all"])
+    scores["concept_recall"] = concept_eval["recall"]
 
     relation_id_eval = _eval_relation_ids(
         case.expected_evidence.relation_ids, actual, catalog
@@ -643,24 +629,38 @@ def score_case(
     relation_spec_eval = _eval_relation_specs(
         case.expected_evidence.relations, actual, catalog
     )
-    _add_missing(missing_required, "relation_ids", relation_id_eval["missing_all"])
-    _add_missing(missing_required, "relations", relation_spec_eval["missing_all"])
-    scores["relation_id_recall"] = relation_id_eval["recall"]
-    scores["relation_spec_recall"] = relation_spec_eval["recall"]
-    scores["relation_recall"] = _best_available_score(
-        relation_id_eval["recall"], relation_spec_eval["recall"]
-    )
-    scores["edge_recall"] = scores["relation_recall"]
+    diagnostics["relation_id_recall"] = relation_id_eval["recall"]
+    diagnostics["relation_spec_recall"] = relation_spec_eval["recall"]
+    if case.expected_evidence.relation_ids.expected:
+        relation_eval = relation_id_eval
+        relation_field = "relation_ids"
+    else:
+        relation_eval = relation_spec_eval
+        relation_field = "relations"
+    _add_missing(missing_required, relation_field, relation_eval["missing_all"])
+    scores["relation_recall"] = relation_eval["recall"]
 
     forbidden_hits = _forbidden_hits(case.forbidden_evidence, actual, catalog)
     scores["forbidden_evidence_count"] = sum(
         len(values) for values in forbidden_hits.values()
     )
+    scores["retrieval_adequate"] = int(
+        bool(
+            actual.source_chunk_ids_ranked
+            or actual.concept_ids
+            or actual.concept_labels
+            or actual.relation_ids
+            or actual.relations
+        )
+    )
+    scores["retrieval_error_count"] = int(actual.retrieval_error is not None)
     scores["dangling_edge_count"] = _int_metric(
         actual.graph_metrics, "dangling_edge_count"
     )
     scores["chunk_node_count"] = _chunk_node_count(actual)
 
+    if actual.retrieval_error:
+        failures.append(f"retrieval failed: {actual.retrieval_error}")
     _apply_required_all_failures(missing_required, failures)
     _apply_thresholds(case.thresholds, scores, failures)
 
@@ -668,7 +668,9 @@ def score_case(
         case_id=case.id,
         mode=case.mode,
         passed=not failures,
+        variant=variant,
         scores=scores,
+        diagnostics=diagnostics,
         failures=failures,
         missing_required=missing_required,
         forbidden_hits=forbidden_hits,
@@ -747,6 +749,78 @@ def actual_evidence_from_analyst_result(
                 if label
             ]
         )
+
+    return ActualEvidence(
+        source_chunk_ids_ranked=_ordered_unique(source_ids),
+        source_paths=_ordered_unique(source_paths),
+        concept_ids=_ordered_unique(concept_ids),
+        concept_labels=_ordered_unique(concept_labels),
+        relation_ids=_ordered_unique(relation_ids),
+        relations=relations,
+    )
+
+
+def actual_evidence_from_legacy_results(
+    results: list[Any], catalog: EvidenceCatalog | None = None
+) -> ActualEvidence:
+    """Normalizes legacy VectorContextRetriever output into benchmark evidence."""
+    from backend.workflows.agents import retrieval_evidence as runtime_evidence
+
+    catalog = catalog or EvidenceCatalog()
+    source_ids: list[str] = []
+    source_paths: list[str] = []
+    concept_ids: list[str] = []
+    concept_labels: list[str] = []
+    relation_ids: list[str] = []
+    relations: list[RelationEvidence] = []
+
+    for query_result in results:
+        for item in query_result.items:
+            source_paths.extend(item.source_paths)
+            if isinstance(item, runtime_evidence.SourceEvidence):
+                source_id = item.metadata.chunk_id or item.metadata.node_id
+                if source_id and source_id.startswith("chunk_"):
+                    source_ids.append(source_id)
+                continue
+            if not isinstance(item, runtime_evidence.RelationEvidence):
+                continue
+
+            relation_id = item.relation_id
+            relation_entry = (
+                catalog.relation_for_id(relation_id) if relation_id else None
+            )
+            subject_id = item.subject_id or (
+                relation_entry.subject_id if relation_entry else None
+            )
+            object_id = item.object_id or (
+                relation_entry.object_id if relation_entry else None
+            )
+            evidence_chunk_ids = item.evidence_chunk_ids or (
+                relation_entry.evidence_chunk_ids if relation_entry else []
+            )
+            if relation_id:
+                relation_ids.append(relation_id)
+            if subject_id:
+                concept_ids.append(subject_id)
+                concept_labels.extend(catalog.labels_for_concept(subject_id))
+            if object_id:
+                concept_ids.append(object_id)
+                concept_labels.extend(catalog.labels_for_concept(object_id))
+            concept_labels.extend(
+                label for label in (item.subject, item.object) if label
+            )
+            source_ids.extend(evidence_chunk_ids)
+            relations.append(
+                RelationEvidence(
+                    relation_id=relation_id,
+                    subject_id=subject_id,
+                    subject_label=item.subject,
+                    predicate=item.predicate or "",
+                    object_id=object_id,
+                    object_label=item.object,
+                    evidence_chunk_ids=evidence_chunk_ids,
+                )
+            )
 
     return ActualEvidence(
         source_chunk_ids_ranked=_ordered_unique(source_ids),
@@ -1023,12 +1097,9 @@ def _apply_thresholds(
     thresholds: Thresholds, scores: dict[str, float | int | None], failures: list[str]
 ) -> None:
     minimum_metrics = {
-        "source_recall_at_6": thresholds.source_recall_at_6,
-        "source_mrr_at_6": thresholds.source_mrr_at_6,
+        "evidence_chunk_recall": thresholds.evidence_chunk_recall,
         "concept_recall": thresholds.concept_recall,
         "relation_recall": thresholds.relation_recall,
-        "node_recall": thresholds.node_recall,
-        "edge_recall": thresholds.edge_recall,
     }
     for metric, threshold in minimum_metrics.items():
         if threshold is None:
@@ -1056,33 +1127,6 @@ def _apply_required_all_failures(
     for evidence_name, missing in missing_required.items():
         if missing:
             failures.append(f"missing required {evidence_name}: {missing}")
-
-
-def _recall_at_k(
-    ranked_values: list[str], expected_values: list[str], k: int
-) -> float | None:
-    if not expected_values:
-        return None
-    return len(set(ranked_values[:k]).intersection(expected_values)) / len(
-        set(expected_values)
-    )
-
-
-def _mrr_at_k(
-    ranked_values: list[str], expected_values: list[str], k: int
-) -> float | None:
-    expected = set(expected_values)
-    if not expected:
-        return None
-    for rank, value in enumerate(ranked_values[:k], start=1):
-        if value in expected:
-            return 1.0 / rank
-    return 0.0
-
-
-def _best_available_score(*values: float | int | None) -> float | None:
-    present = [float(value) for value in values if value is not None]
-    return max(present) if present else None
 
 
 def _catalog_relation_for_triplet(

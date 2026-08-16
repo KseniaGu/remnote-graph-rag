@@ -76,8 +76,8 @@ The default environment contains runtime and development dependencies. Offline p
 ## Prepare environment
 
 Prepare retrieval storage before starting the application. The current parser,
-post-processing, final-storage build, deterministic retrieval benchmark, and
-migration commands are documented in
+post-processing, final-storage build, and deterministic retrieval benchmark
+commands are documented in
 [`docs/optimized_pipeline_runbook.md`](docs/optimized_pipeline_runbook.md).
 
 The application does not build or repair retrieval storage at startup. Keep

@@ -142,6 +142,8 @@ class RetrievalEvidenceTests(unittest.TestCase):
         self.assertEqual("Naive Bayes -> IS_A -> Classifier", relations[0].raw_relation)
         self.assertEqual(["chunk_a"], relations[0].evidence_chunk_ids)
         self.assertEqual(["Naive Bayes"], relations[0].evidence_spans)
+        self.assertIsNone(relations[0].subject_id)
+        self.assertIsNone(relations[0].relation_id)
         self.assertEqual(1, len(sources))
         self.assertTrue(sources[0].derived_from_relation_node)
 
@@ -153,6 +155,29 @@ class RetrievalEvidenceTests(unittest.TestCase):
         )
         self.assertIn("[SOURCE] Naive Bayes is a probabilistic classifier.", output)
         self.assertIn("[SOURCE PATH] Text Classification > Naive Bayes", output)
+
+    def test_postprocessed_relation_preserves_ids_and_edge_evidence(self) -> None:
+        relation_text = (
+            "concept_a ({'name': 'concept_a', 'entity_name': 'Subject (A)', "
+            "'postprocess_concept_id': 'concept_a', "
+            "'source_chunk_ids': ['chunk_subject']}) -> "
+            "USES ({'postprocess_relation_id': 'rel_1', "
+            "'evidence_chunk_ids': ['chunk_edge']}) -> "
+            "concept_b ({'name': 'concept_b', 'entity_name': 'Object', "
+            "'postprocess_concept_id': 'concept_b', "
+            "'source_chunk_ids': ['chunk_object']})"
+        )
+
+        relation = evidence_from_retrieved_node(
+            FakeNodeWithScore(FakeNode(relation_text)), query="q", rank=1
+        )[0]
+
+        self.assertIsInstance(relation, RelationEvidence)
+        self.assertEqual("concept_a", relation.subject_id)
+        self.assertEqual("rel_1", relation.relation_id)
+        self.assertEqual("concept_b", relation.object_id)
+        self.assertEqual(["chunk_edge"], relation.evidence_chunk_ids)
+        self.assertEqual(("Subject (A)", "USES", "Object"), relation.as_triplet())
 
     def test_child_parent_and_low_score_handling(self) -> None:
         parent_node = FakeNode("Parent -> PARENT -> Child")
@@ -483,7 +508,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
 
         nodes, triplets, queries = format_visualization_results([result])
 
-        self.assertEqual(["node_1"], nodes)
+        self.assertEqual(["A", "B", "node_1"], nodes)
         self.assertEqual([("A", "REL", "B")], triplets)
         self.assertEqual(["graph"], queries)
 
@@ -500,7 +525,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         )
         nodes, triplets, queries = tool.invoke({"queries": ["graph"]})
 
-        self.assertEqual(["node_1"], nodes)
+        self.assertEqual(["A", "B", "node_1"], nodes)
         self.assertEqual([("A", "REL", "B")], triplets)
         self.assertEqual(["graph"], queries)
 

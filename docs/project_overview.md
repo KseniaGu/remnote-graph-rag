@@ -136,11 +136,11 @@ The optimized pipelines share low-level store access through
 `RetrievalStoreAccess`, which centralizes vector-store fallback, graph relation
 fallback, docstore lookup, and retrieval health events.
 
-Future end-to-end runtime evaluation should use `legacy_vector_context` as the
-base Analyst mode because that is the application default. Optimized Analyst
-retrieval should be an explicit comparison variant. The existing deterministic
-optimized-retrieval benchmark remains a separate subsystem benchmark and is not
-redefined by this runtime baseline.
+The deterministic retrieval benchmark uses `legacy_vector_context` as the
+configured Analyst baseline because that is the application default. Optimized
+Analyst retrieval remains an explicit comparison variant. The runner can score
+either retrieval implementation against the same reviewed evidence contract;
+it records the resolved variant in every case result and run manifest.
 
 ## Agent Workflow
 
@@ -326,10 +326,13 @@ Notable test areas:
 The suite is not a full end-to-end production evaluation harness, but it now
 covers the core contracts that were previously only documented in review notes.
 Retrieval quality is also checked with the deterministic benchmark runner in
-`scripts/evaluate_retrieval_pipeline.py`. Candidate cases awaiting final review
-live in `evals/retrieval/benchmark_cases.jsonl` and score expected source chunks,
-concepts, relations, graph-shape constraints, and forbidden evidence without
-requiring Ragas, LangSmith, or an LLM evaluator.
+`scripts/evaluate_retrieval_pipeline.py`. Reviewed cases live in
+`evals/retrieval/benchmark_cases.jsonl` and use mode-neutral, set-based recall
+for supporting chunks, concepts, and relations, plus forbidden-evidence and
+Visualizer graph-shape checks. Exact ID and semantic-label/spec matches remain
+separate diagnostics. The runner supports configured, optimized, and
+`legacy_vector_context` variants without requiring Ragas, LangSmith, or an LLM
+evaluator.
 
 ## Current Design Boundaries
 

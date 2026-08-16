@@ -560,7 +560,7 @@ def test_visualizer_tool_can_use_legacy_vector_context_retriever() -> None:
     tool = workflow._build_visualizer_tool()
     nodes, triplets, queries = tool.invoke({"queries": ["graph"]})
 
-    assert nodes == []
+    assert nodes == ["A", "B"]
     assert triplets == [("A", "REL", "B")]
     assert queries == ["graph"]
     assert indexer.get_retriever_calls == [settings.visualizer_retriever_params]
