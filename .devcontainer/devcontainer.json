@@ -6,7 +6,8 @@
   "runServices": [
     "redis",
     "memgraph",
-    "mongodb"
+    "mongodb",
+    "lab"
   ],
   "shutdownAction": "stopCompose",
   "forwardPorts": [

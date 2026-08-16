@@ -34,6 +34,16 @@ services:
       - memgraph-log:/var/log/memgraph
       - memgraph-etc:/etc/memgraph
 
+  lab:
+    image: memgraph/lab
+    ports:
+      - "3001:3000"
+    environment:
+      QUICK_CONNECT_MG_HOST: memgraph
+      QUICK_CONNECT_MG_PORT: "7687"
+    depends_on:
+      - memgraph
+
   mongodb:
     image: mongo:8.2.6
     environment:
