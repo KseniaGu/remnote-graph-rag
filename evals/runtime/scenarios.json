@@ -1,0 +1,1034 @@
+[
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "local_transformer_answer_success",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Positive control for local knowledge retrieval followed by grounded Analyst synthesis without web escalation.",
+    "trace_ids": [
+      "01a00cc4-6d64-76d0-be81-64e802468db8"
+    ],
+    "input": {
+      "user_message": "Please tell me about Transformer architecture",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "retriever",
+          "analyst"
+        ]
+      ],
+      "required_agents": [
+        "retriever",
+        "analyst"
+      ],
+      "forbidden_agents": [
+        "researcher",
+        "visualizer",
+        "mentor"
+      ],
+      "required_tools": [
+        "search_knowledge_base"
+      ],
+      "forbidden_tools": [
+        "deep_web_research",
+        "get_subgraphs_to_visualize"
+      ],
+      "request_scope": "in_scope",
+      "allowed_retrieval_statuses": [
+        "adequate"
+      ],
+      "retrieval_outcome": "adequate",
+      "sources_exhausted": false,
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "structured_output_parse_error",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 2,
+        "max_logical_llm_calls": 3,
+        "max_provider_attempts": 3,
+        "max_retries": 1,
+        "max_tavily_searches": 0,
+        "max_total_tokens": 16000,
+        "max_latency_seconds": 180
+      },
+      "judge_dimensions": [
+        "claim_faithfulness",
+        "analyst_usefulness"
+      ]
+    },
+    "provenance": [
+      "recorded_session",
+      "docs/issues.md"
+    ],
+    "notes": "The deterministic checks do not duplicate retrieval recall scoring."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "contextual_mamba_visualization",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Regression case for preserving the resolved Mamba topic and graph modality across a contextual visualization request.",
+    "trace_ids": [
+      "01a00ccb-2a54-70d1-a138-8e2e5bf8a11f"
+    ],
+    "input": {
+      "user_message": "Thank you! Now, please visualize all the information we discussed above.",
+      "message_history": [
+        {
+          "role": "user",
+          "content": "Please tell me more about Mamba"
+        },
+        {
+          "role": "assistant",
+          "content": "We discussed Mamba as a selective state-space sequence model."
+        }
+      ],
+      "session_summary": "The current technical topic is Mamba and its architecture."
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "retriever",
+          "visualizer"
+        ]
+      ],
+      "required_agents": [
+        "retriever",
+        "visualizer"
+      ],
+      "forbidden_agents": [
+        "researcher",
+        "analyst"
+      ],
+      "required_tools": [
+        "get_subgraphs_to_visualize"
+      ],
+      "forbidden_tools": [
+        "deep_web_research",
+        "search_knowledge_base"
+      ],
+      "tool_arguments": [
+        {
+          "tool": "get_subgraphs_to_visualize",
+          "argument": "queries",
+          "required_terms_all": [
+            "Mamba"
+          ]
+        }
+      ],
+      "request_scope": "in_scope",
+      "allowed_retrieval_statuses": [
+        "adequate"
+      ],
+      "retrieval_outcome": "adequate",
+      "sources_exhausted": false,
+      "requested_modality": "graph",
+      "final_response_required": false,
+      "graph_min_nodes": 3,
+      "graph_max_nodes": 25,
+      "graph_min_edges": 1,
+      "graph_max_edges": 35,
+      "forbidden_failure_types": [
+        "invalid_retriever_output",
+        "model_output_truncated",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 2,
+        "max_logical_llm_calls": 2,
+        "max_provider_attempts": 3,
+        "max_retries": 1,
+        "max_tavily_searches": 0,
+        "max_total_tokens": 12000,
+        "max_latency_seconds": 180
+      },
+      "judge_dimensions": [
+        "graph_usefulness",
+        "conversational_continuity"
+      ]
+    },
+    "provenance": [
+      "recorded_failure",
+      "docs/issues.md#follow-up-visualization-after-discussing-mamba"
+    ],
+    "notes": "Known trace is expected to fail until topic and modality survive fallback."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "explicit_mamba_visualization_success",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Positive graph control proving that explicit Mamba retrieval and visualization work.",
+    "trace_ids": [
+      "01a00cce-01df-7652-8833-da6ecd0937a0"
+    ],
+    "input": {
+      "user_message": "Please visualize information about Mamba",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "retriever",
+          "visualizer"
+        ]
+      ],
+      "required_agents": [
+        "retriever",
+        "visualizer"
+      ],
+      "forbidden_agents": [
+        "researcher",
+        "analyst",
+        "mentor"
+      ],
+      "required_tools": [
+        "get_subgraphs_to_visualize"
+      ],
+      "forbidden_tools": [
+        "deep_web_research",
+        "search_knowledge_base"
+      ],
+      "tool_arguments": [
+        {
+          "tool": "get_subgraphs_to_visualize",
+          "argument": "queries",
+          "required_terms_all": [
+            "Mamba"
+          ]
+        }
+      ],
+      "request_scope": "in_scope",
+      "allowed_retrieval_statuses": [
+        "adequate"
+      ],
+      "retrieval_outcome": "adequate",
+      "sources_exhausted": false,
+      "requested_modality": "graph",
+      "final_response_required": false,
+      "graph_min_nodes": 3,
+      "graph_max_nodes": 25,
+      "graph_min_edges": 1,
+      "graph_max_edges": 35,
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 2,
+        "max_logical_llm_calls": 2,
+        "max_provider_attempts": 2,
+        "max_retries": 1,
+        "max_tavily_searches": 0,
+        "max_total_tokens": 6000,
+        "max_latency_seconds": 60
+      },
+      "judge_dimensions": [
+        "graph_usefulness"
+      ]
+    },
+    "provenance": [
+      "recorded_positive_control"
+    ],
+    "notes": "Pairs with contextual_mamba_visualization to isolate context resolution from graph availability."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "initial_attention_quiz_route",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Positive control for initial quiz intent routing directly to Mentor.",
+    "trace_ids": [
+      "01a00ccf-c981-7d72-9a7d-0cb351af1df6"
+    ],
+    "input": {
+      "user_message": "Quiz me on attention mechanism",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "mentor"
+        ]
+      ],
+      "required_agents": [
+        "mentor"
+      ],
+      "forbidden_agents": [
+        "retriever",
+        "researcher",
+        "analyst",
+        "visualizer"
+      ],
+      "forbidden_tools": [
+        "search_knowledge_base",
+        "get_subgraphs_to_visualize",
+        "deep_web_research"
+      ],
+      "request_scope": "in_scope",
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 1,
+        "max_logical_llm_calls": 2,
+        "max_provider_attempts": 2,
+        "max_retries": 1,
+        "max_tavily_searches": 0,
+        "max_total_tokens": 4000,
+        "max_latency_seconds": 60
+      },
+      "judge_dimensions": [
+        "mentor_pedagogy"
+      ]
+    },
+    "provenance": [
+      "recorded_positive_control",
+      "docs/issues.md#quiz-me-on-attention-mechanism"
+    ],
+    "notes": "This is intentionally separate from the failing Mentor continuation."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "mentor_stuck_continuation",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Regression case requiring a stuck learner's follow-up to remain in active Mentor mode.",
+    "trace_ids": [
+      "01a00cd2-c2ff-73a2-bcc3-ac951095d783"
+    ],
+    "input": {
+      "user_message": "I can't answer this question. Please explain this topic",
+      "message_history": [
+        {
+          "role": "user",
+          "content": "Quiz me on attention mechanism"
+        },
+        {
+          "role": "assistant",
+          "content": "How does scaled dot-product attention avoid overly sharp softmax scores?"
+        }
+      ],
+      "session_summary": "An attention-mechanism quiz is active in Mentor mode."
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "mentor"
+        ]
+      ],
+      "required_agents": [
+        "mentor"
+      ],
+      "forbidden_agents": [
+        "retriever",
+        "researcher",
+        "analyst",
+        "visualizer"
+      ],
+      "forbidden_tools": [
+        "search_knowledge_base",
+        "get_subgraphs_to_visualize",
+        "deep_web_research"
+      ],
+      "request_scope": "in_scope",
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 1,
+        "max_logical_llm_calls": 2,
+        "max_provider_attempts": 2,
+        "max_retries": 1,
+        "max_tavily_searches": 0,
+        "max_total_tokens": 7000,
+        "max_latency_seconds": 90
+      },
+      "judge_dimensions": [
+        "mentor_pedagogy",
+        "conversational_continuity"
+      ]
+    },
+    "provenance": [
+      "recorded_failure",
+      "docs/issues.md#quiz-me-on-attention-mechanism"
+    ],
+    "notes": "Known trace routes to Retriever and should fail deterministically."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "researcher_structured_output_truncation_reliability",
+    "version": 2,
+    "review_status": "reviewed",
+    "description": "Independent failure/success traces for stochastic Researcher structured-output token truncation.",
+    "trace_ids": [
+      "01a00cd7-8dfb-7f41-adce-ce0d87cdad21",
+      "01a00cda-1635-70e1-8943-7a7f15da05b2"
+    ],
+    "input": {
+      "user_message": "Research the latest developments in LLMs quantization approaches",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "researcher",
+          "analyst"
+        ]
+      ],
+      "required_agents": [
+        "researcher",
+        "analyst"
+      ],
+      "forbidden_agents": [
+        "retriever",
+        "visualizer",
+        "mentor"
+      ],
+      "required_tools": [
+        "deep_web_research"
+      ],
+      "forbidden_tools": [
+        "search_knowledge_base",
+        "get_subgraphs_to_visualize"
+      ],
+      "tool_arguments": [
+        {
+          "tool": "deep_web_research",
+          "argument": "topic",
+          "required_terms_all": [
+            "quantization"
+          ]
+        }
+      ],
+      "request_scope": "in_scope",
+      "sources_exhausted": false,
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "structured_output_parse_error",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 2,
+        "max_logical_llm_calls": 4,
+        "max_provider_attempts": 5,
+        "max_retries": 1,
+        "max_tavily_searches": 1,
+        "max_total_tokens": 15000,
+        "max_latency_seconds": 180
+      },
+      "judge_dimensions": [
+        "claim_faithfulness",
+        "analyst_usefulness"
+      ]
+    },
+    "provenance": [
+      "recorded_failure",
+      "recorded_success_rerun",
+      "docs/issues.md#latest-llm-quantization-research-error"
+    ],
+    "notes": "The trace IDs are independent repetitions, not an evaluator or provider retry. The first should expose truncation and parse failure, while the second is the positive control."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "ambiguous_eagle_without_history",
+    "version": 2,
+    "review_status": "reviewed",
+    "description": "Ambiguous acronym case requiring domain-qualified fallback rather than a generic web query.",
+    "trace_ids": [
+      "01a00cdb-b9f2-7c60-acef-dcc9d83d37f0"
+    ],
+    "input": {
+      "user_message": "What is EAGLE?",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "retriever",
+          "researcher",
+          "analyst"
+        ]
+      ],
+      "required_agents": [
+        "retriever",
+        "researcher",
+        "analyst"
+      ],
+      "forbidden_agents": [
+        "visualizer",
+        "mentor"
+      ],
+      "required_tools": [
+        "search_knowledge_base",
+        "deep_web_research"
+      ],
+      "forbidden_tools": [
+        "get_subgraphs_to_visualize"
+      ],
+      "tool_arguments": [
+        {
+          "tool": "deep_web_research",
+          "argument": "topic",
+          "required_terms_all": [
+            "EAGLE"
+          ],
+          "required_terms_any": [
+            "AI",
+            "ML",
+            "machine learning",
+            "method"
+          ],
+          "forbidden_exact_values": [
+            "EAGLE"
+          ]
+        }
+      ],
+      "allowed_request_scopes": [
+        "in_scope",
+        "ambiguous"
+      ],
+      "allowed_retrieval_statuses": [
+        "no_results",
+        "below_threshold",
+        "topic_mismatch"
+      ],
+      "sources_exhausted": false,
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "structured_output_parse_error",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 3,
+        "max_logical_llm_calls": 4,
+        "max_provider_attempts": 4,
+        "max_retries": 1,
+        "max_tavily_searches": 1,
+        "max_total_tokens": 10000,
+        "max_latency_seconds": 120
+      },
+      "judge_dimensions": [
+        "claim_faithfulness",
+        "analyst_usefulness"
+      ]
+    },
+    "provenance": [
+      "recorded_failure",
+      "docs/issues.md#what-is-eagle"
+    ],
+    "notes": "Resolve the acronym within the AI/ML domain without a clarification turn, carry the qualified topic into web research, and synthesize usable findings through Analyst."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "contextual_medusa_web_query",
+    "version": 2,
+    "review_status": "reviewed",
+    "description": "Regression case for carrying a normalized speculative-decoding topic into web fallback.",
+    "trace_ids": [
+      "01a00ce3-6da4-7551-8427-4ad52b83d667"
+    ],
+    "input": {
+      "user_message": "Please tell me more about Medusa",
+      "message_history": [
+        {
+          "role": "user",
+          "content": "What other speculative decoding methods exist?"
+        },
+        {
+          "role": "assistant",
+          "content": "We discussed speculative decoding alternatives including Medusa."
+        }
+      ],
+      "session_summary": "The current topic is speculative decoding for LLM inference."
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "retriever",
+          "researcher",
+          "analyst"
+        ]
+      ],
+      "required_agents": [
+        "retriever",
+        "researcher",
+        "analyst"
+      ],
+      "forbidden_agents": [
+        "visualizer",
+        "mentor"
+      ],
+      "required_tools": [
+        "search_knowledge_base",
+        "deep_web_research"
+      ],
+      "forbidden_tools": [
+        "get_subgraphs_to_visualize"
+      ],
+      "tool_arguments": [
+        {
+          "tool": "deep_web_research",
+          "argument": "topic",
+          "required_terms_all": [
+            "Medusa",
+            "speculative decoding"
+          ],
+          "forbidden_exact_values": [
+            "Medusa"
+          ]
+        }
+      ],
+      "request_scope": "in_scope",
+      "allowed_retrieval_statuses": [
+        "no_results",
+        "below_threshold",
+        "topic_mismatch"
+      ],
+      "sources_exhausted": false,
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "structured_output_parse_error",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 3,
+        "max_logical_llm_calls": 5,
+        "max_provider_attempts": 5,
+        "max_retries": 1,
+        "max_tavily_searches": 1,
+        "max_total_tokens": 12000,
+        "max_latency_seconds": 150
+      },
+      "judge_dimensions": [
+        "claim_faithfulness",
+        "analyst_usefulness",
+        "conversational_continuity"
+      ]
+    },
+    "provenance": [
+      "recorded_failure",
+      "docs/issues.md#please-tell-me-more-about-medusa"
+    ],
+    "notes": "Known trace searches only for Medusa and should fail the argument contract."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "explicit_medusa_web_fallback_success",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Positive control for local miss followed by a correctly qualified web query and Analyst synthesis.",
+    "trace_ids": [
+      "01a00ce5-65c5-7120-8bd1-53d0e7639c74"
+    ],
+    "input": {
+      "user_message": "Please tell me about Medusa speculative decoding method",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "retriever",
+          "researcher",
+          "analyst"
+        ]
+      ],
+      "required_agents": [
+        "retriever",
+        "researcher",
+        "analyst"
+      ],
+      "forbidden_agents": [
+        "visualizer",
+        "mentor"
+      ],
+      "required_tools": [
+        "search_knowledge_base",
+        "deep_web_research"
+      ],
+      "forbidden_tools": [
+        "get_subgraphs_to_visualize"
+      ],
+      "tool_arguments": [
+        {
+          "tool": "deep_web_research",
+          "argument": "topic",
+          "required_terms_all": [
+            "Medusa",
+            "speculative decoding"
+          ]
+        }
+      ],
+      "request_scope": "in_scope",
+      "allowed_retrieval_statuses": [
+        "no_results",
+        "below_threshold",
+        "topic_mismatch"
+      ],
+      "sources_exhausted": false,
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "structured_output_parse_error",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 3,
+        "max_logical_llm_calls": 5,
+        "max_provider_attempts": 5,
+        "max_retries": 1,
+        "max_tavily_searches": 1,
+        "max_total_tokens": 15000,
+        "max_latency_seconds": 180
+      },
+      "judge_dimensions": [
+        "claim_faithfulness",
+        "analyst_usefulness"
+      ]
+    },
+    "provenance": [
+      "recorded_positive_control"
+    ],
+    "notes": "Pairs with contextual_medusa_web_query to isolate topic carry-over."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "transformer_encoder_graph_coverage",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Broad visualization case checking artifact validity, bounded size, and inclusion of the stable BERT node.",
+    "trace_ids": [
+      "01a00ce6-ae95-7de0-99ce-f140a66b8d4c"
+    ],
+    "input": {
+      "user_message": "Please visualize information about popular models based on Transformer encoder architecture",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "retriever",
+          "visualizer"
+        ]
+      ],
+      "required_agents": [
+        "retriever",
+        "visualizer"
+      ],
+      "forbidden_agents": [
+        "researcher",
+        "analyst",
+        "mentor"
+      ],
+      "required_tools": [
+        "get_subgraphs_to_visualize"
+      ],
+      "forbidden_tools": [
+        "search_knowledge_base",
+        "deep_web_research"
+      ],
+      "tool_arguments": [
+        {
+          "tool": "get_subgraphs_to_visualize",
+          "argument": "queries",
+          "required_terms_all": [
+            "Transformer",
+            "encoder"
+          ]
+        }
+      ],
+      "request_scope": "in_scope",
+      "allowed_retrieval_statuses": [
+        "adequate"
+      ],
+      "retrieval_outcome": "adequate",
+      "sources_exhausted": false,
+      "requested_modality": "graph",
+      "final_response_required": false,
+      "graph_min_nodes": 3,
+      "graph_max_nodes": 25,
+      "graph_min_edges": 2,
+      "graph_max_edges": 35,
+      "graph_required_node_ids": [
+        "concept_6aaca400bda280c4f617"
+      ],
+      "forbidden_failure_types": [
+        "model_output_truncated",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 2,
+        "max_logical_llm_calls": 2,
+        "max_provider_attempts": 2,
+        "max_retries": 1,
+        "max_tavily_searches": 0,
+        "max_total_tokens": 6000,
+        "max_latency_seconds": 60
+      },
+      "judge_dimensions": [
+        "graph_usefulness"
+      ]
+    },
+    "provenance": [
+      "recorded_session",
+      "docs/issues.md#transformer-encoder-model-visualization"
+    ],
+    "notes": "The deterministic contract checks validity and a minimum anchor; semantic precision remains a judge/human-review dimension."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "colbert_guidance_mode_continuation",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Regression case requiring explicit guidance-mode language to preserve Mentor mode and the ColBERT topic.",
+    "trace_ids": [
+      "01a00cec-ffc7-7800-bcfc-5d4a6b5fcb10"
+    ],
+    "input": {
+      "user_message": "Explain it in a guidance mode please",
+      "message_history": [
+        {
+          "role": "user",
+          "content": "And what about ColBERT?"
+        },
+        {
+          "role": "assistant",
+          "content": "We discussed ColBERT late interaction and MaxSim."
+        },
+        {
+          "role": "user",
+          "content": "Please quiz me on the topics we discussed above"
+        },
+        {
+          "role": "assistant",
+          "content": "Why can ColBERT pre-compute document token representations?"
+        }
+      ],
+      "session_summary": "A Mentor quiz about ColBERT and MaxSim is active."
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "mentor"
+        ]
+      ],
+      "required_agents": [
+        "mentor"
+      ],
+      "forbidden_agents": [
+        "retriever",
+        "researcher",
+        "analyst",
+        "visualizer"
+      ],
+      "forbidden_tools": [
+        "search_knowledge_base",
+        "get_subgraphs_to_visualize",
+        "deep_web_research"
+      ],
+      "request_scope": "in_scope",
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "invalid_retriever_output",
+        "model_output_truncated",
+        "workflow_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 1,
+        "max_logical_llm_calls": 2,
+        "max_provider_attempts": 2,
+        "max_retries": 1,
+        "max_tavily_searches": 0,
+        "max_total_tokens": 7000,
+        "max_latency_seconds": 90
+      },
+      "judge_dimensions": [
+        "mentor_pedagogy",
+        "conversational_continuity"
+      ]
+    },
+    "provenance": [
+      "recorded_failure",
+      "docs/issues.md#explain-it-in-guidance-mode"
+    ],
+    "notes": "Known trace searches for presentation language and should fail routing, tools, and budgets."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "out_of_scope_biological_cats",
+    "version": 1,
+    "review_status": "reviewed",
+    "description": "Live positive control for rejecting a clearly unrelated request before retrieval or web research.",
+    "trace_ids": [],
+    "input": {
+      "user_message": "Please tell me about biological cats",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        []
+      ],
+      "forbidden_agents": [
+        "retriever",
+        "researcher",
+        "analyst",
+        "mentor",
+        "visualizer"
+      ],
+      "forbidden_tools": [
+        "search_knowledge_base",
+        "get_subgraphs_to_visualize",
+        "deep_web_research"
+      ],
+      "request_scope": "out_of_scope",
+      "sources_exhausted": false,
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "workflow_error",
+        "structured_output_parse_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 0,
+        "max_logical_llm_calls": 1,
+        "max_provider_attempts": 1,
+        "max_retries": 1,
+        "max_tavily_searches": 0,
+        "max_total_tokens": 3000,
+        "max_latency_seconds": 60
+      },
+      "judge_dimensions": []
+    },
+    "provenance": [
+      "positive_control",
+      "manual_request"
+    ],
+    "notes": "No matching exported trace exists; intended as the first conservative live validation case."
+  },
+  {
+    "schema_version": "runtime-evaluation",
+    "id": "in_scope_retnet_local_miss_fallback",
+    "version": 2,
+    "review_status": "reviewed",
+    "description": "An in-domain named topic must not be answered from adjacent local evidence; a true local support gap should escalate to qualified web research.",
+    "trace_ids": [],
+    "input": {
+      "user_message": "Please tell me more about RetNet",
+      "message_history": [],
+      "session_summary": ""
+    },
+    "expectations": {
+      "allowed_worker_sequences": [
+        [
+          "retriever",
+          "researcher",
+          "analyst"
+        ]
+      ],
+      "required_agents": [
+        "retriever",
+        "researcher",
+        "analyst"
+      ],
+      "required_tools": [
+        "search_knowledge_base",
+        "deep_web_research"
+      ],
+      "forbidden_tools": [
+        "get_subgraphs_to_visualize"
+      ],
+      "tool_arguments": [
+        {
+          "tool": "search_knowledge_base",
+          "argument": "queries",
+          "required_terms_all": [
+            "RetNet"
+          ]
+        },
+        {
+          "tool": "search_knowledge_base",
+          "argument": "required_topics",
+          "required_terms_all": [
+            "RetNet"
+          ]
+        },
+        {
+          "tool": "deep_web_research",
+          "argument": "topic",
+          "required_terms_all": [
+            "RetNet"
+          ],
+          "required_terms_any": [
+            "Retentive Network",
+            "AI",
+            "machine learning"
+          ],
+          "forbidden_terms": [
+            "ResNet"
+          ]
+        }
+      ],
+      "request_scope": "in_scope",
+      "allowed_retrieval_statuses": [
+        "no_results",
+        "below_threshold",
+        "topic_mismatch"
+      ],
+      "sources_exhausted": false,
+      "requested_modality": "text",
+      "final_response_required": true,
+      "forbidden_failure_types": [
+        "invalid_retriever_output",
+        "retriever_no_tool_call",
+        "provider_error",
+        "structured_output_parse_error"
+      ],
+      "budgets": {
+        "max_worker_steps": 3,
+        "max_logical_llm_calls": 6,
+        "max_provider_attempts": 7,
+        "max_retries": 1,
+        "max_tavily_searches": 1,
+        "max_total_tokens": 30000,
+        "max_latency_seconds": 300
+      },
+      "judge_dimensions": [
+        "claim_faithfulness",
+        "analyst_usefulness"
+      ]
+    },
+    "provenance": [
+      "manual_user_report",
+      "screenshot_2026-08-17"
+    ],
+    "notes": "Live-only known regression. Adjacent ResNet/CNN evidence must not satisfy the named RetNet requirement. Do not run without Tavily approval."
+  }
+]

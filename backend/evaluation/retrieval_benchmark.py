@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "retrieval-benchmark-v0"
+SCHEMA_VERSION = "retrieval-benchmark-v1"
 
 
 class BenchmarkValidationError(ValueError):
@@ -220,6 +221,63 @@ class Thresholds:
 
 
 @dataclass
+class ContextRelevanceReview:
+    review_status: str = "needs_review"
+    storage_snapshot: str | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+    answer_point_evidence: dict[str, list[str]] = field(default_factory=dict)
+
+    @classmethod
+    def from_raw(cls, value: Any) -> ContextRelevanceReview:
+        if value is None:
+            return cls()
+        if not isinstance(value, dict):
+            raise BenchmarkValidationError("context_relevance must be an object")
+        _reject_unknown_keys(
+            value,
+            {"review_status", "storage_snapshot", "labels", "answer_point_evidence"},
+            "context_relevance",
+        )
+        labels = value.get("labels") or {}
+        mappings = value.get("answer_point_evidence") or {}
+        if not isinstance(labels, dict) or not isinstance(mappings, dict):
+            raise BenchmarkValidationError(
+                "context_relevance labels and mappings must be objects"
+            )
+        allowed_labels = {"relevant", "partially_relevant", "irrelevant"}
+        normalized_labels = {}
+        for evidence_id, label in labels.items():
+            if not isinstance(evidence_id, str) or label not in allowed_labels:
+                raise BenchmarkValidationError(
+                    "context relevance labels must map evidence IDs to "
+                    "relevant, partially_relevant, or irrelevant"
+                )
+            normalized_labels[evidence_id] = label
+        normalized_mappings = {}
+        for answer_point, evidence_ids in mappings.items():
+            if not isinstance(answer_point, str):
+                raise BenchmarkValidationError(
+                    "answer-point mapping keys must be strings"
+                )
+            normalized_mappings[answer_point] = _string_list(evidence_ids)
+        review_status = str(value.get("review_status") or "needs_review")
+        if review_status not in {"needs_review", "reviewed"}:
+            raise BenchmarkValidationError(
+                "context_relevance.review_status must be needs_review or reviewed"
+            )
+        if review_status == "reviewed" and not value.get("storage_snapshot"):
+            raise BenchmarkValidationError(
+                "reviewed context relevance requires storage_snapshot"
+            )
+        return cls(
+            review_status=review_status,
+            storage_snapshot=_string_or_none(value.get("storage_snapshot")),
+            labels=normalized_labels,
+            answer_point_evidence=normalized_mappings,
+        )
+
+
+@dataclass
 class BenchmarkCase:
     schema_version: str
     id: str
@@ -232,6 +290,9 @@ class BenchmarkCase:
     forbidden_evidence: ForbiddenEvidence = field(default_factory=ForbiddenEvidence)
     thresholds: Thresholds = field(default_factory=Thresholds)
     review_notes: str | None = None
+    context_relevance: ContextRelevanceReview = field(
+        default_factory=ContextRelevanceReview
+    )
 
     @classmethod
     def from_raw(cls, value: Any) -> BenchmarkCase:
@@ -251,6 +312,7 @@ class BenchmarkCase:
                 "forbidden_evidence",
                 "thresholds",
                 "review_notes",
+                "context_relevance",
             },
             "benchmark case",
         )
@@ -279,6 +341,9 @@ class BenchmarkCase:
             ),
             thresholds=Thresholds.from_raw(value.get("thresholds")),
             review_notes=_string_or_none(value.get("review_notes")),
+            context_relevance=ContextRelevanceReview.from_raw(
+                value.get("context_relevance")
+            ),
         )
 
 
@@ -300,6 +365,8 @@ class RelationEvidence:
 class ActualEvidence:
     source_chunk_ids_ranked: list[str] = field(default_factory=list)
     source_paths: list[str] = field(default_factory=list)
+    source_paths_by_id: dict[str, list[str]] = field(default_factory=dict)
+    source_excerpts: dict[str, str] = field(default_factory=dict)
     concept_ids: list[str] = field(default_factory=list)
     concept_labels: list[str] = field(default_factory=list)
     relation_ids: list[str] = field(default_factory=list)
@@ -658,6 +725,9 @@ def score_case(
         actual.graph_metrics, "dangling_edge_count"
     )
     scores["chunk_node_count"] = _chunk_node_count(actual)
+    context_scores = _score_context_relevance(case, actual)
+    scores.update(context_scores["scores"])
+    diagnostics.update(context_scores["diagnostics"])
 
     if actual.retrieval_error:
         failures.append(f"retrieval failed: {actual.retrieval_error}")
@@ -703,6 +773,8 @@ def actual_evidence_from_analyst_result(
     catalog = catalog or EvidenceCatalog()
     source_ids: list[str] = []
     source_paths: list[str] = []
+    source_paths_by_id: dict[str, list[str]] = {}
+    source_excerpts: dict[str, str] = {}
     concept_ids: list[str] = []
     concept_labels: list[str] = []
     relations: list[RelationEvidence] = []
@@ -714,8 +786,14 @@ def actual_evidence_from_analyst_result(
         ) or _string_or_none(getattr(source, "node_id", None))
         if source_id:
             source_ids.append(source_id)
+            source_text = str(getattr(source, "text", "") or "")
+            if source_text:
+                source_excerpts[source_id] = _bounded_excerpt(source_text)
         metadata = getattr(source, "metadata", None)
-        source_paths.extend(_metadata_paths(metadata))
+        paths = _metadata_paths(metadata)
+        source_paths.extend(paths)
+        if source_id and paths:
+            source_paths_by_id[source_id] = paths
         for concept in getattr(source, "mentioned_concepts", []) or []:
             concept_id = _node_id(concept)
             label = _node_label(concept)
@@ -753,6 +831,8 @@ def actual_evidence_from_analyst_result(
     return ActualEvidence(
         source_chunk_ids_ranked=_ordered_unique(source_ids),
         source_paths=_ordered_unique(source_paths),
+        source_paths_by_id=source_paths_by_id,
+        source_excerpts=source_excerpts,
         concept_ids=_ordered_unique(concept_ids),
         concept_labels=_ordered_unique(concept_labels),
         relation_ids=_ordered_unique(relation_ids),
@@ -769,6 +849,8 @@ def actual_evidence_from_legacy_results(
     catalog = catalog or EvidenceCatalog()
     source_ids: list[str] = []
     source_paths: list[str] = []
+    source_paths_by_id: dict[str, list[str]] = {}
+    source_excerpts: dict[str, str] = {}
     concept_ids: list[str] = []
     concept_labels: list[str] = []
     relation_ids: list[str] = []
@@ -781,6 +863,8 @@ def actual_evidence_from_legacy_results(
                 source_id = item.metadata.chunk_id or item.metadata.node_id
                 if source_id and source_id.startswith("chunk_"):
                     source_ids.append(source_id)
+                    source_excerpts[source_id] = _bounded_excerpt(item.text)
+                    source_paths_by_id[source_id] = list(item.source_paths)
                 continue
             if not isinstance(item, runtime_evidence.RelationEvidence):
                 continue
@@ -825,11 +909,43 @@ def actual_evidence_from_legacy_results(
     return ActualEvidence(
         source_chunk_ids_ranked=_ordered_unique(source_ids),
         source_paths=_ordered_unique(source_paths),
+        source_paths_by_id=source_paths_by_id,
+        source_excerpts=source_excerpts,
         concept_ids=_ordered_unique(concept_ids),
         concept_labels=_ordered_unique(concept_labels),
         relation_ids=_ordered_unique(relation_ids),
         relations=relations,
     )
+
+
+def enrich_source_observations(
+    actual: ActualEvidence,
+    source_node_lookup: Callable[[str], Any | None],
+) -> ActualEvidence:
+    """Adds bounded source text and paths for already-returned chunk IDs.
+
+    Legacy retrieval can expose a source only through a relation's grounding
+    chunk IDs. The benchmark resolves those IDs against the same loaded
+    docstore during the run so its review artifact remains self-contained.
+    """
+    for source_id in actual.source_chunk_ids_ranked:
+        if (
+            source_id in actual.source_excerpts
+            and source_id in actual.source_paths_by_id
+        ):
+            continue
+        node = source_node_lookup(source_id)
+        if node is None:
+            continue
+        text = _source_node_text(node)
+        if text and source_id not in actual.source_excerpts:
+            actual.source_excerpts[source_id] = _bounded_excerpt(text)
+        paths = _metadata_paths(getattr(node, "metadata", None) or {})
+        if paths and source_id not in actual.source_paths_by_id:
+            actual.source_paths_by_id[source_id] = paths
+            actual.source_paths.extend(paths)
+    actual.source_paths = _ordered_unique(actual.source_paths)
+    return actual
 
 
 def actual_evidence_from_visualizer_result(
@@ -898,13 +1014,210 @@ def render_markdown_summary(summary: dict[str, Any], results: list[CaseResult]) 
     failed = [result for result in results if not result.passed]
     if failed:
         lines.extend(["", "## Failed Cases"])
-        for result in failed:
-            lines.append(f"- `{result.case_id}`: " + "; ".join(result.failures))
+        lines.extend(
+            f"- `{result.case_id}`: " + "; ".join(result.failures) for result in failed
+        )
     lines.extend(["", "## Mean Scores"])
     for metric, value in summary.get("mean_scores", {}).items():
         lines.append(f"- `{metric}`: {value:.3f}")
     lines.append("")
     return "\n".join(lines)
+
+
+def _score_context_relevance(
+    case: BenchmarkCase, actual: ActualEvidence
+) -> dict[str, dict[str, Any]]:
+    review = case.context_relevance
+    scores: dict[str, float | None] = {
+        "context_precision_at_10": None,
+        "context_recall": None,
+    }
+    diagnostics: dict[str, Any] = {
+        "context_relevance_review_status": review.review_status,
+        "context_relevance_storage_snapshot": review.storage_snapshot,
+    }
+    if case.mode != "analyst" or review.review_status != "reviewed":
+        return {"scores": scores, "diagnostics": diagnostics}
+    top_ten = actual.source_chunk_ids_ranked[:10]
+    missing_labels = [item for item in top_ten if item not in review.labels]
+    if missing_labels:
+        diagnostics["context_relevance_missing_labels"] = missing_labels
+        return {"scores": scores, "diagnostics": diagnostics}
+    weights = {
+        "relevant": 1.0,
+        "partially_relevant": 0.5,
+        "irrelevant": 0.0,
+    }
+    scores["context_precision_at_10"] = (
+        sum(weights[review.labels[item]] for item in top_ten) / 10
+    )
+    answer_points = case.expected_evidence.required_answer_points
+    if answer_points:
+        returned = set(top_ten)
+        supported = sum(
+            bool(returned.intersection(review.answer_point_evidence.get(point, [])))
+            for point in answer_points
+        )
+        scores["context_recall"] = supported / len(answer_points)
+    diagnostics["context_relevance_labeled_items"] = len(top_ten)
+    return {"scores": scores, "diagnostics": diagnostics}
+
+
+def render_context_relevance_review(
+    cases: list[BenchmarkCase],
+    results: list[CaseResult],
+    *,
+    observed_storage_snapshot: str | None = None,
+    source_node_lookup: Callable[[str], Any | None] | None = None,
+) -> str:
+    """Renders observed and pre-annotated Analyst evidence for human review."""
+    case_by_id = {case.id: case for case in cases}
+    lines = [
+        "# Context Relevance Review",
+        "",
+        "This view is generated from retrieval output. Record approved labels in the",
+        "machine-readable benchmark JSONL; this Markdown is never executable truth.",
+        "Prefilled labels and answer-point mappings remain proposals while a case is",
+        "marked `needs_review`.",
+    ]
+    for result in results:
+        case = case_by_id.get(result.case_id)
+        if case is None or case.mode != "analyst":
+            continue
+        evidence = result.actual_evidence
+        ranked = list(evidence.get("source_chunk_ids_ranked", []))[:10]
+        excerpts = evidence.get("source_excerpts", {})
+        paths_by_id = evidence.get("source_paths_by_id", {})
+        remaining_excerpt_chars = 10_000
+        answer_point_refs = {
+            point: f"AP{index}"
+            for index, point in enumerate(
+                case.expected_evidence.required_answer_points, start=1
+            )
+        }
+
+        def answer_refs(
+            evidence_id: str,
+            point_refs: dict[str, str] = answer_point_refs,
+            mappings: dict[str, list[str]] = (
+                case.context_relevance.answer_point_evidence
+            ),
+        ) -> str:
+            return ", ".join(
+                point_refs[point]
+                for point, evidence_ids in mappings.items()
+                if point in point_refs and evidence_id in evidence_ids
+            )
+
+        def bounded_details(
+            evidence_id: str,
+            observed_excerpts: dict[str, str] = excerpts,
+            observed_paths_by_id: dict[str, list[str]] = paths_by_id,
+        ) -> tuple[str, str]:
+            nonlocal remaining_excerpt_chars
+            excerpt = str(observed_excerpts.get(evidence_id) or "")
+            observed_paths = observed_paths_by_id.get(evidence_id) or []
+            if (not excerpt or not observed_paths) and source_node_lookup is not None:
+                node = source_node_lookup(evidence_id)
+                if node is not None:
+                    if not excerpt:
+                        excerpt = _bounded_excerpt(_source_node_text(node))
+                    if not observed_paths:
+                        observed_paths = _metadata_paths(
+                            getattr(node, "metadata", None) or {}
+                        )
+            excerpt = (excerpt or "excerpt unavailable")[:remaining_excerpt_chars]
+            remaining_excerpt_chars -= len(excerpt)
+            if not excerpt:
+                excerpt = "excerpt omitted: total bound reached"
+            source_path = (
+                "; ".join(str(path) for path in observed_paths)
+                if isinstance(observed_paths, list | tuple | set)
+                else str(observed_paths)
+            )
+            source_path = source_path or "unavailable"
+            return (
+                source_path.replace("|", "\\|").replace("\n", " "),
+                excerpt.replace("|", "\\|").replace("\n", " "),
+            )
+
+        lines.extend(
+            [
+                "",
+                f"## {case.id}",
+                "",
+                f"- Queries: {', '.join(case.queries)}",
+                f"- Annotation status: {case.context_relevance.review_status}",
+                "- Storage snapshot: "
+                + (
+                    case.context_relevance.storage_snapshot
+                    or observed_storage_snapshot
+                    or "needs review"
+                ),
+                "",
+                "| Rank | Evidence ID | Source path | Bounded excerpt | Proposed label | Answer points |",
+                "| ---: | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for rank, evidence_id in enumerate(ranked, start=1):
+            source_path, excerpt = bounded_details(evidence_id)
+            lines.append(
+                f"| {rank} | `{evidence_id}` | {source_path} | {excerpt} | "
+                f"{case.context_relevance.labels.get(evidence_id, '')} | "
+                f"{answer_refs(evidence_id)} |"
+            )
+        if not ranked:
+            lines.append("| — | — | — | no source evidence returned |  |  |")
+
+        annotated_ids = _ordered_unique(
+            [
+                *case.context_relevance.labels,
+                *(
+                    evidence_id
+                    for evidence_ids in (
+                        case.context_relevance.answer_point_evidence.values()
+                    )
+                    for evidence_id in evidence_ids
+                ),
+            ]
+        )
+        additional_ids = [item for item in annotated_ids if item not in ranked]
+        if additional_ids:
+            lines.extend(
+                [
+                    "",
+                    "Additional annotated evidence not returned in this run:",
+                    "",
+                    "| Evidence ID | Source path | Bounded excerpt | Proposed label | Answer points |",
+                    "| --- | --- | --- | --- | --- |",
+                ]
+            )
+            for evidence_id in additional_ids:
+                source_path, excerpt = bounded_details(evidence_id)
+                lines.append(
+                    f"| `{evidence_id}` | {source_path} | {excerpt} | "
+                    f"{case.context_relevance.labels.get(evidence_id, '')} | "
+                    f"{answer_refs(evidence_id)} |"
+                )
+            lines.extend(
+                [
+                    "",
+                    "These items define reviewed candidate support but do not receive "
+                    "retrieval credit unless a scored run actually returns them.",
+                ]
+            )
+
+        lines.extend(["", "Required answer points:"])
+        lines.extend(
+            f"- {answer_point_refs[point]}: {point}"
+            for point in case.expected_evidence.required_answer_points
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _bounded_excerpt(text: str, limit: int = 1200) -> str:
+    return re.sub(r"\s+", " ", str(text)).strip()[:limit]
 
 
 def _eval_string_spec(
@@ -1153,6 +1466,9 @@ def _collect_benchmark_references(cases: list[BenchmarkCase]) -> dict[str, list[
         forbidden = case.forbidden_evidence
         source_chunk_ids.extend(expected.source_chunk_ids.expected)
         source_chunk_ids.extend(forbidden.source_chunk_ids)
+        source_chunk_ids.extend(case.context_relevance.labels)
+        for evidence_ids in case.context_relevance.answer_point_evidence.values():
+            source_chunk_ids.extend(evidence_ids)
         concept_ids.extend(expected.concept_ids.expected)
         concept_ids.extend(forbidden.concept_ids)
         relation_ids.extend(expected.relation_ids.expected)
@@ -1230,7 +1546,11 @@ def _int_metric(metrics: dict[str, Any], name: str) -> int:
 def _metadata_paths(metadata: Any) -> list[str]:
     paths: list[list[str]] = []
     for attr_name in ("heading_path", "path"):
-        value = getattr(metadata, attr_name, None)
+        value = (
+            metadata.get(attr_name)
+            if isinstance(metadata, dict)
+            else getattr(metadata, attr_name, None)
+        )
         if value:
             paths.append(_string_list(value))
     rendered = []
@@ -1243,6 +1563,19 @@ def _metadata_paths(metadata: Any) -> list[str]:
         if cleaned:
             rendered.append(" > ".join(cleaned))
     return _ordered_unique(rendered)
+
+
+def _source_node_text(node: Any) -> str:
+    text = getattr(node, "text", None)
+    if text is not None:
+        return str(text)
+    get_content = getattr(node, "get_content", None)
+    if not callable(get_content):
+        return ""
+    try:
+        return str(get_content())
+    except (TypeError, ValueError):
+        return ""
 
 
 def _node_id(node: Any) -> str | None:

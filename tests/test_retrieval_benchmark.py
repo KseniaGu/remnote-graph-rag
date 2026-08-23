@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from backend.evaluation.retrieval_benchmark import (
     ActualEvidence,
@@ -10,7 +11,9 @@ from backend.evaluation.retrieval_benchmark import (
     RelationCatalogEntry,
     RelationEvidence,
     actual_evidence_from_legacy_results,
+    enrich_source_observations,
     load_benchmark_cases,
+    render_context_relevance_review,
     score_case,
     summarize_results,
     validate_benchmark_references,
@@ -26,7 +29,7 @@ from backend.workflows.agents.retrieval_evidence import (
 
 def make_case_payload(**overrides):
     payload = {
-        "schema_version": "retrieval-benchmark-v0",
+        "schema_version": "retrieval-benchmark-v1",
         "id": "case_1",
         "review_status": "candidate_needs_review",
         "mode": "analyst",
@@ -197,6 +200,42 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual(["rel_uses"], actual.relation_ids)
         self.assertEqual("concept_clip", actual.relations[0].subject_id)
 
+    def test_legacy_relation_chunk_ids_are_enriched_from_loaded_docstore(self) -> None:
+        runtime_relation = RuntimeRelationEvidence(
+            rank=1,
+            subject="CLIP",
+            predicate="USES",
+            object="Contrastive Objective",
+            raw_relation="CLIP -> USES -> Contrastive Objective",
+            metadata=NormalizedMetadata(),
+            evidence_chunk_ids=["chunk_grounding"],
+        )
+        actual = actual_evidence_from_legacy_results(
+            [QueryEvidenceResult(query="CLIP", items=[runtime_relation])]
+        )
+        source_node = SimpleNamespace(
+            text="CLIP trains matching image and text representations.",
+            metadata={
+                "path": ["CLIP", "## Training objective"],
+                "heading_path": ["CLIP", "## Training objective"],
+            },
+        )
+
+        enriched = enrich_source_observations(
+            actual,
+            lambda source_id: source_node if source_id == "chunk_grounding" else None,
+        )
+
+        self.assertEqual(
+            "CLIP trains matching image and text representations.",
+            enriched.source_excerpts["chunk_grounding"],
+        )
+        self.assertEqual(
+            ["CLIP > Training objective"],
+            enriched.source_paths_by_id["chunk_grounding"],
+        )
+        self.assertEqual(["CLIP > Training objective"], enriched.source_paths)
+
     def test_visualizer_shape_thresholds_count_chunk_nodes_and_dangling_edges(
         self,
     ) -> None:
@@ -221,6 +260,167 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertEqual(1, result.scores["chunk_node_count"])
         self.assertEqual(1, result.scores["dangling_edge_count"])
+
+    def test_reviewed_context_precision_and_recall_are_deterministic(self) -> None:
+        case = load_case(
+            make_case_payload(
+                expected_evidence={
+                    "required_answer_points": ["point one", "point two"],
+                },
+                thresholds={},
+                context_relevance={
+                    "review_status": "reviewed",
+                    "storage_snapshot": "fixture-storage-v1",
+                    "labels": {
+                        "chunk_a": "relevant",
+                        "chunk_b": "partially_relevant",
+                    },
+                    "answer_point_evidence": {
+                        "point one": ["chunk_a"],
+                        "point two": ["chunk_missing"],
+                    },
+                },
+            )
+        )
+        actual = ActualEvidence(
+            source_chunk_ids_ranked=["chunk_a", "chunk_b"],
+            source_paths_by_id={"chunk_a": ["Notes > Mamba"]},
+            source_excerpts={"chunk_a": "Useful evidence."},
+        )
+
+        result = score_case(case, actual)
+
+        self.assertEqual(0.15, result.scores["context_precision_at_10"])
+        self.assertEqual(0.5, result.scores["context_recall"])
+        review = render_context_relevance_review([case], [result])
+        self.assertIn("chunk_a", review)
+        self.assertIn("Notes > Mamba", review)
+        self.assertNotIn("['Notes > Mamba']", review)
+        self.assertIn("Useful evidence.", review)
+        self.assertIn("| relevant | AP1 |", review)
+
+    def test_relevance_review_renders_additional_annotated_evidence(self) -> None:
+        case = load_case(
+            make_case_payload(
+                expected_evidence={"required_answer_points": ["point one"]},
+                thresholds={},
+                context_relevance={
+                    "review_status": "needs_review",
+                    "storage_snapshot": "fixture-storage-v1",
+                    "labels": {
+                        "chunk_returned": "partially_relevant",
+                        "chunk_additional": "relevant",
+                    },
+                    "answer_point_evidence": {
+                        "point one": ["chunk_additional"],
+                    },
+                },
+            )
+        )
+        result = score_case(
+            case,
+            ActualEvidence(source_chunk_ids_ranked=["chunk_returned"]),
+        )
+
+        review = render_context_relevance_review(
+            [case],
+            [result],
+            source_node_lookup=lambda evidence_id: (
+                SimpleNamespace(
+                    text="Additional evidence text.",
+                    metadata={"path": ["Notes", evidence_id]},
+                )
+                if evidence_id == "chunk_additional"
+                else None
+            ),
+        )
+
+        self.assertIn("Additional annotated evidence not returned", review)
+        self.assertIn("chunk_additional", review)
+        self.assertIn("Notes > chunk_additional", review)
+        self.assertIn("Additional evidence text.", review)
+        self.assertIn("| relevant | AP1 |", review)
+        self.assertIn("do not receive retrieval credit", review)
+
+    def test_relevance_review_enforces_total_excerpt_bound(self) -> None:
+        case = load_case(
+            make_case_payload(
+                expected_evidence={"required_answer_points": []}, thresholds={}
+            )
+        )
+        ids = [f"chunk_{index}" for index in range(10)]
+        result = score_case(
+            case,
+            ActualEvidence(
+                source_chunk_ids_ranked=ids,
+                source_excerpts=dict.fromkeys(ids, "~" * 1_200),
+            ),
+        )
+
+        review = render_context_relevance_review([case], [result])
+
+        self.assertEqual(10_000, review.count("~"))
+        self.assertIn("excerpt omitted: total bound reached", review)
+
+    def test_relevance_review_records_observed_storage_snapshot(self) -> None:
+        case = load_case(
+            make_case_payload(
+                expected_evidence={"required_answer_points": []}, thresholds={}
+            )
+        )
+        result = score_case(case, ActualEvidence())
+
+        review = render_context_relevance_review(
+            [case],
+            [result],
+            observed_storage_snapshot="manifest.json@sha256:fixture",
+        )
+
+        self.assertIn(
+            "Storage snapshot: manifest.json@sha256:fixture",
+            review,
+        )
+
+    def test_context_metrics_are_na_until_labels_are_reviewed(self) -> None:
+        case = load_case(
+            make_case_payload(
+                expected_evidence={"required_answer_points": ["point"]},
+                thresholds={},
+            )
+        )
+
+        result = score_case(
+            case,
+            ActualEvidence(source_chunk_ids_ranked=["chunk_a"]),
+        )
+
+        self.assertIsNone(result.scores["context_precision_at_10"])
+        self.assertIsNone(result.scores["context_recall"])
+
+    def test_reviewed_context_requires_labels_for_every_observed_item(self) -> None:
+        case = load_case(
+            make_case_payload(
+                expected_evidence={"required_answer_points": []},
+                thresholds={},
+                context_relevance={
+                    "review_status": "reviewed",
+                    "storage_snapshot": "fixture-storage-v1",
+                    "labels": {},
+                    "answer_point_evidence": {},
+                },
+            )
+        )
+
+        result = score_case(
+            case,
+            ActualEvidence(source_chunk_ids_ranked=["unreviewed_chunk"]),
+        )
+
+        self.assertIsNone(result.scores["context_precision_at_10"])
+        self.assertEqual(
+            ["unreviewed_chunk"],
+            result.diagnostics["context_relevance_missing_labels"],
+        )
 
     def test_summary_counts_failed_cases(self) -> None:
         passing_case = load_case(
@@ -317,6 +517,35 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             "rel_ok", report.relation_ids_missing_graph_triplet[0]["relation_id"]
         )
+
+    def test_reference_validation_includes_context_annotation_sources(self) -> None:
+        case = load_case(
+            make_case_payload(
+                expected_evidence={"required_answer_points": ["point"]},
+                thresholds={},
+                context_relevance={
+                    "review_status": "needs_review",
+                    "storage_snapshot": "fixture-storage-v1",
+                    "labels": {
+                        "chunk_known": "relevant",
+                        "chunk_missing": "relevant",
+                    },
+                    "answer_point_evidence": {
+                        "point": ["chunk_missing"],
+                    },
+                },
+            )
+        )
+
+        report = validate_benchmark_references(
+            [case],
+            EvidenceCatalog(),
+            source_metadata_by_id={"chunk_known": {}},
+            embedded_source_ids={"chunk_known"},
+        )
+
+        self.assertEqual(["chunk_missing"], report.missing_source_chunk_ids)
+        self.assertEqual(["chunk_missing"], report.source_chunk_ids_not_embedded)
 
     def test_reference_validation_allows_cleaned_keep_actions(self) -> None:
         case = load_case(

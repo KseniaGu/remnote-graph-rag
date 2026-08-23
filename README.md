@@ -172,10 +172,68 @@ configurations are also possible.
 
 ![Alt text](app/assets/mentor.png)
 
+## Evaluation
+
+The evaluation pipeline keeps retrieval and runtime executors separate, then combines
+their immutable run history into one per-application-fingerprint scorecard.
+
+```bash
+# Prepared-storage retrieval baseline
+uv run --locked python scripts/evaluate_retrieval_pipeline.py \
+  --mode both \
+  --analyst-variant legacy_vector_context \
+  --visualizer-variant optimized \
+  --analyst-reranker-mode disabled \
+  --no-render-html
+
+# Existing LangSmith export only; zero workflow/provider/Tavily/judge calls
+uv run --locked python scripts/evaluate_runtime_workflow.py offline
+
+# Rebuild consolidated scorecards without executing an evaluator
+uv run --locked python scripts/build_evaluation_report.py
+
+# Audit and publish one exact, complete fingerprint
+uv run --locked python scripts/build_evaluation_report.py \
+  --fingerprint "$EVAL_FINGERPRINT" \
+  --audit-completeness
+uv run --locked python scripts/build_evaluation_report.py \
+  --fingerprint "$EVAL_FINGERPRINT" \
+  --confirm-complete \
+  --publish
+```
+
+The evaluation pipeline writes immutable artifacts under `data/evaluation/runs`,
+per-fingerprint `scorecard.md`/`scorecard.json` plus `history.json`, and
+`latest.md`/`latest.json`. Sanitized reports intended for Git are published
+explicitly under `reports/evaluation`. The Markdown view groups nested metrics into
+compact subtables and collapses verbose provenance; the JSON view preserves the full
+machine-readable scorecard.
+
+Publication never silently chooses the newest incomplete fingerprint: select
+an exact fingerprint, confirm completeness, or explicitly use
+`--allow-incomplete`. Controlled-live, Tavily, and semantic-judge modes require
+explicit confirmation and remain optional. AgentEvals/OpenEvals are isolated in
+the optional `evaluation` dependency group. Semantic judges default to
+function-calling structured output. Claim faithfulness has a bounded
+4,096-token output contract; Boolean judges use 512. Unmet role/evidence
+prerequisites are skipped/N/A, while provider, parser, and schema failures
+remain errors. Results record privacy-safe transport, stop, output-size, parser,
+truncation, and call-attempt diagnostics. Graph usefulness requires
+labels captured in the source runtime run; use the verification sequence in the
+full-report runbook after evaluator changes rather than re-judging an older
+unlabeled graph record.
+
+See [`docs/runtime_evaluation.md`](docs/runtime_evaluation.md) for all commands,
+evaluator contracts, metric definitions, evidence bounds, aggregation rules,
+and safeguards. The
+reviewed runtime cases are in
+[`evals/runtime/scenarios_review.md`](evals/runtime/scenarios_review.md); the
+retrieval contract and its readable review are under `evals/retrieval/`.
+
 ## Future work
 
 - Consider adding more flexible graph traversal options, perhaps a dynamic one?
-- Testing! The main part of the project is missing
+- Expand the reviewed runtime scenarios when observed regressions justify new cases
 - Add a database to store user sessions, logs, and other data
 - Fix bugs
 - Improve interface

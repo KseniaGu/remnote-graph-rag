@@ -1,0 +1,2611 @@
+{
+  "report_schema_version": "graph-rag-evaluation",
+  "snapshot": "2026-08-22_f8d6f3b6f3e0",
+  "fingerprint": "f8d6f3b6f3e0348c75a194bf",
+  "scorecard_generated_at": "2026-08-23T20:14:33.266128+00:00",
+  "published_at": "2026-08-23T20:14:33.274372+00:00",
+  "contributing_run_count": 10,
+  "contributing_runs": [
+    {
+      "run_id": "20260822T011922Z_retrieval_887cc3ed",
+      "run_kind": "retrieval",
+      "status": "completed",
+      "created_at": "2026-08-22T01:19:50.094553+00:00",
+      "invocation_key": "cae1036d5d38cec654584965",
+      "invocation": {
+        "benchmark_file": "evals/retrieval/benchmark_cases.jsonl",
+        "mode": "both",
+        "case_ids": [],
+        "analyst_variant": "legacy_vector_context",
+        "visualizer_variant": "optimized",
+        "analyst_reranker_mode": "disabled"
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "storage_dir": "./storage",
+          "embedder_model_path": "./models/all-MiniLM-L6-v2",
+          "analyst_retrieval_mode": "legacy_vector_context",
+          "visualizer_retrieval_mode": "optimized",
+          "benchmark_schema_version": "retrieval-benchmark-v1"
+        }
+      },
+      "runtime_provider_attempts": null,
+      "runtime_tavily_attempts": null,
+      "judge_provider_calls": null,
+      "artifacts": [
+        "actual_evidence.jsonl",
+        "benchmark_reference_report.json",
+        "case_results.jsonl",
+        "manifest.json",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T012029Z_offline_479d922a",
+      "run_kind": "offline",
+      "status": "completed",
+      "created_at": "2026-08-22T01:20:29.632740+00:00",
+      "invocation_key": "ecd38811f3b1b8c43d858f33",
+      "invocation": {
+        "trace_export": "exports/langsmith_traces_20260816T233652Z.json",
+        "scenarios": "evals/runtime/scenarios.json",
+        "framework": "agentevals"
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "trace_source_configuration_status": [
+            "needs verification"
+          ],
+          "scenario_versions": {
+            "local_transformer_answer_success": 1,
+            "contextual_mamba_visualization": 1,
+            "explicit_mamba_visualization_success": 1,
+            "initial_attention_quiz_route": 1,
+            "mentor_stuck_continuation": 1,
+            "researcher_structured_output_truncation_reliability": 2,
+            "ambiguous_eagle_without_history": 2,
+            "contextual_medusa_web_query": 2,
+            "explicit_medusa_web_fallback_success": 1,
+            "transformer_encoder_graph_coverage": 1,
+            "colbert_guidance_mode_continuation": 1,
+            "out_of_scope_biological_cats": 1,
+            "in_scope_retnet_local_miss_fallback": 2
+          }
+        }
+      },
+      "runtime_provider_attempts": 0,
+      "runtime_tavily_attempts": 0,
+      "judge_provider_calls": 0,
+      "artifacts": [
+        "case_results.jsonl",
+        "framework_results.json",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T012106Z_live_cd556520",
+      "run_kind": "live",
+      "status": "completed",
+      "created_at": "2026-08-22T01:22:09.556944+00:00",
+      "invocation_key": "08b277cc6824c746eee9ff60",
+      "invocation": {
+        "case_ids": [
+          "local_transformer_answer_success",
+          "contextual_mamba_visualization",
+          "explicit_mamba_visualization_success"
+        ],
+        "repetitions": 1,
+        "framework": "none",
+        "allow_tavily": false
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "analyst_retrieval_mode": "legacy_vector_context",
+          "visualizer_retrieval_mode": "optimized",
+          "scenario_versions": {
+            "local_transformer_answer_success": 1,
+            "contextual_mamba_visualization": 1,
+            "explicit_mamba_visualization_success": 1
+          }
+        }
+      },
+      "runtime_provider_attempts": 7,
+      "runtime_tavily_attempts": 0,
+      "judge_provider_calls": 0,
+      "artifacts": [
+        "case_results.jsonl",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T012229Z_live_81ccde39",
+      "run_kind": "live",
+      "status": "completed",
+      "created_at": "2026-08-22T01:23:43.912378+00:00",
+      "invocation_key": "6d87ff8479206ac69c24caba",
+      "invocation": {
+        "case_ids": [
+          "initial_attention_quiz_route",
+          "mentor_stuck_continuation",
+          "transformer_encoder_graph_coverage"
+        ],
+        "repetitions": 1,
+        "framework": "none",
+        "allow_tavily": false
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "analyst_retrieval_mode": "legacy_vector_context",
+          "visualizer_retrieval_mode": "optimized",
+          "scenario_versions": {
+            "initial_attention_quiz_route": 1,
+            "mentor_stuck_continuation": 1,
+            "transformer_encoder_graph_coverage": 1
+          }
+        }
+      },
+      "runtime_provider_attempts": 7,
+      "runtime_tavily_attempts": 0,
+      "judge_provider_calls": 0,
+      "artifacts": [
+        "case_results.jsonl",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T012408Z_live_de469949",
+      "run_kind": "live",
+      "status": "completed",
+      "created_at": "2026-08-22T01:26:39.716503+00:00",
+      "invocation_key": "a121f1f640ff32d4e9abac41",
+      "invocation": {
+        "case_ids": [
+          "contextual_medusa_web_query",
+          "colbert_guidance_mode_continuation",
+          "out_of_scope_biological_cats"
+        ],
+        "repetitions": 1,
+        "framework": "none",
+        "allow_tavily": true
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "analyst_retrieval_mode": "legacy_vector_context",
+          "visualizer_retrieval_mode": "optimized",
+          "scenario_versions": {
+            "contextual_medusa_web_query": 2,
+            "colbert_guidance_mode_continuation": 1,
+            "out_of_scope_biological_cats": 1
+          }
+        }
+      },
+      "runtime_provider_attempts": 11,
+      "runtime_tavily_attempts": 2,
+      "judge_provider_calls": 0,
+      "artifacts": [
+        "case_results.jsonl",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T012733Z_live_b83709dd",
+      "run_kind": "live",
+      "status": "completed",
+      "created_at": "2026-08-22T01:30:01.352496+00:00",
+      "invocation_key": "c8cb43a441ff6c65b372a1d6",
+      "invocation": {
+        "case_ids": [
+          "ambiguous_eagle_without_history",
+          "explicit_medusa_web_fallback_success",
+          "in_scope_retnet_local_miss_fallback"
+        ],
+        "repetitions": 1,
+        "framework": "none",
+        "allow_tavily": true
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "analyst_retrieval_mode": "legacy_vector_context",
+          "visualizer_retrieval_mode": "optimized",
+          "scenario_versions": {
+            "ambiguous_eagle_without_history": 2,
+            "explicit_medusa_web_fallback_success": 1,
+            "in_scope_retnet_local_miss_fallback": 2
+          }
+        }
+      },
+      "runtime_provider_attempts": 14,
+      "runtime_tavily_attempts": 3,
+      "judge_provider_calls": 0,
+      "artifacts": [
+        "case_results.jsonl",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T013029Z_live_674c635e",
+      "run_kind": "live",
+      "status": "completed",
+      "created_at": "2026-08-22T01:33:58.268648+00:00",
+      "invocation_key": "0fc67c711de5589d692f7a02",
+      "invocation": {
+        "case_ids": [
+          "researcher_structured_output_truncation_reliability"
+        ],
+        "repetitions": 3,
+        "framework": "none",
+        "allow_tavily": true
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "analyst_retrieval_mode": "legacy_vector_context",
+          "visualizer_retrieval_mode": "optimized",
+          "scenario_versions": {
+            "researcher_structured_output_truncation_reliability": 2
+          }
+        }
+      },
+      "runtime_provider_attempts": 12,
+      "runtime_tavily_attempts": 3,
+      "judge_provider_calls": 0,
+      "artifacts": [
+        "case_results.jsonl",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T013434Z_judge_0e58731e",
+      "run_kind": "judge",
+      "status": "completed",
+      "created_at": "2026-08-22T01:34:52.962314+00:00",
+      "invocation_key": "ff92c9583aa01fbfbb998e71",
+      "invocation": {
+        "source_run": "20260822T012106Z_live_cd556520",
+        "records": "./data/evaluation/runs/20260822T012106Z_live_cd556520/runtime_records.jsonl",
+        "case_ids": [
+          "local_transformer_answer_success"
+        ],
+        "dimensions": [
+          "claim_faithfulness",
+          "analyst_usefulness"
+        ],
+        "repetition": 1,
+        "structured_output_method": "function_calling"
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "judge_provider": "ollama",
+          "judge_model": "qwen3.5:cloud",
+          "judge_temperature": 0,
+          "judge_output_token_limits": {
+            "claim_faithfulness": 4096,
+            "analyst_usefulness": 512
+          },
+          "judge_structured_output_method": "function_calling",
+          "judge_rubric_versions": {
+            "claim_faithfulness": "v1",
+            "analyst_usefulness": "v1"
+          }
+        }
+      },
+      "runtime_provider_attempts": 3,
+      "runtime_tavily_attempts": 0,
+      "judge_provider_calls": 2,
+      "artifacts": [
+        "case_results.jsonl",
+        "judge_results.jsonl",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T013523Z_judge_7017fb24",
+      "run_kind": "judge",
+      "status": "completed",
+      "created_at": "2026-08-22T01:35:23.711142+00:00",
+      "invocation_key": "f6cca7858455e21da35bbc8b",
+      "invocation": {
+        "source_run": "20260822T012229Z_live_81ccde39",
+        "records": "./data/evaluation/runs/20260822T012229Z_live_81ccde39/runtime_records.jsonl",
+        "case_ids": [
+          "mentor_stuck_continuation"
+        ],
+        "dimensions": [
+          "mentor_pedagogy",
+          "conversational_continuity"
+        ],
+        "repetition": 1,
+        "structured_output_method": "function_calling"
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "judge_provider": "ollama",
+          "judge_model": "qwen3.5:cloud",
+          "judge_temperature": 0,
+          "judge_output_token_limits": {
+            "mentor_pedagogy": 512,
+            "conversational_continuity": 512
+          },
+          "judge_structured_output_method": "function_calling",
+          "judge_rubric_versions": {
+            "mentor_pedagogy": "v1",
+            "conversational_continuity": "v1"
+          }
+        }
+      },
+      "runtime_provider_attempts": 3,
+      "runtime_tavily_attempts": 0,
+      "judge_provider_calls": 0,
+      "artifacts": [
+        "case_results.jsonl",
+        "judge_results.jsonl",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    },
+    {
+      "run_id": "20260822T013547Z_judge_1a421fad",
+      "run_kind": "judge",
+      "status": "completed",
+      "created_at": "2026-08-22T01:35:47.681830+00:00",
+      "invocation_key": "4b0c623c1b4ae17db555daa9",
+      "invocation": {
+        "source_run": "20260822T012106Z_live_cd556520",
+        "records": "./data/evaluation/runs/20260822T012106Z_live_cd556520/runtime_records.jsonl",
+        "case_ids": [
+          "explicit_mamba_visualization_success"
+        ],
+        "dimensions": [
+          "graph_usefulness"
+        ],
+        "repetition": 1,
+        "structured_output_method": "function_calling"
+      },
+      "configuration_snapshot": {
+        "fingerprint_input": {
+          "schema_version": "graph-rag-evaluation",
+          "file_hashes": {
+            "pyproject.toml": "0b45f28eabda71bb57e6714006d07e6672f9419267584e55c8ea421c86b7363d",
+            "uv.lock": "e9e83f2710f1e3e408578e476d49f2f5fc18173527268a177616aa0d11c9e4f5",
+            "evals/runtime/scenarios.json": "06e450d6dc46e860e3fe79e4babd89c841b19d54b7f118cb056a375ae12b7346",
+            "evals/retrieval/benchmark_cases.jsonl": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+            "scripts/evaluate_runtime_workflow.py": "546a7dc18c60493b59a1e8e3ded69bf4dde18622fad8fc98d254292e094f2429",
+            "scripts/evaluate_retrieval_pipeline.py": "17b30e20e0c59ed7b3bd5f0043fc1da9f965fb5c6b6c1684068393a8fc36d872",
+            "scripts/build_evaluation_report.py": "ac6d9fd7ff70c5b72c66bdfc24ae8d251aa343a58653a8af68f49acb24792639"
+          },
+          "tree_hashes": {
+            "backend": "35bd9661e72103e2f5f4fd192b68bc26ff43b4890fc7cc21003b87915be30fd5"
+          },
+          "prompt_tree_hash": "b045821715a3f40ce9bcf7fb3608b59162b98c307100a3bf9b8e4f54f8868ba8",
+          "storage_manifest_hashes": {
+            "storage/postprocessed_graph_storage_manifest.json": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7"
+          },
+          "application_configuration": {
+            "models": {
+              "embedder": {
+                "role": [
+                  1,
+                  false
+                ],
+                "model_path": "./models/all-MiniLM-L6-v2",
+                "device": null,
+                "embedding_dim": 384
+              },
+              "orchestrator": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  2,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": {
+                  "graph_index": "v2",
+                  "routing": "v5"
+                },
+                "tokenizer_model_name": "Qwen/Qwen3.5-9B"
+              },
+              "retriever": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  3,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.0,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "researcher": {
+                "with_tools": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "structured": {
+                  "model_name": "nemotron-3-super:cloud",
+                  "role": [
+                    4,
+                    true
+                  ],
+                  "provider": "ollama",
+                  "temperature": 0.0,
+                  "prompt_version": "v1",
+                  "tokenizer_model_name": null
+                },
+                "prompt_version": "v5"
+              },
+              "analyst": {
+                "model_name": "qwen3.5:cloud",
+                "role": [
+                  6,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.1,
+                "prompt_version": "v6",
+                "tokenizer_model_name": null
+              },
+              "mentor": {
+                "model_name": "nemotron-3-super:cloud",
+                "role": [
+                  5,
+                  true
+                ],
+                "provider": "ollama",
+                "temperature": 0.7,
+                "prompt_version": "v4",
+                "tokenizer_model_name": null
+              },
+              "reranker": {
+                "role": [
+                  8,
+                  false
+                ],
+                "model_path": "models/Qwen3-Reranker-0.6B",
+                "device": null,
+                "batch_size": 8,
+                "top_n": 12,
+                "local_files_only": true,
+                "trust_remote_code": true,
+                "choice_batch_size": 8,
+                "base_url": "http://localhost:11434",
+                "request_timeout": 60.0
+              }
+            },
+            "search": {
+              "analyst_retrieval_mode": "legacy_vector_context",
+              "visualizer_retrieval_mode": "optimized",
+              "retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": true,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 2,
+                  "include_properties": true
+                }
+              },
+              "visualizer_retriever_params": {
+                "VectorContextRetriever": {
+                  "include_text": false,
+                  "similarity_top_k": 5,
+                  "similarity_score": null,
+                  "path_depth": 4,
+                  "include_properties": false
+                }
+              },
+              "analyst_source_candidate_k": 30,
+              "analyst_source_final_k": 6,
+              "analyst_source_min_relative_score": 0.35,
+              "analyst_source_min_raw_margin": 4.0,
+              "analyst_source_min_keep": 3,
+              "analyst_source_max_per_path": 2,
+              "analyst_source_exact_topic_boost": 0.05,
+              "analyst_source_fill_min_score": 0.5,
+              "analyst_source_fill_min_relative_score": 0.45,
+              "analyst_relation_final_k": 5,
+              "analyst_relation_min_relative_score": 0.5,
+              "analyst_relation_min_raw_margin": 3.0,
+              "analyst_relation_seed_extra_k": 4,
+              "analyst_relation_seed_min_score": 0.5,
+              "analyst_context_max_chars": 7000,
+              "analyst_graph_depth": 1,
+              "analyst_graph_relation_limit": 30,
+              "analyst_reranker_mode": "sentence_transformers",
+              "analyst_source_rerank_candidate_k": 10,
+              "analyst_source_rerank_max_chars": 1200,
+              "analyst_relation_reranker_enabled": false,
+              "analyst_relation_rerank_candidate_k": 8,
+              "analyst_relation_rerank_max_chars": 1000,
+              "analyst_relation_require_source_evidence": true,
+              "visualizer_anchor_top_k": 3,
+              "visualizer_anchor_min_score": 0.5,
+              "visualizer_source_candidate_k": 20,
+              "visualizer_concept_candidate_k": 25,
+              "visualizer_max_nodes": 25,
+              "visualizer_max_edges": 35,
+              "visualizer_min_nodes": 3,
+              "visualizer_max_edges_per_node": 6,
+              "visualizer_graph_depth": 2,
+              "visualizer_allow_synthetic_edges": true,
+              "visualizer_synthetic_edge_limit": 6,
+              "visualizer_anchor_source_filter": true,
+              "visualizer_include_isolated_nodes": false,
+              "visualizer_synthetic_edge_label": "RELATED_TO",
+              "visualizer_show_chunks": false,
+              "visualizer_denied_relation_labels": [
+                "MENTIONS",
+                "PARENT",
+                "CHILD"
+              ]
+            },
+            "storage": {
+              "document_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "index_storage": {
+                "storage_type": "redis",
+                "host": "grand-cougar-38475.upstash.io",
+                "port": 6379,
+                "password": "[REDACTED]",
+                "init_from_local": false,
+                "overwrite_index": false
+              },
+              "vector_storage": {
+                "storage_type": "pinecone",
+                "api_key": "[REDACTED]",
+                "environment": "us-east-1-aws",
+                "index_name": "remnote-graph-rag",
+                "init_from_local": false
+              },
+              "property_graph_storage": {
+                "storage_type": "local",
+                "storage_path": "./storage"
+              },
+              "checkpoint_storage": {
+                "storage_type": "mongodb",
+                "uri": "**********",
+                "db_name": "langgraph_checkpoints"
+              }
+            }
+          }
+        },
+        "repository_state": {
+          "revision": "3cbef51",
+          "reported_source_revision": null
+        },
+        "executor_configuration": {
+          "judge_provider": "ollama",
+          "judge_model": "qwen3.5:cloud",
+          "judge_temperature": 0,
+          "judge_output_token_limits": {
+            "graph_usefulness": 512
+          },
+          "judge_structured_output_method": "function_calling",
+          "judge_rubric_versions": {
+            "graph_usefulness": "v1"
+          }
+        }
+      },
+      "runtime_provider_attempts": 2,
+      "runtime_tavily_attempts": 0,
+      "judge_provider_calls": 1,
+      "artifacts": [
+        "case_results.jsonl",
+        "judge_results.jsonl",
+        "manifest.json",
+        "runtime_records.jsonl",
+        "summary.json",
+        "summary.md"
+      ]
+    }
+  ],
+  "excluded_content": [
+    "raw trace exports",
+    "runtime records",
+    "retrieved evidence text",
+    "tool outputs",
+    "credentials and secrets"
+  ]
+}

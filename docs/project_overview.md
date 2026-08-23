@@ -323,16 +323,41 @@ Notable test areas:
 - Workflow scope routing, named-topic adequacy, web exhaustion, fallback
   priority, and optimized-vs-legacy retrieval selection.
 
-The suite is not a full end-to-end production evaluation harness, but it now
-covers the core contracts that were previously only documented in review notes.
-Retrieval quality is also checked with the deterministic benchmark runner in
-`scripts/evaluate_retrieval_pipeline.py`. Reviewed cases live in
-`evals/retrieval/benchmark_cases.jsonl` and use mode-neutral, set-based recall
-for supporting chunks, concepts, and relations, plus forbidden-evidence and
-Visualizer graph-shape checks. Exact ID and semantic-label/spec matches remain
-separate diagnostics. The runner supports configured, optimized, and
-`legacy_vector_context` variants without requiring Ragas, LangSmith, or an LLM
-evaluator.
+Graph RAG evaluation preserves two specialized executors. The retrieval
+runner in `scripts/evaluate_retrieval_pipeline.py` scores prepared-storage
+chunks, concepts, relations, forbidden evidence, and Visualizer graph shape.
+Optional storage-versioned human labels add deterministic Analyst Context
+Precision@10 and Context Recall; missing labels remain `N/A`. Its default
+baseline is `legacy_vector_context` for Analyst and `optimized` for
+Visualizer, while optimized Analyst is an explicit comparison.
+
+The trace-first runtime evaluator in
+`backend/evaluation/runtime_evaluation.py`, with the controlled headless
+adapter in `backend/evaluation/runtime_live.py`, normalizes exported LangSmith
+traces or live workflow events into bounded records. It checks routing, tools,
+fallback, modality, graph validity, termination, classified failures, loops,
+tokens, provider attempts, and latency. Functional gates remain separate from
+report-only efficiency limits and optional semantic judges.
+Unmet semantic prerequisites are skipped/N/A; provider/parser/schema failures
+remain execution errors. Claim faithfulness uses a compact 4,096-token
+structured contract while Boolean judges use 512 tokens.
+
+`backend/evaluation/evaluation_reporting.py` registers both executors in
+immutable evaluation history under `data/evaluation` and renders one
+per-content-fingerprint scorecard without an overall quality score or status.
+Its coverage contract accounts for retrieval, offline/live runtime, required
+repetitions, AgentEvals when requested, every semantic dimension, relevance
+labels, and provenance. Deterministic
+invocations use their newest completed run; live repetitions accumulate; failed
+runs remain inspectable without replacing completed snapshots. Generated
+reports, raw artifacts, OS metadata, and caches do not affect content identity.
+Historical trace configuration is `needs verification` unless trace metadata
+proves it. AgentEvals/OpenEvals stay optional. Explicit, completeness-aware
+publication writes sanitized,
+commit-friendly scorecards and provenance to `reports/evaluation` without
+copying raw traces or evidence. See `docs/runtime_evaluation.md`,
+`evals/runtime/scenarios_review.md`, and
+`evals/retrieval/benchmark_cases_review.md`.
 
 ## Current Design Boundaries
 
@@ -370,8 +395,8 @@ Important boundaries to preserve:
   invalid.
 - Scope classification and creation of named-topic requirements rely on the
   existing Orchestrator and Retriever model calls. Their prompt contracts are
-  tested, but model compliance remains stochastic and should be measured in the
-  future runtime evaluation pipeline.
+  tested and trace-backed runtime scenarios now measure representative behavior,
+  but broader stochastic baselines still require reviewed, quota-aware live runs.
 - Exact-token adequacy checks intentionally do not infer synonyms. They can only
   enforce aliases supplied by the Retriever and do not filter broad queries with
   an empty `required_topics` list.
@@ -388,4 +413,6 @@ Important boundaries to preserve:
 - `docs/remnote_llm_postprocessing_review.md`: post-processing rationale.
 - `docs/remnote_retrieval_optimization_review.md`: retrieval optimization
   rationale.
+- `docs/runtime_evaluation.md`: offline, live, framework, judge, reliability,
+  and scenario-maintenance guidance.
 - `tests/`: executable examples of the main current contracts.

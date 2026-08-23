@@ -32,6 +32,7 @@ data/
 docs/*
 !docs/project_overview.md
 !docs/optimized_pipeline_runbook.md
+!docs/runtime_evaluation.md
 models/
 exports/
 .reports/

@@ -8,19 +8,31 @@ evals/retrieval/benchmark_cases.jsonl against local production storage. Pass
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from collections import Counter, deque
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from backend.configs.paths import PathSettings
+    from backend.configs.search import KnowledgeGraphSearchSettings
+    from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from backend.evaluation.retrieval_benchmark import (
+from backend.evaluation.evaluation_reporting import (  # noqa: E402
+    DEFAULT_EVALUATION_ROOT,
+    allocate_run_dir,
+    register_completed_run,
+    register_failed_run,
+)
+from backend.evaluation.retrieval_benchmark import (  # noqa: E402
     ActualEvidence,
     BenchmarkValidationError,
     CaseResult,
@@ -29,18 +41,21 @@ from backend.evaluation.retrieval_benchmark import (
     actual_evidence_from_analyst_result,
     actual_evidence_from_legacy_results,
     actual_evidence_from_visualizer_result,
+    enrich_source_observations,
     load_benchmark_cases,
+    render_context_relevance_review,
     render_markdown_summary,
     score_case,
     summarize_results,
     validate_benchmark_references,
 )
 
-DEFAULT_RUN_ROOT = ROOT_DIR / "data" / "production" / "full_optimized_pipeline_run"
+DEFAULT_RUN_ROOT = (
+    ROOT_DIR / "data" / "production" / "full_optimized_pipeline_run_updated"
+)
 DEFAULT_STORAGE_DIR = ROOT_DIR / "storage"
 DEFAULT_RAW_DATA_DIR = ROOT_DIR / "data" / "raw" / "AI Research"
 DEFAULT_EMBEDDER_DIR = ROOT_DIR / "models" / "all-MiniLM-L6-v2"
-DEFAULT_OUTPUT_ROOT = DEFAULT_RUN_ROOT / "retrieval_eval"
 DEFAULT_BENCHMARK_FILE = ROOT_DIR / "evals" / "retrieval" / "benchmark_cases.jsonl"
 
 DEFAULT_ANALYST_QUERIES = [
@@ -109,7 +124,22 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=None,
-        help="Directory for outputs. Defaults to a timestamped directory under retrieval_eval.",
+        help=(
+            "Directory for outputs. By default, allocate an immutable timestamped "
+            "directory under <evaluation-root>/runs."
+        ),
+    )
+    parser.add_argument(
+        "--evaluation-root",
+        type=Path,
+        default=DEFAULT_EVALUATION_ROOT,
+        help="Root for immutable evaluation history and consolidated scorecards.",
+    )
+    parser.add_argument(
+        "--write-relevance-review",
+        type=Path,
+        default=None,
+        help="Write an observed top-10 Markdown review sheet without changing labels.",
     )
     parser.add_argument(
         "--raw-data-dir",
@@ -220,24 +250,13 @@ def timestamp_id() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
-def resolve_output_dir(output_dir: Path | None) -> Path:
+def resolve_output_dir(output_dir: Path | None, evaluation_root: Path) -> Path:
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir
-
-    root = DEFAULT_OUTPUT_ROOT / timestamp_id()
-    if not root.exists():
-        root.mkdir(parents=True, exist_ok=False)
-        return root
-
-    for suffix in range(1, 1000):
-        candidate = DEFAULT_OUTPUT_ROOT / f"{root.name}-{suffix:03d}"
-        if not candidate.exists():
-            candidate.mkdir(parents=True, exist_ok=False)
-            return candidate
-    raise RuntimeError(
-        f"Could not create a unique output directory under {DEFAULT_OUTPUT_ROOT}"
-    )
+    output_dir = allocate_run_dir("retrieval", evaluation_root)
+    output_dir.mkdir(parents=True, exist_ok=False)
+    return output_dir
 
 
 def resolve_embedder_path(requested_path: Path | None) -> Path:
@@ -378,6 +397,17 @@ def load_storage_reference_data(storage_dir: Path) -> dict[str, Any]:
             storage_dir / "property_graph_store.json"
         ),
     }
+
+
+def storage_snapshot_identity(storage_dir: Path) -> str | None:
+    """Returns stable identities for prepared-storage manifests."""
+    manifests = sorted(storage_dir.expanduser().resolve().glob("*manifest*.json"))
+    if not manifests:
+        return None
+    return "; ".join(
+        f"{path.name}@sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+        for path in manifests
+    )
 
 
 def load_source_metadata_by_id(path: Path) -> dict[str, dict[str, Any]]:
@@ -849,6 +879,8 @@ def run_visualizer(
 def merge_actual_evidence(items: list[ActualEvidence]) -> ActualEvidence:
     source_ids: list[str] = []
     source_paths: list[str] = []
+    source_paths_by_id: dict[str, list[str]] = {}
+    source_excerpts: dict[str, str] = {}
     concept_ids: list[str] = []
     concept_labels: list[str] = []
     relation_ids: list[str] = []
@@ -858,6 +890,8 @@ def merge_actual_evidence(items: list[ActualEvidence]) -> ActualEvidence:
     for item in items:
         source_ids.extend(item.source_chunk_ids_ranked)
         source_paths.extend(item.source_paths)
+        source_paths_by_id.update(item.source_paths_by_id)
+        source_excerpts.update(item.source_excerpts)
         concept_ids.extend(item.concept_ids)
         concept_labels.extend(item.concept_labels)
         relation_ids.extend(item.relation_ids)
@@ -867,6 +901,8 @@ def merge_actual_evidence(items: list[ActualEvidence]) -> ActualEvidence:
     return ActualEvidence(
         source_chunk_ids_ranked=list(dict.fromkeys(source_ids)),
         source_paths=list(dict.fromkeys(source_paths)),
+        source_paths_by_id=source_paths_by_id,
+        source_excerpts=source_excerpts,
         concept_ids=list(dict.fromkeys(concept_ids)),
         concept_labels=list(dict.fromkeys(concept_labels)),
         relation_ids=list(dict.fromkeys(relation_ids)),
@@ -960,6 +996,11 @@ def run_benchmark(
         if analyst_variant == "legacy_vector_context" and "analyst" in case_modes
         else None
     )
+    legacy_source_access = None
+    if analyst_retriever is not None:
+        from backend.workflows.agents.retrieval_access import RetrievalStoreAccess
+
+        legacy_source_access = RetrievalStoreAccess(indexer)
     visualizer_retriever = (
         indexer.get_retriever(indexer.kg_search_settings.visualizer_retriever_params)
         if visualizer_variant == "legacy_vector_context" and "visualizer" in case_modes
@@ -987,6 +1028,10 @@ def run_benchmark(
                         analyst_retriever, case.queries, analyst=True
                     )
                     actual = actual_evidence_from_legacy_results(query_results, catalog)
+                    actual = enrich_source_observations(
+                        actual,
+                        legacy_source_access.docstore_node,
+                    )
                 else:
                     raise BenchmarkValidationError(
                         f"Unsupported Analyst benchmark variant: {variant}"
@@ -1129,8 +1174,13 @@ def build_manifest(
 
 def main() -> int:
     args = parse_args()
+    output_dir: Path | None = None
     try:
-        output_dir = resolve_output_dir(args.output_dir)
+        if args.validate_references_only and args.output_dir is None:
+            output_dir = args.evaluation_root / "validation" / timestamp_id()
+            output_dir.mkdir(parents=True, exist_ok=False)
+        else:
+            output_dir = resolve_output_dir(args.output_dir, args.evaluation_root)
         analyst_queries = args.analyst_query or DEFAULT_ANALYST_QUERIES
         visualizer_query_sets = make_query_sets(args.visualizer_query)
 
@@ -1174,6 +1224,48 @@ def main() -> int:
                 reference_report=reference_report,
             )
             summary = summarize_results(results)
+            if args.write_relevance_review is not None:
+                from backend.workflows.agents.retrieval_access import (
+                    RetrievalStoreAccess,
+                )
+
+                review_source_access = RetrievalStoreAccess(indexer)
+                args.write_relevance_review.parent.mkdir(parents=True, exist_ok=True)
+                args.write_relevance_review.write_text(
+                    render_context_relevance_review(
+                        benchmark_cases or [],
+                        results,
+                        observed_storage_snapshot=storage_snapshot_identity(
+                            args.storage_dir
+                        ),
+                        source_node_lookup=review_source_access.docstore_node,
+                    ),
+                    encoding="utf-8",
+                )
+            register_completed_run(
+                output_dir,
+                run_kind="retrieval",
+                invocation={
+                    "benchmark_file": str(args.benchmark_file),
+                    "mode": args.mode,
+                    "case_ids": args.case_id or [],
+                    "analyst_variant": args.analyst_variant,
+                    "visualizer_variant": args.visualizer_variant,
+                    "analyst_reranker_mode": args.analyst_reranker_mode,
+                },
+                configuration={
+                    "storage_dir": str(args.storage_dir),
+                    "embedder_model_path": str(embedder_path),
+                    "analyst_retrieval_mode": getattr(
+                        indexer.kg_search_settings, "analyst_retrieval_mode", None
+                    ),
+                    "visualizer_retrieval_mode": getattr(
+                        indexer.kg_search_settings, "visualizer_retrieval_mode", None
+                    ),
+                    "benchmark_schema_version": "retrieval-benchmark-v1",
+                },
+                evaluation_root=args.evaluation_root,
+            )
             print("Retrieval benchmark complete.")
             print(f"- Summary: {output_dir / 'summary.md'}")
             print(f"- Case results: {output_dir / 'case_results.jsonl'}")
@@ -1231,7 +1323,26 @@ def main() -> int:
             if args.render_html or args.render_png:
                 print(f"- Visualizer graphs: {output_dir / 'visualizer_graphs'}")
         return 0
-    except (BenchmarkValidationError, FileNotFoundError) as exc:
+    except (BenchmarkValidationError, FileNotFoundError, RuntimeError) as exc:
+        if (
+            output_dir is not None
+            and not args.validate_references_only
+            and not args.debug_default_queries
+        ):
+            register_failed_run(
+                output_dir,
+                run_kind="retrieval",
+                invocation={
+                    "benchmark_file": str(args.benchmark_file),
+                    "mode": args.mode,
+                    "case_ids": args.case_id or [],
+                    "analyst_variant": args.analyst_variant,
+                    "visualizer_variant": args.visualizer_variant,
+                    "analyst_reranker_mode": args.analyst_reranker_mode,
+                },
+                error=f"{type(exc).__name__}: {exc}",
+                evaluation_root=args.evaluation_root,
+            )
         print(f"Retrieval evaluation setup failed: {exc}", file=sys.stderr)
         return 2
 
