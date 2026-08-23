@@ -55,3 +55,4 @@ secrets.yml
 # Local code
 scripts/local/
 tests/local/
+evals/*/local/
