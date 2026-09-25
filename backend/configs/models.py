@@ -241,8 +241,7 @@ class ModelSettings(BaseSettings):
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (Q4) on port 8002, provider=LLMProviderType.vllm, base_url="http://<VLLM_HOST>:8002/v1"
     analyst: LocalModelSettings | BaseLLMSettings = OllamaSettings(
         role=ModelRoleType.analyst,
-        model_name="qwen3.5:cloud",
-        # model_name="nemotron-3-super:cloud",
+        model_name="nemotron-3-super:cloud",
         temperature=0.1,
         num_ctx=32768,
         top_k=20,
