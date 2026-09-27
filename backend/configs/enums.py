@@ -119,6 +119,7 @@ class LLMProviderType(StrEnum):
     vllm = "vllm"
     openai = "openai"
     gemini = "gemini"
+    openrouter = "openrouter"
 
 
 class WorkflowEventType(str, Enum):

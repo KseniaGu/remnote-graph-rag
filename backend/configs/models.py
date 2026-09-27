@@ -55,6 +55,11 @@ class BaseLLMSettings(BaseSettings):
         return self.model_dump(
             include={"temperature", "top_p", "max_tokens", "base_url"}
         )
+    
+    def openrouter_chat_params(self) -> dict[str, Any]:
+        return self.model_dump(
+            include={"temperature", "top_p", "max_tokens", "reasoning"}
+        )
 
     def gemini_chat_params(self) -> dict[str, Any]:
         return self.model_dump(include={"temperature"})
@@ -103,6 +108,19 @@ class CohereSettings(BaseLLMSettings):
     model_config = BaseLLMSettings.model_config_with_prefix("COHERE_")
     api_key: SecretStr | None = None
     top_n: int
+
+
+class OpenRouterSettings(BaseLLMSettings):
+    """Configuration settings for OpenRouter models.
+
+    Extends base LLM settings with OpenRouter-specific configurations.
+    """
+    model_config = BaseLLMSettings.model_config_with_prefix("OPENROUTER_")
+    api_key: SecretStr | None = None
+    top_p: float = 0.5
+    max_tokens: int = 128
+    base_url: str = ""
+    request_timeout: float = 600.0
 
 
 # Settings for the models that run locally (downloaded from huggingface hub etc.)
@@ -178,26 +196,43 @@ class ResearcherModelSettings(BaseSettings):
     """
 
     # vLLM self-hosted alternative: Qwen3.5-9B (provider=vllm, base_url=VLLM_ROUTING_URL)
-    with_tools: BaseLLMSettings = OllamaSettings(
+    # with_tools: BaseLLMSettings = OllamaSettings(
+    #     role=ModelRoleType.researcher,
+    #     model_name="nemotron-3-super:cloud",
+    #     temperature=0.0,
+    #     num_ctx=8192,
+    #     top_k=20,
+    #     top_p=0.3,
+    #     num_predict=1024,
+    #     request_timeout=120.0,
+    # )
+    with_tools: BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.researcher,
-        model_name="nemotron-3-super:cloud",
+        model_name="nvidia/nemotron-3-super-120b-a12b:free",
         temperature=0.0,
-        num_ctx=8192,
-        top_k=20,
         top_p=0.3,
-        num_predict=1024,
-        request_timeout=120.0,
+        max_tokens=1024,
+        request_timeout=120.0,  
+        provider=LLMProviderType.openrouter,
     )
     # vLLM self-hosted alternative: Qwen3.5-9B (same instance as with_tools)
-    structured: BaseLLMSettings = OllamaSettings(
+    # structured: BaseLLMSettings = OllamaSettings(
+    #     role=ModelRoleType.researcher,
+    #     model_name="nemotron-3-super:cloud",
+    #     temperature=0.0,
+    #     num_ctx=8192,
+    #     top_k=50,
+    #     top_p=1.0,
+    #     num_predict=4096,
+    #     request_timeout=120.0,
+    # )
+    structured: BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.researcher,
-        model_name="nemotron-3-super:cloud",
+        model_name="nvidia/nemotron-3-super-120b-a12b:free",
         temperature=0.0,
-        num_ctx=8192,
-        top_k=50,
-        top_p=1.0,
-        num_predict=4096,
+        max_tokens=4096,
         request_timeout=120.0,
+        provider=LLMProviderType.openrouter,
     )
     prompt_version: str = "v5"
 
@@ -213,56 +248,98 @@ class ModelSettings(BaseSettings):
     )
 
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B on port 8001, provider=LLMProviderType.vllm, base_url="http://<VLLM_HOST>:8001/v1"
-    orchestrator: LocalModelSettings | BaseLLMSettings = OllamaSettings(
+    # orchestrator: LocalModelSettings | BaseLLMSettings = OllamaSettings(
+    #     role=ModelRoleType.orchestrator,
+    #     model_name="nemotron-3-super:cloud",
+    #     tokenizer_model_name="Qwen/Qwen3.5-9B",
+    #     temperature=0.0,
+    #     top_k=10,
+    #     top_p=1.0,
+    #     num_predict=2048,
+    #     request_timeout=120.0,
+    #     prompt_version={"graph_index": "v2", "routing": "v5"},
+    # )
+    orchestrator: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.orchestrator,
-        model_name="nemotron-3-super:cloud",
+        model_name="nvidia/nemotron-3-super-120b-a12b:free",
         tokenizer_model_name="Qwen/Qwen3.5-9B",
         temperature=0.0,
-        top_k=10,
-        top_p=1.0,
-        num_predict=2048,
+        max_tokens=2048,
         request_timeout=120.0,
         prompt_version={"graph_index": "v2", "routing": "v5"},
+        provider=LLMProviderType.openrouter,
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B (same instance as orchestrator)
-    retriever: LocalModelSettings | BaseLLMSettings = OllamaSettings(
+    # retriever: LocalModelSettings | BaseLLMSettings = OllamaSettings(
+    #     role=ModelRoleType.retriever,
+    #     model_name="nemotron-3-super:cloud",
+    #     temperature=0.0,
+    #     num_ctx=8192,
+    #     top_k=20,
+    #     top_p=0.3,
+    #     num_predict=512,
+    #     request_timeout=120.0,
+    #     prompt_version="v6",
+    # )
+    retriever: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.retriever,
-        model_name="nemotron-3-super:cloud",
+        model_name="nvidia/nemotron-3-super-120b-a12b:free",
         temperature=0.0,
-        num_ctx=8192,
-        top_k=20,
         top_p=0.3,
-        num_predict=512,
+        max_tokens=512,
         request_timeout=120.0,
         prompt_version="v6",
+        provider=LLMProviderType.openrouter,
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
 
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (Q4) on port 8002, provider=LLMProviderType.vllm, base_url="http://<VLLM_HOST>:8002/v1"
-    analyst: LocalModelSettings | BaseLLMSettings = OllamaSettings(
+    # analyst: LocalModelSettings | BaseLLMSettings = OllamaSettings(
+    #     role=ModelRoleType.analyst,
+    #     model_name="nemotron-3-super:cloud",
+    #     temperature=0.1,
+    #     num_ctx=32768,
+    #     top_k=20,
+    #     top_p=0.8,
+    #     num_predict=8192,
+    #     reasoning=False,
+    #     request_timeout=120.0,
+    #     prompt_version="v6",
+    # )
+    analyst: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.analyst,
-        model_name="nemotron-3-super:cloud",
+        model_name="nvidia/nemotron-3-super-120b-a12b:free",
         temperature=0.1,
-        num_ctx=32768,
-        top_k=20,
         top_p=0.8,
-        num_predict=8192,
-        reasoning=False,
+        max_tokens=8192,
+        reasoning={"effort": "low"},
         request_timeout=120.0,
         prompt_version="v6",
+        provider=LLMProviderType.openrouter,
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-27B (same instance as analyst)
-    mentor: LocalModelSettings | BaseLLMSettings = OllamaSettings(
+    # mentor: LocalModelSettings | BaseLLMSettings = OllamaSettings(
+    #     role=ModelRoleType.mentor,
+    #     model_name="nemotron-3-super:cloud",
+    #     temperature=0.7,
+    #     num_ctx=8192,
+    #     top_k=40,
+    #     top_p=0.8,
+    #     num_predict=4096,
+    #     reasoning=True,
+    #     request_timeout=120.0,
+    #     prompt_version="v4",
+    # )
+    mentor: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.mentor,
-        model_name="nemotron-3-super:cloud",
+        model_name="nvidia/nemotron-3-super-120b-a12b:free",
         temperature=0.7,
-        num_ctx=8192,
-        top_k=40,
         top_p=0.8,
-        num_predict=4096,
-        reasoning=True,
+        max_tokens=4096,
+        reasoning={"effort": "low"},
         request_timeout=120.0,
         prompt_version="v4",
+        provider=LLMProviderType.openrouter,
     )
 
     reranker: RerankerSettings | CohereSettings | BaseLLMSettings = Field(

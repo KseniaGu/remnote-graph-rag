@@ -23,6 +23,7 @@ dependencies = [
     "langchain-ollama>=1.0.1,<2.0.0",
     "langchain-openai>=1.1.0,<2.0.0",
     "langchain-google-genai>=4.2.0,<5.0.0",
+    "langchain-openrouter>=0.2.9",
     "langsmith>=0.7.0,<0.8.0",
     "sentence-transformers>=5.5.1,<6.0.0",
     "tenacity>=9.1.0,<10.0.0",

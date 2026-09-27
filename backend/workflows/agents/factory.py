@@ -7,6 +7,7 @@ import httpx
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+from langchain_openrouter import ChatOpenRouter
 from ollama._types import ResponseError
 from openai import APIError as OpenAIAPIError
 
@@ -88,6 +89,13 @@ class AgentsFactory:
                 model=model_settings.model_name,
                 api_key=api_key,
                 **model_settings.openai_chat_params(),
+            )
+        
+        if provider == LLMProviderType.openrouter:
+            return ChatOpenRouter(
+                model=model_settings.model_name,
+                api_key=api_key,
+                **model_settings.openrouter_chat_params(),
             )
 
         if provider == LLMProviderType.gemini:
