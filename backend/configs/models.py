@@ -208,7 +208,7 @@ class ResearcherModelSettings(BaseSettings):
     # )
     with_tools: BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.researcher,
-        model_name="nvidia/nemotron-3-super-120b-a12b:free",
+        model_name="openrouter/free",
         temperature=0.0,
         top_p=0.3,
         max_tokens=1024,
@@ -228,7 +228,7 @@ class ResearcherModelSettings(BaseSettings):
     # )
     structured: BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.researcher,
-        model_name="nvidia/nemotron-3-super-120b-a12b:free",
+        model_name="openrouter/free",
         temperature=0.0,
         max_tokens=4096,
         request_timeout=120.0,
@@ -261,7 +261,7 @@ class ModelSettings(BaseSettings):
     # )
     orchestrator: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.orchestrator,
-        model_name="nvidia/nemotron-3-super-120b-a12b:free",
+        model_name="openrouter/free",
         tokenizer_model_name="Qwen/Qwen3.5-9B",
         temperature=0.0,
         max_tokens=2048,
@@ -283,7 +283,7 @@ class ModelSettings(BaseSettings):
     # )
     retriever: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.retriever,
-        model_name="nvidia/nemotron-3-super-120b-a12b:free",
+        model_name="openrouter/free",
         temperature=0.0,
         top_p=0.3,
         max_tokens=512,
@@ -308,7 +308,7 @@ class ModelSettings(BaseSettings):
     # )
     analyst: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.analyst,
-        model_name="nvidia/nemotron-3-super-120b-a12b:free",
+        model_name="openrouter/free",
         temperature=0.1,
         top_p=0.8,
         max_tokens=8192,
@@ -332,7 +332,7 @@ class ModelSettings(BaseSettings):
     # )
     mentor: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.mentor,
-        model_name="nvidia/nemotron-3-super-120b-a12b:free",
+        model_name="openrouter/free",
         temperature=0.7,
         top_p=0.8,
         max_tokens=4096,
