@@ -502,7 +502,7 @@ def build_concept_resolution(decisions: Iterable[Any]) -> ConceptResolution:
 def build_concept_resolution_from_mentions(
     mentions: Iterable[ConceptMention],
 ) -> ConceptResolution:
-    mention_list = sorted(list(mentions), key=lambda item: item.mention_id)
+    mention_list = sorted(mentions, key=lambda item: item.mention_id)
     mention_ids = [mention.mention_id for mention in mention_list]
     if not mention_list:
         return ConceptResolution()
@@ -972,7 +972,7 @@ def bounded_review_clusters(
     mentions_by_id: dict[str, ConceptMention],
 ) -> list[UncertainConceptCluster]:
     mention_ids = sorted(
-        set(mention_id for mention_id in mention_ids if mention_id in mentions_by_id)
+        {mention_id for mention_id in mention_ids if mention_id in mentions_by_id}
     )
     pair_scores = sorted(
         pair_scores,
@@ -1787,7 +1787,7 @@ def concept_name_forms(mention: ConceptMention) -> dict[str, set[str]]:
         if maybe_acronym:
             acronym.add(maybe_acronym)
     for original_name, normalized_name in zip(
-        merge_names, [normalize_name(name) for name in merge_names]
+        merge_names, [normalize_name(name) for name in merge_names], strict=False
     ):
         expansion = acronym_from_expansion(normalized_name)
         if expansion:

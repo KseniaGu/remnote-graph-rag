@@ -90,7 +90,7 @@ class AgentsFactory:
                 api_key=api_key,
                 **model_settings.openai_chat_params(),
             )
-        
+
         if provider == LLMProviderType.openrouter:
             return ChatOpenRouter(
                 model=model_settings.model_name,

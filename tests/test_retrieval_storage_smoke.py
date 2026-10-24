@@ -3,6 +3,8 @@ import re
 import unittest
 from pathlib import Path
 
+import pytest
+
 try:
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
@@ -25,6 +27,7 @@ from backend.workflows.agents.tools import (
 from backend.workflows.agents.visualizer_retrieval import VisualizerRetrievalPipeline
 
 ROOT = Path(__file__).resolve().parents[1]
+pytestmark = pytest.mark.local_assets
 CURRENT_RUN_ROOT = (
     ROOT
     / "data"

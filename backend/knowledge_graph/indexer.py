@@ -386,7 +386,7 @@ class KnowledgeGraphIndexer:
         for merge_combination in nodes_to_merge_labels:
             if len(merge_combination) <= 1:
                 continue
-            unique_subtrees = set(self.get_subtree_label(x) for x in merge_combination)
+            unique_subtrees = {self.get_subtree_label(x) for x in merge_combination}
             first_node_id = node_label_to_node_id[merge_combination[0]]
             first_node = self.get_document_nodes(first_node_id)
             first_node_parent = self.get_document_nodes(first_node.parent_node.node_id)
@@ -491,7 +491,7 @@ class KnowledgeGraphIndexer:
             )
 
             for entity_type, entity_node in zip(
-                (subject_key, object_key), (subject_node, object_node)
+                (subject_key, object_key), (subject_node, object_node), strict=False
             ):
                 # This is the set of rules that are necessary for the LLamaIndex structures, refer to the source code for more details
                 existing_nodes = entity_node.metadata.get(KG_NODES_KEY, [])
@@ -690,10 +690,12 @@ class KnowledgeGraphIndexer:
             else:
                 text = _label_suffix_re.sub("", str(node_id)).strip()
                 hover = text
-            nodes_to_add.append((node_id, dict(text=text, hover=hover)))
+            nodes_to_add.append((node_id, {"text": text, "hover": hover}))
 
-        for relation in relation_triplets:
-            edges_to_add.append((relation[0], relation[2], dict(relation=relation[1])))
+        edges_to_add.extend(
+            (relation[0], relation[2], {"relation": relation[1]})
+            for relation in relation_triplets
+        )
 
         graph.add_nodes_from(nodes_to_add)
         graph.add_edges_from(edges_to_add)
@@ -730,12 +732,8 @@ class KnowledgeGraphIndexer:
         )
         pos = {n: (float(x), float(y)) for n, (x, y) in pos.items()}
 
-        node_id_to_full_text = {
-            node_id: text for node_id, text in graph.nodes(data="text")
-        }
-        node_id_to_hover_text = {
-            node_id: hover for node_id, hover in graph.nodes(data="hover")
-        }
+        node_id_to_full_text = dict(graph.nodes(data="text"))
+        node_id_to_hover_text = dict(graph.nodes(data="hover"))
         node_id_to_short_text = {
             node_id: self._truncate_graph_label(text)
             for node_id, text in node_id_to_full_text.items()
@@ -773,28 +771,28 @@ class KnowledgeGraphIndexer:
 
             # Arrow pointing toward target node
             annotations.append(
-                dict(
-                    x=x1,
-                    y=y1,
-                    ax=x0,
-                    ay=y0,
-                    xref="x",
-                    yref="y",
-                    axref="x",
-                    ayref="y",
-                    showarrow=True,
-                    arrowhead=2,
-                    arrowsize=1.2,
-                    arrowwidth=1,
-                    arrowcolor="#555",
-                    opacity=0.6,
-                )
+                {
+                    "x": x1,
+                    "y": y1,
+                    "ax": x0,
+                    "ay": y0,
+                    "xref": "x",
+                    "yref": "y",
+                    "axref": "x",
+                    "ayref": "y",
+                    "showarrow": True,
+                    "arrowhead": 2,
+                    "arrowsize": 1.2,
+                    "arrowwidth": 1,
+                    "arrowcolor": "#555",
+                    "opacity": 0.6,
+                }
             )
 
         edge_trace = go.Scatter(
             x=edge_x,
             y=edge_y,
-            line=dict(width=0.5, color="#888"),
+            line={"width": 0.5, "color": "#888"},
             hoverinfo="none",
             mode="lines",
         )
@@ -802,7 +800,7 @@ class KnowledgeGraphIndexer:
             x=edge_label_x,
             y=edge_label_y,
             mode="markers",
-            marker=dict(size=8, opacity=0),
+            marker={"size": 8, "opacity": 0},
             hoverinfo="text",
             hovertext=edge_label_text,
         )
@@ -828,57 +826,65 @@ class KnowledgeGraphIndexer:
             text=node_labels,
             hovertext=node_hovertext,
             hoverinfo="text",
-            hoverlabel=dict(
-                bgcolor="#1f2c34",
-                bordercolor="#00a884",
-                font=dict(size=12, color="#e9edef"),
-            ),
-            marker=dict(
-                showscale=True,
-                colorscale=[
+            hoverlabel={
+                "bgcolor": "#1f2c34",
+                "bordercolor": "#00a884",
+                "font": {"size": 12, "color": "#e9edef"},
+            },
+            marker={
+                "showscale": True,
+                "colorscale": [
                     [0, "#1f2c34"],
                     [0.25, "#0ea5e9"],
                     [0.6, "#00a884"],
                     [1.0, "#a855f7"],
                 ],
-                size=15,
-                color=node_degrees,
-                colorbar=dict(
-                    thickness=12,
-                    title=dict(text="Degree", side="right", font=dict(color="#8696a0")),
-                    tickfont=dict(color="#8696a0"),
-                    xanchor="left",
-                ),
-                line=dict(width=1.5, color="#0b141a"),
-            ),
+                "size": 15,
+                "color": node_degrees,
+                "colorbar": {
+                    "thickness": 12,
+                    "title": {
+                        "text": "Degree",
+                        "side": "right",
+                        "font": {"color": "#8696a0"},
+                    },
+                    "tickfont": {"color": "#8696a0"},
+                    "xanchor": "left",
+                },
+                "line": {"width": 1.5, "color": "#0b141a"},
+            },
         )
 
         fig = go.Figure(
             data=[edge_trace, edge_hover_trace, node_trace],
             layout=go.Layout(
-                title=dict(
-                    text=title,
-                    font=dict(size=14, color="#8696a0", family="Inter, sans-serif"),
-                    x=0,
-                    xanchor="left",
-                    y=1,
-                    yanchor="top",
-                    pad=dict(t=10, l=26),
-                )
+                title={
+                    "text": title,
+                    "font": {
+                        "size": 14,
+                        "color": "#8696a0",
+                        "family": "Inter, sans-serif",
+                    },
+                    "x": 0,
+                    "xanchor": "left",
+                    "y": 1,
+                    "yanchor": "top",
+                    "pad": {"t": 10, "l": 26},
+                }
                 if title
                 else None,
                 showlegend=False,
                 hovermode="closest",
-                margin=dict(b=20, l=60, r=60, t=52 if title else 40),
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                margin={"b": 20, "l": 60, "r": 60, "t": 52 if title else 40},
+                xaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
+                yaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
                 annotations=annotations,
                 autosize=True,
-                hoverlabel=dict(
-                    bgcolor="#1f2c34",
-                    bordercolor="#2a3942",
-                    font=dict(size=12, color="#e9edef"),
-                ),
+                hoverlabel={
+                    "bgcolor": "#1f2c34",
+                    "bordercolor": "#2a3942",
+                    "font": {"size": 12, "color": "#e9edef"},
+                },
             ),
         )
 
@@ -991,7 +997,8 @@ class KnowledgeGraphIndexer:
             document_texts, show_progress=True
         )
         for node, embedding in tqdm(
-            zip(documents, embeddings), desc="Getting embeddings for llama nodes"
+            zip(documents, embeddings, strict=False),
+            desc="Getting embeddings for llama nodes",
         ):
             node.embedding = embedding
             node = make_json_serializable(node, "metadata")
@@ -1002,7 +1009,7 @@ class KnowledgeGraphIndexer:
         )
 
         for node, embedding in tqdm(
-            zip(graph_entities, embeddings),
+            zip(graph_entities, embeddings, strict=False),
             desc="Getting embeddings for graph entities",
         ):
             node = make_json_serializable(node, "properties")
@@ -1098,7 +1105,7 @@ class KnowledgeGraphIndexer:
         if ensure_embeddings:
             self.get_embeddings()
 
-    def get_retriever(self, retriever_params: dict = None) -> BaseRetriever:
+    def get_retriever(self, retriever_params: dict | None = None) -> BaseRetriever:
         """Gets retriever engine.
 
         Available options:

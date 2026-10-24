@@ -15,7 +15,8 @@ Project defaults from `PathSettings`:
 | Default parsed text artifacts | `data/raw/parsed_texts` |
 | Local application storage | `storage` |
 
-Model paths are read from `.env` through `ModelSettings`:
+Model paths are read from environment settings (optionally `.env`) through
+`ModelSettings`:
 
 | Purpose | Setting |
 | --- | --- |
@@ -77,7 +78,9 @@ Notes:
   split quality/graph passes, and LLM concept resolution. The prompt file
   version is `v1`; this is the renamed production prompt that replaced the old
   experimental `v9` naming.
-- Important LLM defaults are `model-name=nemotron-3-super:cloud`,
+- This offline post-processing runner uses Ollama independently of the runtime
+  OpenRouter configuration. Its important LLM defaults are
+  `model-name=nemotron-3-super:cloud`,
   `base-url=https://ollama.com`, `max-batch-chunks=1`,
   `max-batch-chars=9000`, `num-ctx=10240`,
   `quality-num-predict=2048`, `graph-num-predict=6144`, and
@@ -433,3 +436,28 @@ property-graph storage, and MongoDB checkpoints. Configure every selected backen
 with prepared data before starting the application. Runtime startup is load-only
 and fails when the index is absent or invalid; use the build and migration
 commands in this runbook for intentional storage changes.
+
+The runtime model provider defaults to OpenRouter `openrouter/free` automatic
+routing (`LLM_PIPELINE=ollama` is the compatibility selector). Configure
+`OPENROUTER_API_KEY`; configure Tavily credentials when web fallback is needed.
+Ollama is required only for explicitly selected Ollama paths such as the offline
+post-processing commands above. See [the overview](project_overview.md#models-prompts-and-configuration)
+for all active role prompts and model limits.
+
+Install runtime/development dependencies with uv 0.12.3 and a supported Python
+version; OCR/parser tools use the optional `scripts` group shown above:
+
+```bash
+uv sync --locked
+uv run --locked reflex init
+uv run --locked reflex run
+```
+
+The development frontend is available at `http://localhost:3000`. For Reflex
+production mode use `uv run --locked reflex run --env prod`. Keep migration flags
+`REDIS_INIT_FROM_LOCAL`, `PINECONE_INIT_FROM_LOCAL`, `NEO4J_INIT_FROM_LOCAL`, and
+`MEMGRAPH_INIT_FROM_LOCAL` disabled while serving. Enable the relevant flag only
+for an intentional migration with `scripts/migrate_to_cloud.py`.
+
+These application commands require prepared assets and selected services. For
+checks that need neither, use [the offline gates](project_overview.md#setup-and-offline-checks).

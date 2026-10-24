@@ -76,10 +76,6 @@ def test_normalize_math_delimiters_repairs_concatenated_table_rows() -> None:
 
 
 def test_normalize_math_delimiters_preserves_valid_table_with_empty_cell() -> None:
-    markdown = (
-        "| A | B | C |\n"
-        "|---|---|---|\n"
-        "| value | | final |"
-    )
+    markdown = "| A | B | C |\n|---|---|---|\n| value | | final |"
 
     assert _normalize_math_delimiters(markdown) == markdown

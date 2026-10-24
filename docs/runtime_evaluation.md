@@ -1,6 +1,6 @@
 # Graph RAG evaluation
 
-Updated: 2026-08-23
+Updated: 2026-10-23
 
 ## Purpose and boundary
 
@@ -39,6 +39,49 @@ The authoritative contracts are
 [`evals/retrieval/benchmark_cases.jsonl`](../evals/retrieval/benchmark_cases.jsonl)
 and [`evals/runtime/scenarios.json`](../evals/runtime/scenarios.json).
 Their Markdown companions are review views, not executable input.
+
+## Regenerate the runtime scenario review
+
+Run this standard-library recipe from the repository root after editing
+`evals/runtime/scenarios.json`. It regenerates the
+[readable review](../evals/runtime/scenarios_review.md) without invoking models,
+services, or evaluation executors. The JSON contract remains authoritative.
+
+```bash
+python - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+source = Path('evals/runtime/scenarios.json')
+scenarios = json.loads(source.read_text())
+lines = [
+    '# Runtime scenario review',
+    '',
+    'Generated from [scenarios.json](scenarios.json); edit the machine contract,',
+    'then regenerate this review. This view is not executable input or measured results.',
+    'Use the [regeneration recipe](../../docs/runtime_evaluation.md#regenerate-the-runtime-scenario-review).',
+    '',
+    f'- Contract SHA256: `{hashlib.sha256(source.read_bytes()).hexdigest()}`',
+    f'- Scenarios: {len(scenarios)}',
+    '',
+]
+for scenario in scenarios:
+    lines.extend([
+        f"## {scenario['id']}",
+        '',
+        scenario['description'],
+        '',
+        f"Version: {scenario['version']}; review status: `{scenario['review_status']}`.",
+        '',
+        '```json',
+        json.dumps(scenario, ensure_ascii=False, indent=2),
+        '```',
+        '',
+    ])
+Path('evals/runtime/scenarios_review.md').write_text('\n'.join(lines))
+PY
+```
 
 ## Commands
 
@@ -147,7 +190,7 @@ uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py j
 The legacy `--records path/to/runtime_records.jsonl` input remains available.
 
 Judge mode uses active Analyst model settings, not a separate judge role. Current
-repository defaults are Ollama `qwen3.5:cloud` at `https://ollama.com`;
+repository defaults are OpenRouter `openrouter/free` automatic routing;
 environment overrides remain effective. The evaluator forces temperature 0,
 uses a 4,096-token output limit for bounded claim faithfulness and 512 tokens
 for each Boolean dimension, uses result rubric `runtime-semantic-v1`, and
@@ -261,6 +304,14 @@ bytecode, and temporary files do not. Git revision and a trace's reported source
 revision remain provenance and do not split identical content. Executor-only
 arguments also do not split an otherwise identical application fingerprint.
 Different fingerprints are never aggregated.
+
+Model configuration snapshots retain provider-specific generation settings,
+including output limits, request timeouts, and reasoning options for every role
+and both Researcher stages. Earlier snapshots could omit these fields through
+base-class serialization. Capturing them now corrects effective fingerprint
+input completeness without changing the hash formula. Recursive secret
+redaction remains in place. Future fingerprints can therefore differ from older
+ones; historical runs and published reports are not regenerated or rewritten.
 
 For the same deterministic retrieval or offline invocation, only the newest
 completed run contributes to current metrics. Older and failed runs remain in
@@ -400,8 +451,9 @@ Semantic judges are non-gating and require explicit provider confirmation.
 
 The four non-faithfulness dimensions use separate Boolean OpenEvals rubrics.
 The default structured-output transport is `function_calling`, which matches
-the tool-capable Ollama model used by the workflow. Diagnostic alternatives are
-`--structured-output-method json_schema` and
+the configured workflow transport. Support can vary with the automatically
+routed model; no live compatibility is implied by offline tests. Diagnostic
+alternatives are `--structured-output-method json_schema` and
 `--structured-output-method json_mode`; changing the method changes the
 evaluation invocation and fingerprint.
 
@@ -452,6 +504,8 @@ failure classes, evaluator formulas, or scenario contracts change:
 2. Update the machine-readable scenario or benchmark and increment its version
    or schema when its contract changes.
 3. Regenerate/synchronize the Markdown review view and record human approval.
+   For runtime scenarios, use the
+   [tracked regeneration recipe](#regenerate-the-runtime-scenario-review).
 4. Update this document, `README.md`, `docs/project_overview.md`, and
    `AGENTS.md` when maintenance guidance changes.
 5. Add/update deterministic tests for executable defaults and metric formulas.
@@ -464,3 +518,35 @@ failure classes, evaluator formulas, or scenario contracts change:
 No-progress semantic loop detection, monetary cost, safety/toxicity scoring,
 automatic relevance-label generation, UI evaluation, ingestion/indexing
 evaluation, and one aggregate quality score remain out of scope.
+
+## Public evidence and offline verification
+
+The [published scorecards](../reports/evaluation/README.md) are historical and
+incomplete. They are not measurements of the current OpenRouter runtime or a
+paired graph-versus-vector improvement. Semantic judge errors and unavailable
+scores must remain visible. No fresh evaluation campaign is part of the M1
+offline engineering checks.
+
+Use [the setup and offline gates](project_overview.md#setup-and-offline-checks)
+for a locked clean-checkout test run without `.env`, credentials, private
+storage, downloaded models, or services. The commands in this evaluation
+runbook have different requirements: retrieval needs prepared storage and a
+local embedder; offline trace evaluation needs an existing sanitized export;
+live workflow and judge modes contact configured providers, and web fallback
+contacts Tavily. They are not substitutes for the offline test gate.
+
+Configured OpenRouter `openrouter/free` identifies an automatic routing policy.
+Response provenance separates `configured_provider` / `configured_model`
+from response-observed `provider` / `model`. Missing response identities remain
+unknown (empty strings); an echoed `openrouter/free` route does not identify
+the resolved model. For OpenRouter, response metadata `provider` identifies the
+serving provider; the adapter-injected `model_provider="openrouter"` label alone
+does not. Supported legacy `model_provider` values remain accepted for other
+adapters. Stop diagnostics accept `done_reason`, `finish_reason`, and
+`stop_reason`; token observations accept canonical usage metadata and
+OpenAI-style prompt/completion counts. Aggregate token-coverage analysis remains
+future work. Output caps, reasoning requests, and request timeouts describe
+configured behavior, not proof that every routed model has
+identical capabilities. The default `LLM_PIPELINE=ollama` selector remains a
+compatibility alias; active runtime roles use OpenRouter. Offline
+post-processing and optional Ollama reranking have their own settings.

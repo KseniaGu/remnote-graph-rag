@@ -3,8 +3,10 @@ from backend.configs.models import (
     ModelSettings,
     OllamaSettings,
     OpenAISettings,
+    OpenRouterSettings,
     RerankerSettings,
     _vllm_models,
+    get_model_settings,
 )
 
 
@@ -57,19 +59,73 @@ def test_openai_style_chat_params_are_provider_specific() -> None:
     }
 
 
-def test_default_analyst_uses_v6_educational_cloud_configuration() -> None:
-    analyst = ModelSettings().analyst
+def test_default_openrouter_roles_preserve_generation_contract(monkeypatch) -> None:
+    from backend.workflows.agents import factory
 
-    assert analyst.model_name == "qwen3.5:cloud"
-    assert analyst.prompt_version == "v6"
-    assert analyst.num_predict == 8192
-    assert analyst.request_timeout == 120.0
-    assert analyst.num_ctx == 32768
-    assert analyst.ollama_chat_params()["reasoning"] is False
-    assert ModelSettings().mentor.num_predict == 4096
+    monkeypatch.delenv("LLM_PIPELINE", raising=False)
+    monkeypatch.setattr(factory, "ChatOpenRouter", lambda **kwargs: kwargs)
+    settings = get_model_settings()
+    roles = [
+        (settings.orchestrator, 2048, 0.0, 0.5, None),
+        (settings.retriever, 512, 0.0, 0.3, None),
+        (settings.researcher.with_tools, 1024, 0.0, 0.3, None),
+        (settings.researcher.structured, 4096, 0.0, 0.5, None),
+        (settings.analyst, 8192, 0.1, 0.8, {"effort": "low"}),
+        (settings.mentor, 4096, 0.7, 0.8, {"effort": "low"}),
+    ]
+    for role, limit, temperature, top_p, reasoning in roles:
+        assert role.provider == LLMProviderType.openrouter
+        assert role.model_name == "openrouter/free"
+        expected = {
+            "model": "openrouter/free",
+            "api_key": None,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": limit,
+            "request_timeout": 120000,
+        }
+        if reasoning is not None:
+            expected["reasoning"] = reasoning
+        assert factory.AgentsFactory.get_llm_by_role(role) == expected
+    assert settings.analyst.prompt_version == "v6"
+    assert settings.mentor.prompt_version == "v4"
 
-    researcher = ModelSettings().researcher.structured
-    assert "reasoning" not in researcher.ollama_chat_params()
+
+def test_openrouter_settings_select_provider_and_forward_reasoning(monkeypatch) -> None:
+    from backend.workflows.agents import factory
+
+    monkeypatch.setattr(factory, "ChatOpenRouter", lambda **kwargs: kwargs)
+    settings = OpenRouterSettings(
+        _env_file=None,
+        role=ModelRoleType.analyst,
+        model_name="provider/model",
+        api_key="synthetic-key",
+        provider=LLMProviderType.openrouter,
+        reasoning={"effort": "low"},
+        request_timeout=1.5,
+    )
+    assert settings.reasoning == {"effort": "low"}
+    assert factory.AgentsFactory.get_llm_by_role(settings) == {
+        "model": "provider/model",
+        "api_key": "synthetic-key",
+        "temperature": 0.0,
+        "top_p": 0.5,
+        "max_tokens": 128,
+        "reasoning": {"effort": "low"},
+        "request_timeout": 1500,
+    }
+
+
+def test_openrouter_settings_default_to_openrouter_provider():
+    settings = OpenRouterSettings(
+        _env_file=None, role=ModelRoleType.analyst, model_name="test-model"
+    )
+    assert settings.provider == LLMProviderType.openrouter
+
+
+def test_ollama_pipeline_selector_remains_openrouter_compatibility_alias(monkeypatch):
+    monkeypatch.setenv("LLM_PIPELINE", "ollama")
+    assert get_model_settings().analyst.provider == LLMProviderType.openrouter
 
 
 def test_runtime_routing_prompt_versions_are_current(monkeypatch) -> None:

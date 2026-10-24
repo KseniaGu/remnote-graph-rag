@@ -281,7 +281,7 @@ def materialize_final_text_nodes(
             manifest["quarantined_chunk_ids"].append(node.id_)
 
     # Remove graph evidence for chunks that are not graph-enabled.
-    for node_id, node in node_by_id.items():
+    for node in node_by_id.values():
         if not node.metadata.get("graph_enabled"):
             node.metadata["postprocess_graph_import_excluded"] = True
     return base_nodes, manifest
@@ -662,7 +662,7 @@ def embed_final_nodes(
         for node in source_nodes
     ]
     embeddings = embedder.get_text_embedding_batch(texts, show_progress=True)
-    for node, embedding in zip(vector_nodes, embeddings):
+    for node, embedding in zip(vector_nodes, embeddings, strict=False):
         node.embedding = [*embedding]
     vector_store.add(vector_nodes)
     return {
