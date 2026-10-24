@@ -1,6 +1,6 @@
 # M1 execution report
 
-Status: Planner correction R1 implemented, coordinator-verified and independently reviewed; ready for Planner reassessment. Earlier M1 verification is retained below as history; Planner acceptance and hosted CI remain pending.
+Status: R1 closed; M1 accepted by the Planner with explicitly pending conditions. Reviewed source and the latest plan are preserved in commit `c0b82e67c924e5305b3beb49ed839e9c23163ded` on `refactoring-m1`. The coordinator inspected successful hosted PR Quality run `40051835672`, including native network-namespace isolation, as recorded below. Fresh Planner premerge assessment remains pending; no merge is authorized before that assessment. Earlier dated pending states remain historical.
 
 Approved scope: WP1 offline configuration/provenance, WP2, WP3, WP7a. B0, M2, aggregate service budgets, evaluation campaigns and optional demo/corpus work deferred. No provider, Tavily, judge or model download requests authorized. Locked dependency provisioning authorized.
 
@@ -250,8 +250,24 @@ Focused independent review: spec compliant, quality approved, no findings; the r
 
 ## Current Git preservation and premerge handoff — 2026-10-24
 
-The user now authorizes committing the reviewed work, publishing the branch and opening a PR; this supersedes the older restrictions recorded above. Open the PR with base `refactoring` and head `refactoring-m1`. Any later merge is into `refactoring`, never `main`, and remains conditional on a fresh Planner premerge assessment. Return the premerge handoff first and stop before merging. Current branches are `refactoring` in the original checkout and `refactoring-m1` in the existing worktree at `.worktrees/portfolio-m1`. Earlier branch names and temporary/path references remain historical audit context; the worktree path itself has not changed.
+The user now authorizes committing the reviewed work, publishing the branch and opening a PR; this supersedes the older restrictions recorded above. [PR #1](https://github.com/KseniaGu/remnote-graph-rag/pull/1) is open with base `refactoring` and head `refactoring-m1`. Any later merge is into `refactoring`, never `main`, and remains conditional on a fresh Planner premerge assessment. Return the premerge handoff first and stop before merging. Current branches are `refactoring` in the original checkout and `refactoring-m1` in the existing worktree at `.worktrees/portfolio-m1`. Earlier branch names and temporary/path references remain historical audit context; the worktree path itself has not changed.
 
 The latest Planner-owned [plan and disposition](portfolio_improvement_plan.md) was copied byte-for-byte from the original checkout: SHA256 `693360b7a5a3d5a58342dc3bbbb376e4a9ab5303beeb72d5e37014eede08d75c`. Its current disposition is **R1 closed; M1 accepted with explicitly pending conditions**. This authorized preservation copy supersedes the earlier worktree-plan snapshot without editing the Planner's wording or source file.
 
-Before publishing, the coordinator's remote inspection found no existing PR and only the `main` branch. Deployment workflows trigger on pushes to `main` or manual dispatch (the vLLM workflow is manual only); publishing `refactoring-m1` and opening its PR do not trigger deployment. The quality workflow runs on PRs/manual dispatch. Preserve the reviewed staged implementation, latest README presentation and tracked regeneration recipe. Existing verified source/gate evidence above is reused; this preservation step does not rerun unchanged application tests or establish new quality measurements. Actual hosted CI and the fresh Planner premerge assessment remain pending. The coordinator owns subsequent Git/CI actions; no commit, publication or merge is performed by this documentation step.
+Before publishing, the coordinator's remote inspection found no existing PR and only the `main` branch. Deployment workflows trigger on pushes to `main` or manual dispatch (the vLLM workflow is manual only); publishing `refactoring-m1` and opening its PR do not trigger deployment. The quality workflow runs on PRs/manual dispatch. Preserve the reviewed staged implementation, latest README presentation and tracked regeneration recipe. Existing verified source/gate evidence above is reused; this preservation step does not rerun unchanged application tests or establish new quality measurements. The coordinator has now inspected the successful hosted Quality run recorded below; fresh Planner premerge assessment remains pending. The coordinator owns subsequent Git/CI actions; this report-only documentation step performs no commit, publication or merge.
+
+
+## Hosted PR Quality evidence — 2026-10-24
+
+The coordinator inspected [PR #1](https://github.com/KseniaGu/remnote-graph-rag/pull/1), head `refactoring-m1`, base `refactoring` at `76659bd6c02de3d52815e48b5e9d0faa401e7a21`, and the completed successful [Quality run 40051835672](https://github.com/KseniaGu/remnote-graph-rag/actions/runs/40051835672), [job 120745983839](https://github.com/KseniaGu/remnote-graph-rag/actions/runs/40051835672/job/120745983839). The run's `head_sha` is preserved source commit `c0b82e67c924e5305b3beb49ed839e9c23163ded`; logs/API identify the actual checkout as `refs/pull/1/merge` at `f251f40f5f6a3f1bc0601beac1969a9358617ae9`. All steps succeeded.
+
+| Inspected hosted evidence | Actual result |
+| --- | --- |
+| Python / uv | 3.11.15 / 0.12.3 |
+| Locked dependency installation | 241 resolved / 183 installed |
+| Ruff lint / format | PASS / 104 files already formatted |
+| `sudo unshare --net -- .venv/bin/python scripts/check_offline.py` | **315 passed, 9 skipped, 27 subtests passed in 32.90s; no warnings** |
+
+All nine skips are the explicit private-storage/local-embedding integration module. Hosted kernel network-namespace execution is now actually inspected and passing for this run. These are **coordinator-inspected hosted results**; the independent reviewers previously performed scoped reviews, not this gate run. This is structural/offline engineering evidence, not a measurement of live provider behavior or answer quality.
+
+This report-only evidence update creates a successor commit and triggers PR CI again. Record the final head and its results in the PR body and premerge handoff rather than repeatedly committing the report to cite itself. Fresh Planner premerge assessment remains pending. The intended conditional merge target remains `refactoring`, never `main`; local and remote `main` remain at `76659bd6c02de3d52815e48b5e9d0faa401e7a21` per coordinator inspection. No replacement PR was needed because none existed before PR #1 was opened. No merge, deployment, B0/M2 work or provider/Tavily/judge request accompanies this documentation update.
