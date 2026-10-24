@@ -33,6 +33,9 @@ docs/*
 !docs/project_overview.md
 !docs/optimized_pipeline_runbook.md
 !docs/runtime_evaluation.md
+!docs/full_evaluation_report_runbook.md
+!docs/portfolio_improvement_plan.md
+!docs/portfolio_execution_report.md
 models/
 exports/
 .reports/

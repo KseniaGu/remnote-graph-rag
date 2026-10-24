@@ -1485,8 +1485,10 @@ class AnalystRetrievalPipeline:
                 for part in path
                 if self._clean_path_part(part)
             ]
-            for idx in range(len(cleaned_parts), 0, -1):
-                candidates.append(" > ".join(cleaned_parts[:idx]))
+            candidates.extend(
+                " > ".join(cleaned_parts[:idx])
+                for idx in range(len(cleaned_parts), 0, -1)
+            )
 
         if metadata.source:
             candidates.append(metadata.source)

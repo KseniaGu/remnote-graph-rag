@@ -119,6 +119,18 @@ known-first-party = [
     "scripts",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Reflex turns these class defaults into per-session reactive state.
+"app/state.py" = ["RUF012"]
+# Keep the existing Enum string conversion contract; StrEnum changes str(member).
+"backend/configs/enums.py" = ["UP042"]
+# These CLIs add the repository root before importing application modules.
+"scripts/build_postprocessed_graph_storage.py" = ["E402"]
+"scripts/run_llm_postprocess.py" = ["E402"]
+"scripts/run_optimized_postprocess_pipeline.py" = ["E402"]
+# Imports follow the scripts-directory setup used by the existing CLI tests.
+"tests/test_llm_postprocess.py" = ["E402"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -126,3 +138,6 @@ line-ending = "auto"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = [
+    "local_assets: integration tests requiring private storage and a local embedding model",
+]

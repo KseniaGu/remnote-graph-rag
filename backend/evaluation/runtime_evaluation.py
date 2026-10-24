@@ -258,6 +258,14 @@ class ToolObservation(StrictModel):
 
 
 class ProviderObservation(StrictModel):
+    """Separates configured routing identity from available response identity.
+
+    Empty observed provider/model fields mean unknown. An automatic route echoed
+    by an adapter is not evidence of the model that served the request.
+    """
+
+    configured_provider: str = ""
+    configured_model: str = ""
     run_id: str = ""
     node: str = ""
     provider: str = ""
@@ -1681,6 +1689,50 @@ def _safe_judge_failure_reason(exc: Exception) -> str:
     return f"{category}; error chain={chain}; raw model output omitted"
 
 
+def _provider_response_fields(
+    response_metadata: Any, usage_metadata: Any
+) -> dict[str, Any]:
+    """Normalizes only bounded response metadata shared by live and exported runs."""
+    response = response_metadata if isinstance(response_metadata, dict) else {}
+    usage = usage_metadata if isinstance(usage_metadata, dict) else {}
+    token_usage = response.get("token_usage", {})
+    if not isinstance(token_usage, dict):
+        token_usage = {}
+    model = next(
+        (
+            str(value)
+            for value in (response.get("model_name"), response.get("model"))
+            if value and value != "openrouter/free"
+        ),
+        "",
+    )
+    provider = response.get("provider")
+    legacy_provider = response.get("model_provider")
+    # ChatOpenRouter injects its adapter label even without a serving provider.
+    if not provider and legacy_provider != "openrouter":
+        provider = legacy_provider
+    return {
+        "provider": str(provider or ""),
+        "model": model,
+        "stop_reason": str(
+            response.get("done_reason")
+            or response.get("finish_reason")
+            or response.get("stop_reason")
+            or ""
+        ),
+        "input_tokens": _int_or_zero(
+            usage.get("input_tokens")
+            if usage.get("input_tokens") is not None
+            else token_usage.get("prompt_tokens")
+        ),
+        "output_tokens": _int_or_zero(
+            usage.get("output_tokens")
+            if usage.get("output_tokens") is not None
+            else token_usage.get("completion_tokens")
+        ),
+    }
+
+
 def _provider_observation(run: dict[str, Any]) -> ProviderObservation:
     kwargs = _llm_message_kwargs(run)
     response_metadata = kwargs.get("response_metadata", {})
@@ -1691,19 +1743,22 @@ def _provider_observation(run: dict[str, Any]) -> ProviderObservation:
         metadata = {}
     content = kwargs.get("content")
     tool_calls = kwargs.get("tool_calls")
+    response_fields = _provider_response_fields(
+        response_metadata, kwargs.get("usage_metadata")
+    )
+    for key, source in (
+        ("input_tokens", "prompt_tokens"),
+        ("output_tokens", "completion_tokens"),
+    ):
+        if run.get(source) is not None:
+            response_fields[key] = _int_or_zero(run[source])
     return ProviderObservation(
         run_id=str(run.get("_id") or ""),
         node=str(metadata.get("langgraph_node") or run.get("name") or ""),
-        provider=str(
-            metadata.get("ls_provider") or response_metadata.get("model_provider") or ""
-        ),
-        model=str(
-            metadata.get("ls_model_name") or response_metadata.get("model_name") or ""
-        ),
+        configured_provider=str(metadata.get("ls_provider") or ""),
+        configured_model=str(metadata.get("ls_model_name") or ""),
         status=str(run.get("status") or "unknown"),
-        stop_reason=str(response_metadata.get("done_reason") or ""),
-        input_tokens=_int_or_zero(run.get("prompt_tokens")),
-        output_tokens=_int_or_zero(run.get("completion_tokens")),
+        **response_fields,
         content_present=bool(str(content or "").strip()),
         tool_call_count=len(tool_calls) if isinstance(tool_calls, list) else 0,
         configured_output_token_limit=_first_int(

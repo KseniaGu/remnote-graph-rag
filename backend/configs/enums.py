@@ -18,7 +18,7 @@ class ModelRoleType(Enum):
     reranker = (8, False)
 
     @classmethod
-    def get_all_members(cls, is_agent: bool = None):
+    def get_all_members(cls, is_agent: bool | None = None):
         if is_agent is None:
             return list(cls.__members__.keys())
         return [

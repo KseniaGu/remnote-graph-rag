@@ -1,12 +1,19 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.configs.models import ModelSettings, _vllm_models
+from backend.configs.enums import ModelRoleType
+from backend.configs.models import OllamaSettings, _vllm_models
 from backend.workflows.agents.factory import AgentsFactory
 
 
 def test_ollama_timeout_is_forwarded_to_both_clients() -> None:
-    settings = ModelSettings().analyst
+    settings = OllamaSettings(
+        _env_file=None,
+        role=ModelRoleType.analyst,
+        model_name="legacy-model",
+        api_key=None,
+        request_timeout=120.0,
+    )
 
     with patch("backend.workflows.agents.factory.ChatOllama") as chat_ollama:
         AgentsFactory.get_llm_by_role(settings)

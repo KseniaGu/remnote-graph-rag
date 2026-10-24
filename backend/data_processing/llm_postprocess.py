@@ -1348,11 +1348,11 @@ def validate_decision_against_input(
     for concept in decision.concepts:
         if not concept.evidence_spans:
             errors.append(f"concept {concept.local_id} has no evidence_spans")
-        for span in concept.evidence_spans:
-            if not span_supported(span, evidence_text):
-                errors.append(
-                    f"concept {concept.local_id} evidence span is not source-grounded: {span!r}"
-                )
+        errors.extend(
+            f"concept {concept.local_id} evidence span is not source-grounded: {span!r}"
+            for span in concept.evidence_spans
+            if not span_supported(span, evidence_text)
+        )
 
     for relation in decision.relations:
         if (
@@ -1378,11 +1378,11 @@ def validate_decision_against_input(
             errors.append(
                 f"relation {relation.canonical_predicate} has no evidence_spans"
             )
-        for span in relation.evidence_spans:
-            if not span_supported(span, evidence_text):
-                errors.append(
-                    f"relation {relation.canonical_predicate} evidence span is not source-grounded: {span!r}"
-                )
+        errors.extend(
+            f"relation {relation.canonical_predicate} evidence span is not source-grounded: {span!r}"
+            for span in relation.evidence_spans
+            if not span_supported(span, evidence_text)
+        )
         if (
             relation.canonical_predicate == "RELATED_TO"
             and specific_relation_cue_present(relation.evidence_spans)
@@ -2038,9 +2038,7 @@ def read_jsonl_if_exists(path: Path) -> list[dict[str, Any]]:
         return []
     rows: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                rows.append(json.loads(line))
+        rows.extend(json.loads(line) for line in f if line.strip())
     return rows
 
 

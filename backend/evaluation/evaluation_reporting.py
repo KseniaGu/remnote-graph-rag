@@ -211,7 +211,7 @@ def build_evaluation_snapshot(configuration: dict[str, Any]) -> dict[str, Any]:
     from backend.configs.storage import StorageSettings
 
     application_configuration = {
-        "models": get_model_settings().model_dump(mode="json"),
+        "models": get_model_settings().model_dump(mode="json", serialize_as_any=True),
         "search": KnowledgeGraphSearchSettings().model_dump(mode="json"),
         "storage": StorageSettings().model_dump(mode="json"),
     }

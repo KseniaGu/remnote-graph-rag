@@ -20,6 +20,7 @@ from backend.evaluation.runtime_evaluation import (
     _bounded_evidence_from_tool_output,
     _graph_labels_from_artifacts,
     _merge_bounded_evidence,
+    _provider_response_fields,
     _redact_mapping,
 )
 from backend.utils.chat_limits import (
@@ -177,16 +178,10 @@ async def run_controlled_live_scenario(
                 provider = ProviderObservation(
                     run_id=event_run_id,
                     node=node,
-                    provider=str(response_metadata.get("model_provider") or ""),
-                    model=str(
-                        response_metadata.get("model_name")
-                        or response_metadata.get("model")
-                        or ""
-                    ),
+                    configured_provider=str(metadata.get("ls_provider") or ""),
+                    configured_model=str(metadata.get("ls_model_name") or ""),
                     status="success",
-                    stop_reason=str(response_metadata.get("done_reason") or ""),
-                    input_tokens=_int_or_zero(usage_metadata.get("input_tokens")),
-                    output_tokens=_int_or_zero(usage_metadata.get("output_tokens")),
+                    **_provider_response_fields(response_metadata, usage_metadata),
                     content_present=bool(str(content or "").strip()),
                     tool_call_count=len(tool_calls),
                     configured_output_token_limit=_int_or_none(

@@ -44,6 +44,34 @@ def write_identity_fixture(root: Path) -> None:
 
 
 class EvaluationReportingTests(unittest.TestCase):
+    def test_snapshot_records_effective_openrouter_reasoning_without_credentials(self):
+        from pydantic import SecretStr
+
+        from backend.configs.models import get_model_settings
+
+        settings = get_model_settings()
+        settings.analyst.api_key = SecretStr("synthetic-secret")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_identity_fixture(root)
+            with (
+                patch.object(evaluation_reporting, "ROOT", root),
+                patch(
+                    "backend.configs.models.get_model_settings", return_value=settings
+                ),
+            ):
+                snapshot = evaluation_reporting.build_evaluation_snapshot({})
+        models = snapshot["fingerprint_input"]["application_configuration"]["models"]
+        self.assertEqual("openrouter", models["analyst"]["provider"])
+        self.assertEqual("openrouter/free", models["analyst"]["model_name"])
+        self.assertEqual({"effort": "low"}, models["analyst"]["reasoning"])
+        self.assertEqual(8192, models["analyst"]["max_tokens"])
+        self.assertEqual(120.0, models["analyst"]["request_timeout"])
+        self.assertEqual(1024, models["researcher"]["with_tools"]["max_tokens"])
+        self.assertEqual(4096, models["researcher"]["structured"]["max_tokens"])
+        self.assertEqual("[REDACTED]", models["analyst"]["api_key"])
+        self.assertNotIn("synthetic-secret", json.dumps(snapshot))
+
     def test_latest_deterministic_run_replaces_snapshot_but_history_is_immutable(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

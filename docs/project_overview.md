@@ -1,8 +1,8 @@
 # RemNote Graph RAG Project Overview
 
 This document is a concise overview of the current project architecture. It
-uses the older review documents as background, but reflects the current codebase
-as of the optimized data-processing and retrieval pipeline.
+reflects the current configuration and separates offline preparation, runtime
+serving, and evaluation evidence.
 
 For operational commands to run the full parser, LLM post-processing, and final
 storage build, see `docs/optimized_pipeline_runbook.md`.
@@ -251,11 +251,16 @@ and embedding backfill belong to offline scripts.
 
 Model configuration is centralized in `backend/configs/models.py`.
 
-- Default LLM pipeline: `LLM_PIPELINE=ollama`.
-- Default routing, retrieval, research, and Mentor model:
-  `nemotron-3-super:cloud` via Ollama-compatible APIs.
-- Default Analyst model: `qwen3.5:cloud` with prompt `v6` and an 8,192-token
-  generation limit.
+- Default selector: `LLM_PIPELINE=ollama`, retained as a compatibility alias.
+  Its active provider is **OpenRouter**, with `openrouter/free` for Orchestrator,
+  Retriever, both Researcher stages, Analyst, and Mentor.
+- `openrouter/free` selects models automatically; it is not a fixed model
+  identity. A configured route and an observed response model are separate
+  provenance. Missing observed identities remain unknown.
+- OpenRouter role limits are Orchestrator 2,048, Retriever 512, Researcher
+  tools 1,024 / structured synthesis 4,096, Analyst 8,192, and Mentor 4,096
+  output tokens, with a 120-second request timeout. Analyst and Mentor request
+  reasoning effort `low`; provider behavior can depend on the routed model.
 - Optional pipeline: `LLM_PIPELINE=vllm`, using OpenAI-compatible endpoints with
   Google Cloud Run ID-token authentication.
 - Embedder: local HuggingFace model configured by `EMBEDDER_MODEL_PATH`.
@@ -265,7 +270,7 @@ Model configuration is centralized in `backend/configs/models.py`.
 
 Current prompt selections:
 
-| Role / purpose | Default `ollama` pipeline | Optional `vllm` pipeline |
+| Role / purpose | Default OpenRouter (`ollama` selector) | Optional `vllm` pipeline |
 | --- | --- | --- |
 | Orchestrator routing | `v5` | `v5` |
 | Orchestrator offline/legacy graph indexing | `v2` | `v2` |
@@ -300,7 +305,71 @@ RERANKER_MODEL_PATH=/app/models/Qwen3-Reranker-0.6B
 ```
 
 Cloud runtime secrets and environment variables configure Redis, Pinecone,
-Memgraph, MongoDB, Ollama, Tavily, and LangSmith.
+Memgraph, MongoDB, OpenRouter, Tavily, and LangSmith. Ollama remains available
+for explicitly selected offline post-processing and reranking paths.
+
+The deployment definitions are [the standard Cloud Run workflow](../.github/workflows/deploy.yml)
+and [the optional vLLM workflow](../.github/workflows/deploy-vllm.yml). Provision an
+Artifact Registry repository, Workload Identity Federation, build/runtime service
+accounts, and the credentials/environment variables referenced by those workflows.
+The standard workflow deploys the backend and static frontend separately; the
+vLLM workflow additionally hosts a model service with the necessary invoker role.
+Selected databases must already contain the migrated data. Cloud deployments do
+not require a remote graph or document database when the corresponding local
+adapters are selected. Deployment is separate from the offline quality workflow.
+
+## Setup And Offline Checks
+
+Use Python 3.11 (the dependency contract supports `>=3.11,<3.14`) and uv
+**0.12.3**, pinned by `pyproject.toml`. Provision the locked dependencies before
+running the checks; installation downloads packages and is separate from offline
+test execution:
+
+```bash
+uv sync --locked --group dev --group evaluation
+uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
+uv run --no-sync python scripts/check_offline.py
+```
+
+Run these from a clean checkout without a `.env`, credentials, `data/`,
+`storage/`, or downloaded `models/`. The default suite uses synthetic chunks,
+graphs, traces, and provider responses. Retrieval/storage tests replace embeddings
+with mocks or in-memory implementations; model factory and provenance tests use
+fake providers and never assess live answer quality. The offline harness clears
+inherited environment and credentials, isolates user/model caches, disables
+tracing and model downloads, and denies and records Python socket attempts
+before imports, including child Python processes.
+`--no-sync` prevents uv from resolving or downloading dependencies during checks.
+Hosted CI additionally uses an isolated network namespace for system-wide denial;
+a local harness run establishes Python socket denial. Hosted CI results remain
+unverified until an actual workflow run is inspected.
+
+The prepared-storage smoke tests are a separate integration boundary: they need
+a compatible final storage snapshot and a local embedding model, and are marked
+`local_assets`. The default harness skips them with explicit reasons. After
+separately provisioning the required local assets and integration configuration,
+run them directly outside the offline harness:
+
+```bash
+uv run --no-sync pytest -q -ra tests/test_retrieval_storage_smoke.py --run-local-assets
+```
+
+The offline harness blocks private assets and clears integration configuration,
+so passing `--run-local-assets` to it cannot run these integration checks.
+Real Redis, Pinecone, MongoDB, Neo4j/Memgraph, OpenRouter, and Tavily behavior is
+not established by the offline suite. Starting the app or running a
+prepared-storage benchmark requires those selected dependencies; the basic
+application is not a zero-setup fixture demo.
+
+For application use, provision the selected stores and model credentials, then
+follow [the pipeline runbook](optimized_pipeline_runbook.md#running-the-app-locally).
+The default runtime needs `OPENROUTER_API_KEY`, prepared local document/property
+graph files, Redis index storage, Pinecone vectors, and MongoDB for checkpoint
+and session services. Tavily credentials are needed for web fallback.
+Remote document and graph databases are optional adapter choices; local/Redis
+vector storage and local index storage are also supported by explicit settings.
+Runtime serving does not build or migrate storage.
 
 ## Testing And Evaluation
 
@@ -355,9 +424,14 @@ Historical trace configuration is `needs verification` unless trace metadata
 proves it. AgentEvals/OpenEvals stay optional. Explicit, completeness-aware
 publication writes sanitized,
 commit-friendly scorecards and provenance to `reports/evaluation` without
-copying raw traces or evidence. See `docs/runtime_evaluation.md`,
-`evals/runtime/scenarios_review.md`, and
-`evals/retrieval/benchmark_cases_review.md`.
+copying raw traces or evidence. See [the evaluation guide](runtime_evaluation.md),
+[generated runtime scenario review](../evals/runtime/scenarios_review.md), and
+[retrieval contract](../evals/retrieval/benchmark_cases.jsonl).
+
+The [published evidence](../reports/evaluation/README.md) is historical and
+incomplete. It is retained for inspection, not as a current answer-quality
+baseline or a measured graph advantage. Historical semantic errors and skips
+remain visible; unmeasured dimensions are unavailable.
 
 ## Current Design Boundaries
 
@@ -409,10 +483,6 @@ Important boundaries to preserve:
 
 - `docs/optimized_pipeline_runbook.md`: how to run processing and build final
   storage.
-- `docs/remnote_parser_optimization_review.md`: parser optimization rationale.
-- `docs/remnote_llm_postprocessing_review.md`: post-processing rationale.
-- `docs/remnote_retrieval_optimization_review.md`: retrieval optimization
-  rationale.
 - `docs/runtime_evaluation.md`: offline, live, framework, judge, reliability,
   and scenario-maintenance guidance.
 - `tests/`: executable examples of the main current contracts.
