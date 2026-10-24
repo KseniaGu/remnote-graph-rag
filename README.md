@@ -41,7 +41,7 @@ See the [architecture and configuration](docs/project_overview.md) for decisions
 active prompts, optional backends, and limitations.
 
 <details>
-<summary>More application screenshots</summary>
+<summary><strong>More application screenshots — click to expand</strong></summary>
 
 ![Knowledge graph visualization](app/assets/visualization.png)
 ![Web research response](app/assets/research.png)
