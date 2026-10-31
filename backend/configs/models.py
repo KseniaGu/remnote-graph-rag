@@ -241,7 +241,7 @@ class ResearcherModelSettings(BaseSettings):
         request_timeout=120.0,
         provider=LLMProviderType.openrouter,
     )
-    prompt_version: str = "v5"
+    prompt_version: str = "v6"
 
 
 class ModelSettings(BaseSettings):
@@ -264,7 +264,7 @@ class ModelSettings(BaseSettings):
     #     top_p=1.0,
     #     num_predict=2048,
     #     request_timeout=120.0,
-    #     prompt_version={"graph_index": "v2", "routing": "v5"},
+    #     prompt_version={"graph_index": "v2", "routing": "v6"},
     # )
     orchestrator: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.orchestrator,
@@ -273,7 +273,7 @@ class ModelSettings(BaseSettings):
         temperature=0.0,
         max_tokens=2048,
         request_timeout=120.0,
-        prompt_version={"graph_index": "v2", "routing": "v5"},
+        prompt_version={"graph_index": "v2", "routing": "v6"},
         provider=LLMProviderType.openrouter,
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B (same instance as orchestrator)
@@ -286,7 +286,7 @@ class ModelSettings(BaseSettings):
     #     top_p=0.3,
     #     num_predict=512,
     #     request_timeout=120.0,
-    #     prompt_version="v6",
+    #     prompt_version="v7",
     # )
     retriever: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.retriever,
@@ -295,7 +295,7 @@ class ModelSettings(BaseSettings):
         top_p=0.3,
         max_tokens=512,
         request_timeout=120.0,
-        prompt_version="v6",
+        prompt_version="v7",
         provider=LLMProviderType.openrouter,
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
@@ -372,7 +372,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.0,
             max_tokens=2048,
-            prompt_version={"graph_index": "v2", "routing": "v5"},
+            prompt_version={"graph_index": "v2", "routing": "v6"},
         ),
         retriever=OpenAISettings(
             role=ModelRoleType.retriever,
@@ -381,7 +381,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.0,
             max_tokens=512,
-            prompt_version="v6",
+            prompt_version="v7",
         ),
         researcher=ResearcherModelSettings(
             with_tools=OpenAISettings(

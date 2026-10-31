@@ -5,6 +5,22 @@ RETRIEVER_V6_PROMPT = Path("backend/llm/prompts/learner_workflow/retriever/v6.ya
 
 
 class RetrieverPromptTests(unittest.TestCase):
+    def test_active_prompt_requires_explicit_topic_policy(self) -> None:
+        prompt_path = Path("backend/llm/prompts/learner_workflow/retriever/v7.yaml")
+        self.assertTrue(prompt_path.is_file(), "Retriever v7 prompt must exist")
+        prompt = prompt_path.read_text(encoding="utf-8")
+        self.assertIn('"topic_policy":"broad","required_topics":[]', prompt)
+        self.assertIn(
+            '"topic_policy":"named","required_topics":[["RetNet","Retentive Network"]]',
+            prompt,
+        )
+        self.assertIn("only after an in-scope route", prompt)
+        self.assertIn("Never guess or invent an expansion", prompt)
+        self.assertIn(
+            "Never pass topic_policy or required_topics to get_subgraphs_to_visualize",
+            prompt,
+        )
+
     def test_named_topics_have_explicit_adequacy_requirements(self) -> None:
         prompt = RETRIEVER_V6_PROMPT.read_text(encoding="utf-8")
 

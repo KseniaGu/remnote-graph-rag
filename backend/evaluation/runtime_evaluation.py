@@ -8,6 +8,7 @@ import math
 import re
 import statistics
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from itertools import combinations
 from pathlib import Path
@@ -15,6 +16,12 @@ from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from backend.evaluation.portfolio_budget import (
+    EvaluationBudgetExceeded,
+    EvaluationBudgetUnavailable,
+    current_evaluation_budget,
+)
 
 SCHEMA_VERSION = "runtime-evaluation"
 EVIDENCE_ITEM_LIMIT = 10
@@ -40,7 +47,7 @@ SECRET_KEY_PARTS = (
     "credential",
 )
 EVIDENCE_ID_RE = re.compile(r"\b(?:chunk|concept|rel)_[A-Za-z0-9_:.-]+\b")
-JUDGE_RUBRIC_VERSION = "runtime-semantic-v1"
+JUDGE_RUBRIC_VERSION = "runtime-semantic-v2"
 SEMANTIC_JUDGE_OUTPUT_TOKEN_LIMITS = {
     "claim_faithfulness": 4096,
     "analyst_usefulness": 512,
@@ -96,6 +103,8 @@ class StructuredOutputMethodJudge(BaseChatModel):
     """Makes OpenEvals use the selected structured-output transport."""
 
     wrapped: Any = Field(exclude=True)
+    strict_structured_output: bool = False
+    last_raw: Any = Field(default=None, exclude=True)
     structured_output_method: Literal[
         "function_calling", "json_schema", "json_mode"
     ] = "function_calling"
@@ -118,11 +127,29 @@ class StructuredOutputMethodJudge(BaseChatModel):
         return await self.wrapped._agenerate(messages, **kwargs)
 
     def with_structured_output(self, schema: dict | type, **kwargs: Any) -> Any:
+        if not self.strict_structured_output:
+            return self.wrapped.with_structured_output(
+                schema, method=self.structured_output_method, **kwargs
+            )
+        from langchain_core.runnables import RunnableLambda
+
+        def unpack(envelope: dict) -> Any:
+            self.last_raw = envelope.get("raw")
+            if envelope.get("parsing_error") is not None:
+                raise envelope["parsing_error"]
+            parsed = envelope.get("parsed")
+            if (
+                not isinstance(parsed, dict)
+                or set(parsed) != {"score", "reasoning"}
+                or not isinstance(parsed["score"], bool)
+                or not isinstance(parsed["reasoning"], str)
+            ):
+                raise ValueError("judge output does not match the boolean score schema")
+            return parsed
+
         return self.wrapped.with_structured_output(
-            schema,
-            method=self.structured_output_method,
-            **kwargs,
-        )
+            schema, method=self.structured_output_method, strict=True, include_raw=True
+        ) | RunnableLambda(unpack)
 
 
 class ScenarioInput(StrictModel):
@@ -272,11 +299,25 @@ class ProviderObservation(StrictModel):
     model: str = ""
     status: str = "success"
     stop_reason: str = ""
-    input_tokens: int = 0
-    output_tokens: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    reported_total_tokens: int | None = None
+    token_sources: dict[str, str] = Field(default_factory=dict)
     content_present: bool = False
     tool_call_count: int = 0
     configured_output_token_limit: int | None = None
+
+    @field_validator(
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "reported_total_tokens",
+        mode="before",
+    )
+    @classmethod
+    def normalize_usage_value(cls, value: Any) -> int | None:
+        return _observed_token_count(value)
 
 
 class FailureObservation(StrictModel):
@@ -299,14 +340,139 @@ class GraphObservation(StrictModel):
 
 class RuntimeUsage(StrictModel):
     latency_seconds: float | None = None
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    usage_method: str = "legacy_unknown"
+    token_coverage: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    turn_telemetry: dict[str, Any] = Field(default_factory=dict)
     logical_llm_calls: int = 0
-    provider_attempts: int = 0
-    retries: int = 0
+    provider_attempts: int | None = None
+    retries: int | None = None
     tavily_searches: int = 0
     reported_cost: float | None = None
+
+    @field_validator(
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "provider_attempts",
+        "retries",
+        mode="before",
+    )
+    @classmethod
+    def normalize_usage_value(cls, value: Any) -> int | None:
+        return _observed_token_count(value)
+
+
+def _observed_token_count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _aggregate_event_usage(
+    providers: list[ProviderObservation], *, attempted: int | None
+) -> RuntimeUsage:
+    """Aggregate captured attempts by event ID without treating missing data as zero."""
+    grouped: dict[str, list[ProviderObservation]] = {}
+    missing_id = False
+    for provider in providers:
+        if not provider.run_id:
+            missing_id = True
+            continue
+        grouped.setdefault(provider.run_id, []).append(provider)
+    # A conflicted identity makes the attempt set uncertain even if one token
+    # component happens to agree across the conflicting observations.
+    conflicting_ids = {
+        event_id
+        for event_id, events in grouped.items()
+        if len(
+            {
+                (
+                    event.input_tokens,
+                    event.output_tokens,
+                    event.total_tokens,
+                    event.node,
+                    event.provider,
+                    event.model,
+                    event.status,
+                    event.configured_provider,
+                    event.configured_model,
+                    event.stop_reason,
+                    event.configured_output_token_limit,
+                    event.reported_total_tokens,
+                    tuple(sorted(event.token_sources.items())),
+                )
+                for event in events
+            }
+        )
+        > 1
+    }
+    coverage = {}
+    totals = {}
+    for field in ("input_tokens", "output_tokens", "total_tokens"):
+        known = []
+        conflict = False
+        for event_id, events in grouped.items():
+            if event_id in conflicting_ids:
+                continue
+            values = {getattr(event, field) for event in events}
+            if len(values) != 1:
+                conflict = True
+            else:
+                value = values.pop()
+                if value is not None:
+                    known.append(value)
+        subtotal = sum(known) if known else None
+        complete = (
+            attempted is not None
+            and attempted > 0
+            and len(grouped) == attempted
+            and len(known) == attempted
+            and not missing_id
+            and not conflict
+            and not conflicting_ids
+        )
+        coverage[field] = {
+            "observed": len(known),
+            "attempted": attempted,
+            "subtotal": subtotal,
+            "complete": complete,
+        }
+        totals[field] = subtotal if complete else None
+    return RuntimeUsage(
+        **totals,
+        usage_method="event_unique_v1",
+        token_coverage=coverage,
+        provider_attempts=attempted,
+    )
+
+
+def _complete_usage_value(usage: RuntimeUsage, field: str) -> int | None:
+    """Return only a value supported by internally consistent event coverage."""
+    if usage.usage_method != "event_unique_v1":
+        return None
+    coverage = usage.token_coverage.get(field, {})
+    attempted = coverage.get("attempted")
+    observed = coverage.get("observed")
+    value = getattr(usage, field)
+    if (
+        coverage.get("complete") is not True
+        or isinstance(attempted, bool)
+        or not isinstance(attempted, int)
+        or attempted <= 0
+        or usage.provider_attempts != attempted
+        or isinstance(observed, bool)
+        or not isinstance(observed, int)
+        or observed != attempted
+        or isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or coverage.get("subtotal") != value
+    ):
+        return None
+    return value
 
 
 class RuntimeRecord(StrictModel):
@@ -403,13 +569,19 @@ class SemanticJudgeResult(StrictModel):
     judge_provider: str
     judge_model: str
     status: Literal["success", "skipped", "error"]
+    usage: RuntimeUsage = Field(default_factory=RuntimeUsage)
+    usage_sources: dict[str, str] = Field(default_factory=dict)
+    prior_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    reported_total_tokens: int | None = None
     score: bool | float | None = None
     reason: str = ""
     provider_call_attempted: bool = False
     error_type: str = ""
     error_cause_types: list[str] = Field(default_factory=list)
     raw_output_omitted: bool = False
-    transport_status: Literal["not_attempted", "completed", "failed"] = "not_attempted"
+    transport_status: Literal["not_attempted", "completed", "failed", "unknown"] = (
+        "not_attempted"
+    )
     http_status_code: int | None = None
     stop_reason: str = ""
     configured_output_token_limit: int | None = None
@@ -422,8 +594,12 @@ class SemanticJudgeResult(StrictModel):
         "schema_validation_failure",
         "structured_output_parse_failure",
         "provider_failure",
+        "unclassified_failure",
     ] = "not_attempted"
     confirmed_truncation: bool = False
+    observed_model: str = ""
+    observed_provider: str = ""
+    observed_request_id: str = ""
     evidence_ids: list[str] = Field(default_factory=list)
     supported_claims: int | None = None
     partial_claims: int | None = None
@@ -607,6 +783,25 @@ def normalize_trace_runs(
         logical_calls = len(logical_parent_ids)
     provider_attempts = len(providers)
     reported_cost = _float_or_none(root.get("total_cost"))
+    attempted = root.get("provider_attempts")
+    if isinstance(attempted, bool) or not isinstance(attempted, int) or attempted < 0:
+        attempted = None
+    usage = _aggregate_event_usage(providers, attempted=attempted)
+    usage.latency_seconds = _float_or_none(root.get("latency"))
+    usage.logical_llm_calls = logical_calls
+    usage.provider_attempts = attempted
+    usage.retries = _observed_token_count(root.get("retries"))
+    usage.tavily_searches = sum(tool.name == "deep_web_research" for tool in tools)
+    usage.reported_cost = reported_cost
+    usage.turn_telemetry = {
+        "source": "trace_root",
+        "captured_provider_event_observations": provider_attempts,
+        "unique_captured_provider_ids": len({p.run_id for p in providers if p.run_id}),
+        "input_tokens": _observed_token_count(root.get("prompt_tokens")),
+        "output_tokens": _observed_token_count(root.get("completion_tokens")),
+        "total_tokens": _observed_token_count(root.get("total_tokens")),
+        "availability": "reported_root_only",
+    }
 
     return RuntimeRecord(
         scenario_id=scenario.id,
@@ -649,17 +844,7 @@ def normalize_trace_runs(
                 or route_decisions[-1:] == ["__end__"]
             )
         ),
-        usage=RuntimeUsage(
-            latency_seconds=_float_or_none(root.get("latency")),
-            input_tokens=_int_or_zero(root.get("prompt_tokens")),
-            output_tokens=_int_or_zero(root.get("completion_tokens")),
-            total_tokens=_int_or_zero(root.get("total_tokens")),
-            logical_llm_calls=logical_calls,
-            provider_attempts=provider_attempts,
-            retries=max(0, provider_attempts - logical_calls),
-            tavily_searches=sum(tool.name == "deep_web_research" for tool in tools),
-            reported_cost=reported_cost,
-        ),
+        usage=usage,
         provenance={
             "revision_id": str(metadata.get("revision_id") or ""),
             "evaluation_fingerprint": str(metadata.get("evaluation_fingerprint") or ""),
@@ -1006,7 +1191,7 @@ def score_runtime_record(
         checks,
         "budget",
         "total_tokens",
-        record.usage.total_tokens,
+        _complete_usage_value(record.usage, "total_tokens"),
         budgets.max_total_tokens,
         minimum=False,
         gating=False,
@@ -1063,9 +1248,9 @@ def score_runtime_record(
             "provider_attempts": record.usage.provider_attempts,
             "retries": record.usage.retries,
             "tavily_searches": record.usage.tavily_searches,
-            "total_tokens": record.usage.total_tokens,
-            "input_tokens": record.usage.input_tokens,
-            "output_tokens": record.usage.output_tokens,
+            "total_tokens": _complete_usage_value(record.usage, "total_tokens"),
+            "input_tokens": _complete_usage_value(record.usage, "input_tokens"),
+            "output_tokens": _complete_usage_value(record.usage, "output_tokens"),
             "latency_seconds": record.usage.latency_seconds,
             "path_efficiency_ratio": path_efficiency,
             "loop_detected": loop_detected,
@@ -1106,6 +1291,9 @@ def summarize_runtime_results(
     records: list[RuntimeRecord], results: list[RuntimeCaseResult]
 ) -> dict[str, Any]:
     """Builds separate pass/failure and reliability summaries without one score."""
+    # Reuse the scorecard's availability/coverage rule for standalone summaries.
+    from backend.evaluation.evaluation_reporting import _token_usage_summary
+
     by_dimension: dict[str, Counter[str]] = defaultdict(Counter)
     gating_by_dimension: dict[str, Counter[str]] = defaultdict(Counter)
     for result in results:
@@ -1121,10 +1309,23 @@ def summarize_runtime_results(
         records_by_scenario[record.scenario_id].append(record)
     for result in results:
         results_by_scenario[result.scenario_id].append(result)
-    for scenario_id, scenario_records in records_by_scenario.items():
+    event_occurrences = Counter(
+        event_id
+        for record in records
+        for event_id in {
+            provider.run_id for provider in record.providers if provider.run_id
+        }
+    )
+    duplicate_event_ids = {
+        event_id for event_id, count in event_occurrences.items() if count > 1
+    }
+    for scenario_id in sorted(records_by_scenario.keys() | results_by_scenario.keys()):
+        scenario_records = records_by_scenario[scenario_id]
         scenario_results = results_by_scenario[scenario_id]
         routes = [tuple(record.worker_sequence) for record in scenario_records]
-        route_consistency = max(Counter(routes).values()) / len(routes)
+        route_consistency = (
+            max(Counter(routes).values()) / len(routes) if routes else None
+        )
         evidence_sets = [set(record.evidence_ids) for record in scenario_records]
         overlaps = [
             _jaccard(left, right) for left, right in combinations(evidence_sets, 2)
@@ -1136,11 +1337,48 @@ def summarize_runtime_results(
             for record in scenario_records
             if record.usage.latency_seconds is not None
         ]
-        tokens = [record.usage.total_tokens for record in scenario_records]
+
+        def identity(item: RuntimeRecord | RuntimeCaseResult) -> tuple[Any, ...]:
+            return (
+                item.run_id,
+                item.scenario_version,
+                item.repetition,
+                item.source_mode,
+            )
+
+        record_counts = Counter(map(identity, scenario_records))
+        result_counts = Counter(map(identity, scenario_results))
+        matched = {
+            key
+            for key, count in record_counts.items()
+            if count == 1 and result_counts.get(key) == 1
+        }
+        paired = [record for record in scenario_records if identity(record) in matched]
+        pairing_incomplete = len(paired) != len(scenario_records) or len(
+            matched
+        ) != len(scenario_results)
+        usage_summary = _token_usage_summary(
+            [record.model_dump(mode="json") for record in paired],
+            pairing_incomplete=pairing_incomplete,
+            excluded_event_ids=duplicate_event_ids,
+        )
+        tokens = [
+            value
+            for record in paired
+            if (value := _complete_usage_value(record.usage, "total_tokens"))
+            is not None
+            and _token_usage_summary(
+                [record.model_dump(mode="json")],
+                excluded_event_ids=duplicate_event_ids,
+            )["token_coverage"]["total_tokens"]["complete_runs"]
+            == 1
+        ]
         reliability[scenario_id] = {
             "run_count": run_count,
-            "pass_rate": pass_count / run_count,
-            "pass_rate_wilson_95": list(_wilson_interval(pass_count, run_count)),
+            "pass_rate": pass_count / run_count if run_count else None,
+            "pass_rate_wilson_95": (
+                list(_wilson_interval(pass_count, run_count)) if run_count else None
+            ),
             "route_consistency": route_consistency,
             "evidence_set_stability": sum(overlaps) / len(overlaps)
             if overlaps
@@ -1152,6 +1390,8 @@ def summarize_runtime_results(
                     for result in scenario_results
                 )
                 / run_count
+                if run_count
+                else None
             ),
             "output_limit_hit_rate": (
                 sum(
@@ -1159,8 +1399,19 @@ def summarize_runtime_results(
                     for result in scenario_results
                 )
                 / run_count
+                if run_count
+                else None
             ),
             "tokens": _distribution(tokens),
+            "token_coverage": usage_summary["token_coverage"],
+            "token_distributions": {
+                field: usage_summary[field]
+                for field in ("input_tokens", "output_tokens", "total_tokens")
+            },
+            "token_usage_scope": (
+                "Provided paired records only; omitted or failed manifests require "
+                "separate campaign accounting."
+            ),
             "latency_seconds": _distribution(latencies),
             "failure_type_frequency": dict(
                 Counter(
@@ -1228,10 +1479,18 @@ def write_runtime_artifacts(
         "judge_skipped_results": sum(
             item.status == "skipped" for item in judge_results or []
         ),
-        "runtime_provider_attempts": sum(
-            record.usage.provider_attempts
-            for record in records
-            if record.source_mode == "controlled_live"
+        "runtime_provider_attempts": (
+            sum(
+                record.usage.provider_attempts
+                for record in records
+                if record.source_mode == "controlled_live"
+            )
+            if all(
+                record.usage.provider_attempts is not None
+                for record in records
+                if record.source_mode == "controlled_live"
+            )
+            else None
         ),
         "runtime_tavily_attempts": sum(
             record.usage.tavily_searches
@@ -1301,6 +1560,81 @@ def evaluate_with_agentevals(
     }
 
 
+@contextmanager
+def _judge_transport_boundary(judge: Any, provider: str, model: str):
+    """Reserve immediately before HTTP dispatch; setup failures do not spend a call."""
+    wrapped = getattr(judge, "wrapped", judge)
+    sdk = getattr(wrapped, "client", None)
+    client = getattr(getattr(sdk, "sdk_configuration", None), "client", None)
+    state = {"attempted": False}
+    budget = current_evaluation_budget()
+    if client is None or not hasattr(client, "event_hooks"):
+        # Test/injected evaluators cannot expose a transport boundary; conservatively
+        # account for invocation when one is supplied.
+        state["injected"] = True
+        yield state
+        return
+    hooks = client.event_hooks["request"]
+
+    def before_request(_request: Any) -> None:
+        if budget is not None:
+            budget.reserve("judge", provider=provider, model=model)
+        state["attempted"] = True
+
+    def after_response(response: Any) -> None:
+        state["response_metadata"] = {"http_status_code": response.status_code}
+        try:
+            # Never buffer a streamed judge response merely for accounting.
+            if (
+                "application/json"
+                not in response.headers.get("content-type", "").lower()
+            ):
+                return
+            body = json.loads(response.request.content)
+            if isinstance(body, dict) and body.get("stream") is True:
+                return
+            response.read()
+            payload = response.json()
+            if isinstance(payload, dict):
+                state["response_metadata"].update(
+                    {
+                        key: payload.get(key)
+                        for key in ("model", "provider", "id")
+                        if isinstance(payload.get(key), str)
+                    }
+                )
+                if isinstance(payload.get("usage"), dict):
+                    state["response_metadata"]["token_usage"] = {
+                        key: payload["usage"][key]
+                        for key in (
+                            "prompt_tokens",
+                            "completion_tokens",
+                            "total_tokens",
+                        )
+                        if key in payload["usage"]
+                    }
+        except Exception:
+            # Accounting must not change request behavior or expose payloads.
+            pass
+
+    response_hooks = client.event_hooks["response"]
+    hooks.append(before_request)
+    response_hooks.append(after_response)
+    try:
+        yield state
+    finally:
+        hooks.remove(before_request)
+        response_hooks.remove(after_response)
+
+
+def _reserve_injected_judge(state: dict, provider: str, model: str) -> None:
+    if state.get("injected"):
+        budget = current_evaluation_budget()
+        if budget is not None:
+            budget.reserve("judge", provider=provider, model=model)
+        state["attempted"] = True
+
+
 def evaluate_with_openevals_judge(
     scenario: RuntimeScenario,
     record: RuntimeRecord,
@@ -1311,6 +1645,7 @@ def evaluate_with_openevals_judge(
     judge_model: str,
     configured_output_token_limit: int | None = None,
     evaluator_factory: Any | None = None,
+    strict_structured_output: bool = False,
     structured_output_method: Literal[
         "function_calling", "json_schema", "json_mode"
     ] = "function_calling",
@@ -1326,6 +1661,8 @@ def evaluate_with_openevals_judge(
         raise ValueError(
             f"scenario {scenario.id!r} does not opt into judge dimension {dimension!r}"
         )
+
+    transport_metadata: dict[str, Any] = {}
 
     def error(
         reason: str,
@@ -1351,7 +1688,13 @@ def evaluate_with_openevals_judge(
             error_cause_types=error_types[1:],
             raw_output_omitted=provider_call_attempted,
             configured_output_token_limit=configured_output_token_limit,
-            **_judge_diagnostics(exc=exc, raw=raw, attempted=provider_call_attempted),
+            **_judge_diagnostics(
+                exc=exc,
+                raw=raw,
+                attempted=provider_call_attempted,
+                transport_metadata=transport_metadata,
+                normalized_untrusted=judge_provider == "openrouter",
+            ),
             evidence_ids=record.evidence_ids,
         )
 
@@ -1375,19 +1718,28 @@ def evaluate_with_openevals_judge(
             )
         raw_response: Any = None
         schema_instruction = _structured_output_instruction(FaithfulnessAssessment)
+        attempted = False
         try:
             if evaluator_factory is not None:
-                raw_assessment = evaluator_factory(
-                    rubric=rubric,
-                    judge=judge,
-                    schema=FaithfulnessAssessment,
-                )(
-                    request=record.input.user_message,
-                    response=record.final_response,
-                    evidence=[
-                        item.model_dump(mode="json") for item in record.bounded_evidence
-                    ],
+                evaluator = evaluator_factory(
+                    rubric=rubric, judge=judge, schema=FaithfulnessAssessment
                 )
+                with _judge_transport_boundary(
+                    judge, judge_provider, judge_model
+                ) as state:
+                    _reserve_injected_judge(state, judge_provider, judge_model)
+                    try:
+                        raw_assessment = evaluator(
+                            request=record.input.user_message,
+                            response=record.final_response,
+                            evidence=[
+                                item.model_dump(mode="json")
+                                for item in record.bounded_evidence
+                            ],
+                        )
+                    finally:
+                        attempted = state["attempted"]
+                        transport_metadata.update(state.get("response_metadata", {}))
                 raw_response = raw_assessment
             else:
                 from langchain_core.messages import HumanMessage, SystemMessage
@@ -1396,36 +1748,45 @@ def evaluate_with_openevals_judge(
                     FaithfulnessAssessment,
                     method=structured_output_method,
                     include_raw=True,
+                    **({"strict": True} if strict_structured_output else {}),
                 )
-                envelope = structured_judge.invoke(
-                    [
-                        SystemMessage(
-                            content=(
-                                "Evaluate claim faithfulness using only the supplied "
-                                "bounded evidence. Do not use external knowledge. "
-                                + rubric
-                                + " Return compact results: at most 32 atomic claims; "
-                                "claim text at most 400 characters; at most five evidence "
-                                "IDs and a 240-character reason per claim. "
-                                "Use only supported, partial, or unsupported verdicts. "
-                                + schema_instruction
-                            )
-                        ),
-                        HumanMessage(
-                            content=json.dumps(
-                                {
-                                    "request": record.input.user_message,
-                                    "response": record.final_response,
-                                    "evidence": [
-                                        item.model_dump(mode="json")
-                                        for item in record.bounded_evidence
-                                    ],
-                                },
-                                ensure_ascii=False,
-                            )
-                        ),
-                    ]
-                )
+                with _judge_transport_boundary(
+                    judge, judge_provider, judge_model
+                ) as state:
+                    _reserve_injected_judge(state, judge_provider, judge_model)
+                    try:
+                        envelope = structured_judge.invoke(
+                            [
+                                SystemMessage(
+                                    content=(
+                                        "Evaluate claim faithfulness using only the supplied "
+                                        "bounded evidence. Do not use external knowledge. "
+                                        + rubric
+                                        + " Return compact results: at most 32 atomic claims; "
+                                        "claim text at most 400 characters; at most five evidence "
+                                        "IDs and a 240-character reason per claim. "
+                                        "Use only supported, partial, or unsupported verdicts. "
+                                        + schema_instruction
+                                    )
+                                ),
+                                HumanMessage(
+                                    content=json.dumps(
+                                        {
+                                            "request": record.input.user_message,
+                                            "response": record.final_response,
+                                            "evidence": [
+                                                item.model_dump(mode="json")
+                                                for item in record.bounded_evidence
+                                            ],
+                                        },
+                                        ensure_ascii=False,
+                                    )
+                                ),
+                            ]
+                        )
+                    finally:
+                        attempted = state["attempted"]
+                        transport_metadata.update(state.get("response_metadata", {}))
                 if not isinstance(envelope, dict):
                     raise TypeError("structured judge returned a non-mapping envelope")
                 raw_response = envelope.get("raw")
@@ -1433,16 +1794,18 @@ def evaluate_with_openevals_judge(
                 if parsing_error is not None:
                     return error(
                         _safe_judge_failure_reason(parsing_error),
-                        provider_call_attempted=True,
+                        provider_call_attempted=attempted,
                         exc=parsing_error,
                         raw=raw_response,
                     )
                 raw_assessment = envelope.get("parsed")
             assessment = FaithfulnessAssessment.model_validate(raw_assessment)
+        except (EvaluationBudgetExceeded, EvaluationBudgetUnavailable):
+            raise
         except Exception as exc:
             return error(
                 _safe_judge_failure_reason(exc),
-                provider_call_attempted=True,
+                provider_call_attempted=attempted,
                 exc=exc,
                 raw=raw_response,
             )
@@ -1466,7 +1829,13 @@ def evaluate_with_openevals_judge(
             provider_call_attempted=True,
             raw_output_omitted=True,
             configured_output_token_limit=configured_output_token_limit,
-            **_judge_diagnostics(exc=None, raw=raw_response, attempted=True),
+            **_judge_diagnostics(
+                exc=None,
+                raw=raw_response,
+                attempted=True,
+                transport_metadata=transport_metadata,
+                normalized_untrusted=judge_provider == "openrouter",
+            ),
             evidence_ids=record.evidence_ids,
             supported_claims=supported,
             partial_claims=partial,
@@ -1492,6 +1861,7 @@ def evaluate_with_openevals_judge(
         judge = StructuredOutputMethodJudge(
             wrapped=judge,
             structured_output_method=structured_output_method,
+            strict_structured_output=strict_structured_output,
         )
 
     prompt = f"""Evaluate only the named dimension for this Graph RAG response.
@@ -1500,43 +1870,50 @@ context, runtime outcome, response, and bounded graph when present.
 
 <dimension>{dimension}</dimension>
 <rubric>{rubric}</rubric>
-<required_output_schema>
-{{"score": true_or_false, "reason": "concise explanation, at most 320 characters"}}
-</required_output_schema>
 <inputs>{{inputs}}</inputs>
 <outputs>{{outputs}}</outputs>
 """
-    evaluator = evaluator_factory(
-        prompt=prompt,
-        feedback_key=dimension,
-        judge=judge,
-        continuous=False,
-        use_reasoning=True,
-    )
+    attempted = False
     try:
-        raw_result = evaluator(
-            inputs={
-                "request": record.input.user_message,
-                "recent_history": record.input.message_history,
-                "session_summary": record.input.session_summary,
-            },
-            outputs={
-                "response": record.final_response,
-                "worker_sequence": record.worker_sequence,
-                "request_scope": record.request_scope,
-                "output_modality": record.output_modality,
-                "evidence_ids": record.evidence_ids,
-                "graph": {
-                    "node_labels": record.graph.node_labels,
-                    "edges": record.graph.labeled_edges,
-                },
-            },
+        evaluator = evaluator_factory(
+            prompt=prompt,
+            feedback_key=dimension,
+            judge=judge,
+            continuous=False,
+            use_reasoning=True,
         )
+        with _judge_transport_boundary(judge, judge_provider, judge_model) as state:
+            _reserve_injected_judge(state, judge_provider, judge_model)
+            try:
+                raw_result = evaluator(
+                    inputs={
+                        "request": record.input.user_message,
+                        "recent_history": record.input.message_history,
+                        "session_summary": record.input.session_summary,
+                    },
+                    outputs={
+                        "response": record.final_response,
+                        "worker_sequence": record.worker_sequence,
+                        "request_scope": record.request_scope,
+                        "output_modality": record.output_modality,
+                        "evidence_ids": record.evidence_ids,
+                        "graph": {
+                            "node_labels": record.graph.node_labels,
+                            "edges": record.graph.labeled_edges,
+                        },
+                    },
+                )
+            finally:
+                attempted = state["attempted"]
+                transport_metadata.update(state.get("response_metadata", {}))
+    except (EvaluationBudgetExceeded, EvaluationBudgetUnavailable):
+        raise
     except Exception as exc:
         return error(
             _safe_judge_failure_reason(exc),
-            provider_call_attempted=True,
+            provider_call_attempted=attempted,
             exc=exc,
+            raw=getattr(judge, "last_raw", None),
         )
     if not isinstance(raw_result, dict):
         exc = TypeError("OpenEvals judge returned a non-mapping result")
@@ -1559,7 +1936,13 @@ context, runtime outcome, response, and bounded graph when present.
         provider_call_attempted=True,
         raw_output_omitted=True,
         configured_output_token_limit=configured_output_token_limit,
-        **_judge_diagnostics(exc=None, raw=raw_result, attempted=True),
+        **_judge_diagnostics(
+            exc=None,
+            raw=getattr(judge, "last_raw", None) or raw_result,
+            attempted=True,
+            transport_metadata=transport_metadata,
+            normalized_untrusted=judge_provider == "openrouter",
+        ),
         evidence_ids=record.evidence_ids,
     )
 
@@ -1576,19 +1959,34 @@ def _structured_output_instruction(schema: type[BaseModel]) -> str:
 
 
 def _judge_diagnostics(
-    *, exc: Exception | None, raw: Any, attempted: bool
+    *,
+    exc: Exception | None,
+    raw: Any,
+    attempted: bool,
+    transport_metadata: dict[str, Any] | None = None,
+    normalized_untrusted: bool = False,
 ) -> dict[str, Any]:
     """Extracts privacy-safe diagnostics without retaining model output."""
     if not attempted:
-        return {}
+        return {"usage": _aggregate_event_usage([], attempted=0)}
+    transport_metadata = transport_metadata or {}
     parser = _judge_parser_classification(exc)
     stop_reason, output_present, output_size, raw_http_status = (
         _judge_output_observation(raw)
     )
-    http_status = raw_http_status or _exception_http_status(exc)
-    transport_status = (
-        "completed" if raw is not None or parser != "provider_failure" else "failed"
+    http_status = _first_int(
+        transport_metadata.get("http_status_code"),
+        raw_http_status,
+        _exception_http_status(exc),
     )
+    if raw is not None or transport_metadata.get("http_status_code") is not None:
+        transport_status = "completed"
+    elif http_status is not None and http_status >= 400:
+        transport_status = "failed"
+    else:
+        transport_status = "unknown"
+    if parser == "provider_failure" and (http_status is None or http_status < 400):
+        parser = "unclassified_failure"
     normalized_stop = stop_reason.casefold().replace("-", "_")
     confirmed_truncation = normalized_stop in {
         "length",
@@ -1596,8 +1994,49 @@ def _judge_diagnostics(
         "max_token",
         "token_limit",
     }
+    raw_metadata = getattr(raw, "response_metadata", {}) if raw is not None else {}
+    raw_usage = getattr(raw, "usage_metadata", {}) if raw is not None else {}
+    transport_usage = transport_metadata.get("token_usage")
+    if isinstance(transport_usage, dict):
+        raw_metadata = {**(raw_metadata or {}), "token_usage": transport_usage}
+    fields = _provider_response_fields(
+        raw_metadata,
+        raw_usage,
+        normalized_untrusted=normalized_untrusted or isinstance(transport_usage, dict),
+        wire_captured=isinstance(transport_usage, dict),
+    )
+    request_id = str(
+        transport_metadata.get("id") or (raw_metadata or {}).get("id") or ""
+    )
+    judge_usage = _aggregate_event_usage(
+        [ProviderObservation(run_id=request_id, **fields)]
+        if raw is not None or transport_usage is not None
+        else [],
+        attempted=1,
+    )
+    judge_usage.provider_attempts = 1
     return {
+        "usage": judge_usage,
+        "usage_sources": fields["token_sources"],
+        "reported_total_tokens": fields["reported_total_tokens"],
         "transport_status": transport_status,
+        "observed_model": str(
+            transport_metadata.get("model") or ""
+            if "http_status_code" in transport_metadata
+            else getattr(raw, "response_metadata", {}).get("model_name")
+            or getattr(raw, "response_metadata", {}).get("model")
+            or ""
+        ),
+        "observed_provider": str(
+            transport_metadata.get("provider") or ""
+            if "http_status_code" in transport_metadata
+            else getattr(raw, "response_metadata", {}).get("provider") or ""
+        ),
+        "observed_request_id": str(
+            transport_metadata.get("id")
+            or getattr(raw, "response_metadata", {}).get("id")
+            or ""
+        ),
         "http_status_code": http_status,
         "stop_reason": stop_reason,
         "output_present": output_present,
@@ -1690,14 +2129,28 @@ def _safe_judge_failure_reason(exc: Exception) -> str:
 
 
 def _provider_response_fields(
-    response_metadata: Any, usage_metadata: Any
+    response_metadata: Any,
+    usage_metadata: Any,
+    *,
+    normalized_untrusted: bool = False,
+    wire_captured: bool = False,
 ) -> dict[str, Any]:
     """Normalizes only bounded response metadata shared by live and exported runs."""
     response = response_metadata if isinstance(response_metadata, dict) else {}
     usage = usage_metadata if isinstance(usage_metadata, dict) else {}
-    token_usage = response.get("token_usage", {})
-    if not isinstance(token_usage, dict):
+    # Verified wire evidence takes precedence irrespective of adapter labels.
+    normalized_untrusted = normalized_untrusted or wire_captured
+    wire_usage = response.get("token_usage")
+    if isinstance(wire_usage, dict) and (wire_captured or not normalized_untrusted):
+        # Captured OpenRouter wire fields override adapter-filled zeros.
+        token_usage = wire_usage
+        if normalized_untrusted:
+            usage = {}
+    else:
         token_usage = {}
+        if normalized_untrusted:
+            # Adapter/trace metadata alone cannot prove wire presence or validity.
+            usage = {}
     model = next(
         (
             str(value)
@@ -1711,6 +2164,48 @@ def _provider_response_fields(
     # ChatOpenRouter injects its adapter label even without a serving provider.
     if not provider and legacy_provider != "openrouter":
         provider = legacy_provider
+
+    def token(primary: Any, fallback: Any) -> tuple[int | None, str]:
+        # Preserve explicit zero; invalid metadata is unavailable, never a zero.
+        value = primary if primary is not None else fallback
+        source = (
+            "usage_metadata"
+            if primary is not None
+            else "wire_response"
+            if wire_captured
+            else "response_metadata"
+        )
+        if _observed_token_count(value) is None:
+            return None, "unavailable"
+        return value, source
+
+    input_tokens, input_source = token(
+        usage.get("input_tokens"),
+        token_usage.get(
+            "prompt_tokens",
+            token_usage.get(
+                "input_tokens",
+                response.get("prompt_eval_count") if not normalized_untrusted else None,
+            ),
+        ),
+    )
+    output_tokens, output_source = token(
+        usage.get("output_tokens"),
+        token_usage.get(
+            "completion_tokens",
+            token_usage.get(
+                "output_tokens",
+                response.get("eval_count") if not normalized_untrusted else None,
+            ),
+        ),
+    )
+    reported_total, total_source = token(
+        usage.get("total_tokens"), token_usage.get("total_tokens")
+    )
+    total = reported_total
+    if total is None and input_tokens is not None and output_tokens is not None:
+        total = input_tokens + output_tokens
+        total_source = "derived_input_output"
     return {
         "provider": str(provider or ""),
         "model": model,
@@ -1720,16 +2215,15 @@ def _provider_response_fields(
             or response.get("stop_reason")
             or ""
         ),
-        "input_tokens": _int_or_zero(
-            usage.get("input_tokens")
-            if usage.get("input_tokens") is not None
-            else token_usage.get("prompt_tokens")
-        ),
-        "output_tokens": _int_or_zero(
-            usage.get("output_tokens")
-            if usage.get("output_tokens") is not None
-            else token_usage.get("completion_tokens")
-        ),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total,
+        "reported_total_tokens": reported_total,
+        "token_sources": {
+            "input_tokens": input_source,
+            "output_tokens": output_source,
+            "total_tokens": total_source,
+        },
     }
 
 
@@ -1743,15 +2237,51 @@ def _provider_observation(run: dict[str, Any]) -> ProviderObservation:
         metadata = {}
     content = kwargs.get("content")
     tool_calls = kwargs.get("tool_calls")
+    adapter_provider = metadata.get("ls_provider")
+    observed_provider = response_metadata.get("model_provider")
+    normalized_untrusted = (
+        "openrouter" in (adapter_provider, observed_provider)
+        or run.get("name") == "ChatOpenRouter"
+        or not (adapter_provider or run.get("name") == "ChatOllama")
+    )
     response_fields = _provider_response_fields(
-        response_metadata, kwargs.get("usage_metadata")
+        response_metadata,
+        kwargs.get("usage_metadata"),
+        normalized_untrusted=normalized_untrusted,
     )
     for key, source in (
         ("input_tokens", "prompt_tokens"),
         ("output_tokens", "completion_tokens"),
     ):
-        if run.get(source) is not None:
-            response_fields[key] = _int_or_zero(run[source])
+        value = run.get(source)
+        if (
+            not normalized_untrusted
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        ):
+            response_fields[key] = value
+            response_fields["token_sources"][key] = "trace_run"
+    value = run.get("total_tokens")
+    if (
+        not normalized_untrusted
+        and isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 0
+    ):
+        response_fields["total_tokens"] = value
+        response_fields["reported_total_tokens"] = value
+        response_fields["token_sources"]["total_tokens"] = "trace_run"
+    elif response_fields["reported_total_tokens"] is None:
+        inp, out = response_fields["input_tokens"], response_fields["output_tokens"]
+        response_fields["total_tokens"] = (
+            inp + out if inp is not None and out is not None else None
+        )
+        response_fields["token_sources"]["total_tokens"] = (
+            "derived_input_output"
+            if response_fields["total_tokens"] is not None
+            else "unavailable"
+        )
     return ProviderObservation(
         run_id=str(run.get("_id") or ""),
         node=str(metadata.get("langgraph_node") or run.get("name") or ""),

@@ -168,6 +168,74 @@ def make_indexer(vector_store, docs, graph_store=None, settings=None):
 
 
 class AnalystRetrievalPipelineTests(unittest.TestCase):
+    def test_source_only_never_reads_graph_or_reranker_and_deduplicates_parents(self):
+        class NoGraphIndex:
+            def __init__(self, vector_store):
+                self.vector_store = vector_store
+
+            @property
+            def property_graph_store(self):
+                raise AssertionError("source-only must not access graph")
+
+        parent = FakeTextNode(
+            "parent",
+            "Adam uses adaptive moments.",
+            make_metadata(chunk_id="parent", source="Optimizers", path=["Optimizers"]),
+        )
+        passages = {
+            f"passage-{i}": FakeTextNode(
+                f"passage-{i}",
+                "Adam uses adaptive moments.",
+                make_metadata(
+                    docstore_node_kind="postprocessed_embedding_passage",
+                    parent_chunk_id="parent",
+                    chunk_id="parent",
+                ),
+            )
+            for i in range(2)
+        }
+        vector = FakeVectorStore(list(passages), [0.9, 0.8])
+        indexer = make_indexer(vector, {"parent": parent, **passages})
+        indexer.index = NoGraphIndex(vector)
+
+        class NoReranker:
+            def postprocess_nodes(self, *args, **kwargs):
+                raise AssertionError("source-only must not rerank")
+
+        with patch.object(
+            AnalystRetrievalPipeline,
+            "_create_configured_reranker",
+            side_effect=AssertionError("source-only must not initialize reranker"),
+        ):
+            pipeline = AnalystRetrievalPipeline(indexer, source_only=True)
+            explicit = AnalystRetrievalPipeline(
+                indexer, reranker=NoReranker(), source_only=True
+            )
+            self.assertIsNone(explicit.reranker)
+        result = pipeline._search_one("Adam optimizers")
+        self.assertEqual([item.node_id for item in result["sources"]], ["parent"])
+        self.assertEqual([], result["relations"])
+        output = pipeline.search(["Adam optimizers"])
+        self.assertEqual(output.count("[SOURCE]"), 1)
+        self.assertNotIn("[RELATION]", output)
+        self.assertIn("Chunk: parent", output)
+
+    def test_source_only_empty_and_vector_error(self):
+        pipeline = AnalystRetrievalPipeline(
+            make_indexer(FakeVectorStore([]), {}), source_only=True
+        )
+        self.assertEqual(pipeline.search(["missing"]), "No relevant information found.")
+
+        class FailedVector:
+            def query(self, query):
+                raise RuntimeError("offline test failure")
+
+        failed = AnalystRetrievalPipeline(
+            make_indexer(FailedVector(), {}), source_only=True
+        )
+        with self.assertRaisesRegex(RuntimeError, "offline test failure"):
+            failed.search(["missing"])
+
     def test_source_filtering_excludes_disabled_quarantined_empty_and_non_docstore_nodes(
         self,
     ) -> None:

@@ -1,6 +1,6 @@
 # Graph RAG evaluation
 
-Updated: 2026-10-23
+Updated: 2026-10-26
 
 ## Purpose and boundary
 
@@ -30,6 +30,7 @@ machine-readable representation.
 | `backend/evaluation/retrieval_benchmark.py` | Reviewed prepared-storage contracts, evidence/graph scoring, optional context-relevance labels, and review rendering. |
 | `backend/evaluation/runtime_evaluation.py` | Canonical runtime observations, trace normalization, deterministic checks, reliability metrics, and optional semantic judges. |
 | `backend/evaluation/runtime_live.py` | Controlled headless invocation of the production LangGraph workflow. |
+| `backend/evaluation/portfolio_budget.py` | Evaluation-only locked ledger, stage/effort and daily quota reservations, and resumable job identity. |
 | `backend/evaluation/evaluation_reporting.py` | Immutable run registration, fingerprints, aggregation, scorecard rendering, and sanitized publication. |
 | `scripts/evaluate_retrieval_pipeline.py` | Retrieval executor and relevance-review command. |
 | `scripts/evaluate_runtime_workflow.py` | Offline, live, optional AgentEvals, and optional judge modes. |
@@ -39,6 +40,163 @@ The authoritative contracts are
 [`evals/retrieval/benchmark_cases.jsonl`](../evals/retrieval/benchmark_cases.jsonl)
 and [`evals/runtime/scenarios.json`](../evals/runtime/scenarios.json).
 Their Markdown companions are review views, not executable input.
+
+## Runtime routing and knowledge-search boundaries
+
+The active Retriever prompt is `v7` for the default and vLLM pipelines. Knowledge
+search requires `topic_policy`: `named` requires nonempty topic alias groups;
+`broad` uses no groups and requires a validated in-scope route. Invalid routing
+or search arguments are operational errors, not empty retrieval or an automatic
+web-search fallback. A valid broad declaration does not guarantee relevance.
+These changes affect future fingerprints; preserved B0 contracts, observations,
+and scorecards retain their original identities and results.
+
+Successful controlled-live runs reconstruct the application fallback for an
+out-of-scope completed graph. New controlled-live records identify response
+origin in `provenance.response_origin`: `application_fallback_reconstruction`
+for a reconstructed fallback, `graph_message` for a current-turn graph answer,
+and `unavailable` when no text response was captured. Graph-only imported traces
+cannot establish a later application response without that event; historical
+records are unchanged and may lack this field. Score routing and refusal delivery
+separately; response presence alone does not measure refusal relevance or clarity.
+
+## Portfolio collection budgets and B0 checkpoint
+
+Preparation, command flags, and plan approval do not authorize service calls.
+B0/final collection requires explicit authorization of provider/model, stages,
+attempt limits, and spend conditions after readiness review. The production
+runtime remains OpenRouter `openrouter/free`; this is variable-model deployment
+observation unless a separate fixed-model comparison is approved. Preserve the
+configured router alias and response-observed provider/model separately; leave
+unavailable resolved identities unknown. Historical Ollama traces cannot supply
+missing current OpenRouter observations.
+
+| Scope | All LLM attempts, including judges | Judge sublimit | Logical Tavily searches / request attempts |
+| --- | --- | --- | --- |
+| B0, before behavior fixes | 33 | 5 | 3 / 6 |
+| Final | 59 | 5 | 7 / 14 |
+| Entire core effort | 92 | 10 | 10 / 20 |
+
+The historical 2026-10-26 completion amendment changed daily 12 → 24 and
+B0/final 32/60 → 33/59; the overall 92, judge/web sublimits, per-turn limits and
+20-request demo headroom stay unchanged. Existing spending and uncertain jobs
+persist. Existing ledgers require the [explicit completion amendment procedure](full_evaluation_report_runbook.md#explicit-completion-policy-amendment);
+the normal runner never upgrades old policy or resets counters automatically.
+No cats repeat or extra/retried judge job was authorized by that amendment.
+The prospective 2026-10-30 policy changes the internal daily ceiling 24 → 50;
+existing ledgers require the [explicit daily amendment](full_evaluation_report_runbook.md#prospective-daily-policy-amendment).
+Existing day limits remain unchanged when no accepted proof establishes either
+their policy origin or prospectively authorized current capacity. The latter
+uses fresh reviewed account/key and free-route evidence, a capture-bound
+observation baseline, and existing external limits; prior usage is not reset.
+All other limits and reservations remain unchanged.
+For resumed final runs, a fresh quota observation is explicitly registered from
+a reviewed protected capture under the canonical lock. The runner requires that
+exact observation and its existing baseline under the same locked session before
+admission; ordinary session entry cannot silently create this baseline. This
+registration never resets older observations or refunds attempts.
+
+These are maximum envelopes once authorized, not targets or permission to fill
+unused slots. Retries, timeouts, parse failures, canceled/uncertain dispatched
+requests, smoke checks, and failed preflights consume the same ledger. Preserve
+per-turn bounds of five logical model calls, six provider attempts, one retry,
+and one logical Tavily search. A logical search allows at most two requests.
+Stop with partial coverage on exhaustion; retain a distinct operational budget
+outcome rather than treating it as empty retrieval or source exhaustion.
+
+Attempt ceilings do not guarantee a monetary or token ceiling. Runtime contract
+estimates are 97,000 B0 and 173,000 final tokens, excluding judge input and
+retries. Five judge jobs per stage allow up to 6,144 output tokens (one 4,096
+claim job and four 512 Boolean jobs). Review provider-side hard spend controls
+and actual quota, reserve demo capacity, and record unknown usage as spent.
+Without a verified hard spend ceiling, disclose the limitation and obtain
+explicit authorization for the verified attempt envelope. The optional eight
+matched-answer generations require separate authorization and do not increase
+web/judge limits.
+
+Production index storage remains Redis. An explicitly approved local-index
+evaluation can use existing `INDEX_STORAGE` JSON with `storage_type: local` and
+`storage_path` naming the preserved directory containing `index_store.json`.
+This is a separate effective configuration, not a production default change;
+see [local index preparation](full_evaluation_report_runbook.md#explicit-local-index-for-evaluation).
+
+The evaluation-only adapter is `backend/evaluation/portfolio_budget.py`.
+Live/judge commands require `--budget-stage {B0,final}` and `--provider-quota
+PATH`; the canonical ledger is `data/evaluation/portfolio_budget/ledger.json`
+under the main checkout resolved from Git's common directory. Worktrees share
+that ledger regardless of `--evaluation-root`. One exclusive lock covers
+sequential dispatch and artifact registration.
+Reservations are persisted before dispatch and never refunded. Restarting loads
+the same ledger. Each stage binds the actual effective application configuration,
+`ChatLimitService` settings, `PathSettings`, selected prompt-tree hash and
+prepared-storage manifest hashes. A changed binding stops resume; changing paths
+or per-turn limits does not grant a replacement run. Judge selection and source
+records also contribute to the job contract. Configured model aliases share the
+observed provider quota pool; changing an alias cannot reset its consumption.
+
+Completed jobs reuse hash-verified saved artifacts without redispatch. Already
+published jobs add no new report contribution: a full replay exits without a new
+completed run, while a partial resume publishes only new or previously unpublished
+jobs. Publication intent is durable before manifest creation; resume reconciles
+successful manifests after interruption, avoiding duplicate live samples or judge
+results. Uncertain jobs stop for reconciliation before redispatch. Keep artifacts at their recorded
+locations when resuming; do not delete or replace the ledger to clear a stop.
+A standalone restored repository is a different Git common directory. For
+authorized collection there, pass `--budget-ledger` with the existing absolute
+path to the original canonical shared ledger. The restore helper marks its new
+Git directory with `portfolio-restored-source`, carrying the original canonical
+ledger binding and snapshot-manifest identity. Automatic ledger selection refuses
+that checkout, even though `.git` exists. Every original/restored admission checks
+that the override resolves to the approved original path: another existing,
+copied, or hard-linked ledger is rejected; a symlink resolving to the original
+is allowed. The override must already exist. Ledger state also binds its canonical
+path and fixed daily policy; the normal runner rejects legacy/mismatched state
+without migration or counter reset. Restoration must not initialize a new effort allowance or copy
+an old snapshot ledger over the latest mutable counts.
+
+The collection policy caps combined runtime/retry/judge attempts at 50 per UTC
+day and retains at least 20 requests of demo headroom. This policy survives day
+rollover, restart and model-alias changes. Supplied quota metadata can tighten
+these values: the effective daily limit is the minimum of 50 and the supplied
+limit, and effective headroom is the maximum of 20 and the supplied reserve.
+Metadata cannot enlarge the ceiling or reduce headroom, including on a new day. This local margin does not reserve provider
+capacity against concurrent production traffic. Authorization remains required.
+
+The normalized quota JSON accepts exactly `observed_at` (timezone-aware ISO
+8601), `provider` (`openrouter`), `model`, `remaining_requests`, `demo_reserve`,
+and `daily_batch_limit` (nonnegative integers for the last three). Provider/model
+must match requests. At session entry and before every reservation, observation
+time must be no more than 15 minutes old, on the current UTC day, and not in the
+future. Expiration can stop collection during a batch. This conservative runner
+policy is not a provider availability guarantee. A changed observation cannot
+increase that day's batch allowance or
+release its demo reserve. The runner records request/run/stage identities
+without prompt/evidence content. Expiration or midnight requires fresh
+coordinator-supplied metadata, while stage and overall usage persist. This file contains no API key.
+The lock/ledger does not coordinate concurrent production-demo traffic; refresh
+availability and retain conservative headroom.
+
+B0 preserves the post-preparation/pre-fix source and private storage, the
+12-case local retrieval baseline, and representative deterministic runtime
+controls. Its eight predeclared live observations and five judge jobs are listed
+in the [B0 preparation and resume procedure](full_evaluation_report_runbook.md#b0-preparation-and-resume).
+Uncollected cases and ineligible judges remain visible; no substitutions or
+negative-score removal. B0 is a subset, not a complete campaign. Behavior and
+prompt changes wait for the checkpoint disposition. An accepted archive-only
+baseline supports code/regression and local-retrieval comparisons; it cannot
+establish improved live success, latency, token usage, or answer quality.
+
+The Orchestrator routing prompt `v6` instructs an active quiz continuation to
+remain with Mentor for an answer, hint, or explanation; explicit new requests,
+visualization, quit/cancel and out-of-scope scope override stale quiz context.
+Model output may still conflict with that instruction. Historical observations
+and scenario versions remain unchanged.
+
+Researcher prompt `v6` receives recent conversation history and the older session
+summary along with the latest request. This gives contextual local-miss fallback
+the information needed to resolve its research topic, but does not guarantee the
+model produces a correct search argument. Historical Medusa observations and
+scenario expectations are unchanged.
 
 ## Regenerate the runtime scenario review
 
@@ -89,6 +247,10 @@ For an end-to-end sequence that produces every report block, including human
 context-relevance annotation, use
 [full_evaluation_report_runbook.md](full_evaluation_report_runbook.md). The
 commands below describe individual evaluator modes.
+
+The [retrieval comparison guide](retrieval_ablation.md) defines the offline
+source-only, graph-assisted, reranked, and legacy arms, their measurement
+boundaries, and the review required before drawing paired comparisons.
 
 ### Output-directory behavior
 
@@ -146,10 +308,25 @@ appears only in Diagnostics. It does not score tools, retrieval, grounding,
 answers, tokens, or latency. Run either native-only offline mode or the
 AgentEvals form for one export, not both, to avoid duplicate observations.
 
+Provider-consuming examples below require the shared runner parameters. Set
+these only after authorization and readiness review; file creation/flags do not
+authorize calls. Full-campaign examples use `final`; B0 uses only its predeclared
+subset and `B0` stage. The normalized quota file is distinct from the raw
+sanitized provider response and must reflect a nonfuture observation from the
+current UTC day, at most 15 minutes old at entry and every reservation:
+
+```bash
+PORTFOLIO_STAGE=final
+PORTFOLIO_QUOTA=data/evaluation/portfolio_baseline/preparation/quota_runner.json
+PORTFOLIO_JUDGE_MODEL=openrouter/free
+```
+
 Controlled live positive control:
 
 ```bash
 uv run --locked python scripts/evaluate_runtime_workflow.py live \
+  --budget-stage "$PORTFOLIO_STAGE" \
+  --provider-quota "$PORTFOLIO_QUOTA" \
   --case-id out_of_scope_biological_cats \
   --confirm-provider-calls
 ```
@@ -158,6 +335,8 @@ Controlled Tavily fallback regression:
 
 ```bash
 uv run --locked python scripts/evaluate_runtime_workflow.py live \
+  --budget-stage "$PORTFOLIO_STAGE" \
+  --provider-quota "$PORTFOLIO_QUOTA" \
   --case-id in_scope_retnet_local_miss_fallback \
   --confirm-provider-calls \
   --allow-tavily
@@ -167,6 +346,8 @@ Three independent Researcher truncation-reliability repetitions:
 
 ```bash
 uv run --locked python scripts/evaluate_runtime_workflow.py live \
+  --budget-stage "$PORTFOLIO_STAGE" \
+  --provider-quota "$PORTFOLIO_QUOTA" \
   --case-id researcher_structured_output_truncation_reliability \
   --repetitions 3 \
   --confirm-provider-calls \
@@ -176,11 +357,21 @@ uv run --locked python scripts/evaluate_runtime_workflow.py live \
 These are independent runs. A failed repetition followed by a successful
 repetition is not an evaluator retry.
 
+`live --repetition N` selects exactly one positive repetition rather than all
+repetitions up to N; it cannot be combined with `--repetitions`.
+`--capture-diagnostics` saves bounded private callback diagnostics, including
+partial failures, under the run's `diagnostics/` directory. These files may
+contain private context and remain ignored.
+
 Optional claim-faithfulness judge over the newest current-fingerprint run that
 contains the selected case:
 
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
+  --budget-stage "$PORTFOLIO_STAGE" \
+  --provider-quota "$PORTFOLIO_QUOTA" \
+  --judge-provider openrouter \
+  --judge-model "$PORTFOLIO_JUDGE_MODEL" \
   --source-run latest \
   --case-id local_transformer_answer_success \
   --dimension claim_faithfulness \
@@ -189,11 +380,12 @@ uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py j
 
 The legacy `--records path/to/runtime_records.jsonl` input remains available.
 
-Judge mode uses active Analyst model settings, not a separate judge role. Current
-repository defaults are OpenRouter `openrouter/free` automatic routing;
-environment overrides remain effective. The evaluator forces temperature 0,
+Judge mode requires explicit `--judge-provider openrouter` and `--judge-model`;
+it does not inherit the active Analyst model identity. Select and authorize judge
+configuration separately from runtime roles, even when both use `openrouter/free`.
+The quota metadata must match that provider/model. The evaluator forces temperature 0,
 uses a 4,096-token output limit for bounded claim faithfulness and 512 tokens
-for each Boolean dimension, uses result rubric `runtime-semantic-v1`, and
+for each Boolean dimension, uses result rubric `runtime-semantic-v2`, and
 performs no evaluator retry.
 Claim output is capped at 32 atomic claims, five evidence IDs per claim, and
 bounded claim/reason strings. Boolean dimensions use OpenEvals; claim
@@ -206,8 +398,9 @@ under the current evaluation root and fingerprint, and one source run must
 contain every selected case. The
 error `no completed runtime run contains every selected case` means no source
 satisfies all those conditions. Common causes are scratch output, a fingerprint
-change, or cases saved in separate runs. Rerun the selected case into immutable
-history, or specify an exact run ID/records file.
+change, or cases saved in separate runs. Specify the exact compatible run ID or
+records file. New source collection requires explicit authorization and remaining
+budget; do not automatically rerun a baseline observation.
 
 Generate a top-10 relevance review sheet from an actual Analyst retrieval run.
 The sheet resolves legacy relation grounding IDs against the same loaded
@@ -395,6 +588,52 @@ Path efficiency is the shortest allowed completed worker path divided by
 observed worker steps, capped at 1. Incomplete or short-circuited runs are
 `N/A`.
 
+## Token usage availability
+
+New evaluation captures use `event_unique_v1`: each distinct captured model-event
+or request ID is counted once across roles, including Orchestrator, both
+Researcher stages, and retries. Distinct IDs are not merged because their role,
+model, or token values match. Events without an identity and conflicting
+duplicate values are excluded from the affected observed subtotal; a missing
+identity or any conflict also makes run coverage incomplete. Input, output, and
+total availability are tracked independently; a reported zero is observed,
+while absent, invalid, or unavailable metadata stays unavailable. A total may
+be derived from input plus output only when both are known. The captured
+provider-reported total and its source remain distinguishable when available.
+
+The evaluation-only OpenRouter JSON response hook records the original usage
+fields by unique response ID before adapter conversion. `wire_response` identifies
+that evidence; missing or invalid fields remain unavailable, and a total derived
+from two known components is not reported as a provider total. Unmatched or repeated
+response IDs cannot establish wire coverage. Streaming bodies are never buffered
+for accounting; without independently captured wire fields, adapter-normalized
+OpenRouter usage and identity-unknown trace counters remain unavailable because
+the adapter may have filled or coerced values. A uniquely identified JSON response rejected by the
+SDK before a model-end callback can retain its observed wire usage as a separate
+response observation; reservation counts remain independent.
+
+The evaluation keeps reported turn/root telemetry separate from event-derived
+usage; a partial nonzero subtotal does not replace fuller captured event data.
+For each field, report the observed/attempted request coverage, observed
+subtotal, and complete/eligible-run counts. Complete-run averages include
+known-zero runs and exclude partial or unavailable runs. Incomplete observed
+subtotals remain separately identified, and unknown denominators stay unknown.
+Missing token totals cannot pass a token budget as zero or establish a complete
+per-success cost. The tokens-per-success ratio is available only when all
+eligible runs have complete totals, their identities match their score rows,
+and no failed, uncertain or incomplete run artifact is missing. Missing
+manifests leave aggregate attempt and eligible-run totals unknown; known counts
+and unobserved manifests are reported separately. Failed and uncertain
+reservations remain spent regardless of token availability. Runtime and judge
+usage are separate; skipped judge jobs make no request, and a missing historical
+response or usage remains unavailable.
+
+Legacy records without availability metadata retain `legacy_unknown` coverage:
+old default zeros are not evidence of actual zero usage. New captures identify
+their method as `event_unique_v1`; neither method establishes provider billing
+or recovers metadata that was not captured. Historical runs, analyses and
+scorecards are immutable and are not silently rewritten under this rule.
+
 ## Context relevance
 
 Context metrics apply only to ranked Analyst source evidence. Human reviewers
@@ -439,6 +678,7 @@ Precision.
 
 ## Optional semantic judges
 
+
 Semantic judges are non-gating and require explicit provider confirmation.
 
 - `claim_faithfulness`: structured supported/partial/unsupported factual claims
@@ -448,6 +688,35 @@ Semantic judges are non-gating and require explicit provider confirmation.
 - `mentor_pedagogy`
 - `conversational_continuity`
 - `graph_usefulness`
+
+The corrected non-claim prompt relies on the OpenEvals `score`/`reasoning`
+schema rather than embedding a second conflicting schema. New judgments use
+`runtime-semantic-v2` and distinct job identities; older results remain historical.
+The opt-in `--fixed-judge-pilot` requires OpenRouter model
+`xingchen-agi/xing4.0-29b-a4b:free`, `--structured-output-method json_schema`,
+and claim faithfulness or graph usefulness. It sets Phala-only, no fallback,
+required parameters, temperature zero, reasoning effort none, strict JSON Schema
+with raw response diagnostics, and 8,192/512 respective output caps. Guarded
+transport retries remain disabled. Current free endpoint availability and judge
+quality require separate verification; offline compatibility is not a live claim.
+The evaluator reserves the attempt at the SDK HTTP request boundary and records
+available response model, provider and request ID without retaining the response
+body. Local prompt/schema setup failures are reported without a provider attempt.
+The canonical campaign ledger pins the first valid observed serving model and
+provider and requires exact matches across jobs and saved results. Each available
+model or provider field on a failed attempt, including the durable retry record,
+is compared with later attempts and saved attempt history even before a complete
+identity is pinned. An identity-free transient remains eligible for retry.
+Missing, unexpected, or different identities and truncation stop the pilot. Across at
+most four dispatched logical assessments, one shared retry is available for a
+confirmed timeout, connection failure, or HTTP 5xx. The retry is persisted before
+dispatch and each attempt consumes a reservation; 429, authentication, budget,
+formatting, schema, empty or invalid output, truncation, identity failures and
+valid negative judgments do not qualify. Interrupted jobs remain uncertain and
+are not automatically dispatched again. Results preserve failed-attempt
+diagnostics and partial usage, while reporting one quality sample and both
+attempts. Skipped prerequisites consume no request. Offline safeguards do not
+authorize live collection; the pilot remains subject to its approved prerequisites.
 
 The four non-faithfulness dimensions use separate Boolean OpenEvals rubrics.
 The default structured-output transport is `function_calling`, which matches
@@ -476,6 +745,13 @@ evaluator retry.
 AgentEvals/OpenEvals are optional. AgentEvals strict graph-trajectory matching is
 a non-gating cross-check; the native evaluator remains authoritative for this
 repository's state, fallback, evidence, and budget contracts.
+
+### Fixed-pilot capacity registration and setup recovery
+
+The fixed pilot requires a fresh, registered observation for its exact Xing model. Its endpoint capture must identify a zero-price Phala endpoint supporting JSON Schema, structured outputs, temperature, reasoning and output limits. The judge credential must match the approved campaign account and key; runtime `openrouter/free` observations do not authorize fixed-pilot calls. Captures share the account-wide baseline and retain existing headroom and daily limits.
+
+The budget CLI's `--confirm-fixed-judge-successor-transition` appends the reviewed final-only successor binding with complete parent/new inventories and exact patch. `--recover-fixed-judge-setup` is a separate lock- and hash-guarded operation for the single preserved Mamba setup stop; it verifies the frozen evidence, parent source, selected input and an old/new contract pair differing only in final configuration. It preserves the original started job and creates an audited one-use bridge consumed atomically when the successor job is claimed. Ordinary uncertain jobs remain blocked. Neither operation grants collection authorization or refunds attempts.
+
 
 ## Reviewed regression semantics
 
@@ -544,9 +820,9 @@ serving provider; the adapter-injected `model_provider="openrouter"` label alone
 does not. Supported legacy `model_provider` values remain accepted for other
 adapters. Stop diagnostics accept `done_reason`, `finish_reason`, and
 `stop_reason`; token observations accept canonical usage metadata and
-OpenAI-style prompt/completion counts. Aggregate token-coverage analysis remains
-future work. Output caps, reasoning requests, and request timeouts describe
-configured behavior, not proof that every routed model has
-identical capabilities. The default `LLM_PIPELINE=ollama` selector remains a
+OpenAI-style prompt/completion counts. Availability and coverage are described in
+[Token usage availability](#token-usage-availability). Output caps, reasoning
+requests, and request timeouts describe configured behavior, not proof that every
+routed model has identical capabilities. The default `LLM_PIPELINE=ollama` selector remains a
 compatibility alias; active runtime roles use OpenRouter. Offline
 post-processing and optional Ollama reranking have their own settings.

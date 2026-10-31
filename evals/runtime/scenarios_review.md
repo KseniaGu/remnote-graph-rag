@@ -4,7 +4,7 @@ Generated from [scenarios.json](scenarios.json); edit the machine contract,
 then regenerate this review. This view is not executable input or measured results.
 Use the [regeneration recipe](../../docs/runtime_evaluation.md#regenerate-the-runtime-scenario-review).
 
-- Contract SHA256: `7db9d34fc25e7ab74f820545219f71a10c4e1c3698877be9d76683ea243cd211`
+- Contract SHA256: `b0dfd1af372437e8c52257c70613e76130efe9721907300252b81d1bc4619f31`
 - Scenarios: 13
 
 ## local_transformer_answer_success
@@ -1053,13 +1053,13 @@ Version: 1; review status: `reviewed`.
 
 An in-domain named topic must not be answered from adjacent local evidence; a true local support gap should escalate to qualified web research.
 
-Version: 2; review status: `reviewed`.
+Version: 3; review status: `reviewed`.
 
 ```json
 {
   "schema_version": "runtime-evaluation",
   "id": "in_scope_retnet_local_miss_fallback",
-  "version": 2,
+  "version": 3,
   "review_status": "reviewed",
   "description": "An in-domain named topic must not be answered from adjacent local evidence; a true local support gap should escalate to qualified web research.",
   "trace_ids": [],
@@ -1112,7 +1112,8 @@ Version: 2; review status: `reviewed`.
         "required_terms_any": [
           "Retentive Network",
           "AI",
-          "machine learning"
+          "machine learning",
+          "neural network"
         ],
         "forbidden_terms": [
           "ResNet"

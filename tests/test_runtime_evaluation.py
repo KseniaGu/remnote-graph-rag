@@ -245,7 +245,10 @@ class RuntimeEvaluationTests(unittest.TestCase):
         self.assertEqual(["chunk_mamba"], record.evidence_ids)
         self.assertEqual("[REDACTED]", record.tools[0].arguments["api_key"])
         self.assertEqual("adequate", record.retrieval_outcome)
-        self.assertEqual(1, record.usage.provider_attempts)
+        self.assertIsNone(record.usage.provider_attempts)
+        self.assertEqual(
+            1, record.usage.turn_telemetry["captured_provider_event_observations"]
+        )
         self.assertTrue(record.terminated)
 
     def test_openrouter_trace_preserves_configured_and_observed_identity(self):
@@ -278,7 +281,7 @@ class RuntimeEvaluationTests(unittest.TestCase):
         self.assertEqual("resolved/model", provider.model)
         self.assertEqual("Synthetic Serving Provider", provider.provider)
         self.assertEqual("length", provider.stop_reason)
-        self.assertEqual((21, 7), (provider.input_tokens, provider.output_tokens))
+        self.assertEqual((None, None), (provider.input_tokens, provider.output_tokens))
         self.assertEqual("invalid_model_output", record.retrieval_outcome)
         self.assertIn("model_output_truncated", {item.code for item in record.failures})
         self.assertNotIn("SECRET", record.model_dump_json())
@@ -347,8 +350,9 @@ class RuntimeEvaluationTests(unittest.TestCase):
                 self.assertEqual("", provider.model)
                 self.assertEqual("", provider.provider)
                 self.assertEqual("openrouter/free", provider.configured_model)
+                # Normalized OpenRouter trace counters lack wire provenance.
                 self.assertEqual(
-                    (10, 2), (provider.input_tokens, provider.output_tokens)
+                    (None, None), (provider.input_tokens, provider.output_tokens)
                 )
 
     def test_live_event_captures_openai_metadata_and_legacy_done_reason(self):
@@ -439,7 +443,8 @@ class RuntimeEvaluationTests(unittest.TestCase):
                     response.get("model") or response.get("model_name"), provider.model
                 )
                 self.assertEqual(
-                    (21, 7), (provider.input_tokens, provider.output_tokens)
+                    (None, None),
+                    (provider.input_tokens, provider.output_tokens),
                 )
                 self.assertIn(
                     "model_output_truncated", {item.code for item in record.failures}
@@ -837,10 +842,10 @@ class RuntimeEvaluationTests(unittest.TestCase):
 
         self.assertEqual("success", result.status)
         self.assertTrue(result.score)
-        self.assertEqual("runtime-semantic-v1", result.rubric_version)
+        self.assertEqual("runtime-semantic-v2", result.rubric_version)
         self.assertEqual("Grounded answer.", observed["outputs"]["response"])
         self.assertFalse(observed["continuous"])
-        self.assertIn("required_output_schema", observed["prompt"])
+        self.assertNotIn("required_output_schema", observed["prompt"])
         self.assertEqual(512, result.configured_output_token_limit)
         self.assertEqual("completed", result.transport_status)
         self.assertEqual("success", result.parser_classification)

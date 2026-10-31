@@ -18,6 +18,10 @@ except ImportError:
 
 from backend.configs.constants import MAX_RETRIES, WORKFLOW_LOGGING
 from backend.configs.enums import LLMProviderType
+from backend.evaluation.portfolio_budget import (
+    EvaluationBudgetUnavailable,
+    current_evaluation_budget,
+)
 from backend.utils.common_funcs import get_logger
 
 logger = get_logger(WORKFLOW_LOGGING)
@@ -60,6 +64,40 @@ class AgentsFactory:
             if model_settings.api_key
             else None
         )
+
+        evaluation_budget = current_evaluation_budget()
+        if evaluation_budget is not None:
+            if provider != LLMProviderType.openrouter:
+                raise EvaluationBudgetUnavailable(
+                    "evaluation transport is only verified for OpenRouter"
+                )
+            if model_settings.model_name != evaluation_budget.quota["model"]:
+                raise EvaluationBudgetUnavailable(
+                    "evaluation model differs from quota observation"
+                )
+            from openrouter import OpenRouter
+
+            # max_retries=0 alone leaves the SDK's default retry policy active.
+            # Explicit None disables it; transports also disallow retries/redirects.
+            client = OpenRouter(
+                api_key=api_key,
+                retry_config=None,
+                timeout_ms=int(model_settings.request_timeout * 1000),
+                client=httpx.Client(
+                    transport=httpx.HTTPTransport(retries=0), follow_redirects=False
+                ),
+                async_client=httpx.AsyncClient(
+                    transport=httpx.AsyncHTTPTransport(retries=0),
+                    follow_redirects=False,
+                ),
+            )
+            return ChatOpenRouter(
+                model=model_settings.model_name,
+                api_key=api_key,
+                client=client,
+                max_retries=0,
+                **model_settings.openrouter_chat_params(),
+            )
 
         if provider == LLMProviderType.ollama:
             client_kwargs: dict[str, Any] = {"timeout": model_settings.request_timeout}

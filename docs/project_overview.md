@@ -162,15 +162,23 @@ structured-output LLM call for initial routing and broad request-scope
 classification. Clearly unrelated requests terminate at the existing end path;
 AI/ML-adjacent mathematics, statistics, data, programming, and systems requests
 remain in scope. Unknown technical-looking names and acronyms are classified as
-ambiguous and continue to retrieval rather than being rejected.
+ambiguous and continue to retrieval rather than being rejected. Routing prompt `v6`
+explicitly prioritizes continuing an active Mentor quiz for an answer, hint, or
+explanation while allowing the latest request to override stale tutoring context.
+This prompt contract does not guarantee a model follows it.
 
-For knowledge searches, Retriever `v6` can provide up to three named-topic alias
-groups. After either Analyst retrieval mode formats evidence, a deterministic
-exact-token check requires at least one alias from every group. Query and result
-headers are excluded, while source text, source paths, and relations count as
-evidence. Topic mismatch supplements the existing numeric thresholds and routes
-to Researcher through the same `retriever_empty` transition. Broad searches with
-no topic requirements retain their previous behavior.
+For knowledge searches, Retriever `v7` requires an explicit `topic_policy`:
+`named` uses one to three nonempty topic alias groups, while `broad` uses no
+alias groups and is permitted only after validated in-scope routing. Missing or
+invalid policy is rejected before tool dispatch rather than treated as a local
+miss. After either Analyst retrieval mode formats evidence, a deterministic
+exact-token check requires at least one alias from every named group. Query and
+result headers are excluded, while source text, source paths, and relations count
+as evidence. Valid topic mismatches still route to Researcher through the existing
+`retriever_empty` transition. Researcher `v6` receives the recent conversation and
+older summary so contextual follow-ups retain their technical domain; its latest
+request remains authoritative. This does not guarantee model compliance. Explicit
+broad mode is a structural safeguard, not a guarantee of semantic relevance.
 
 The workflow state includes messages, retrieved context, a compact older-session
 summary, visual artifacts, routing state, `request_scope`, `retrieval_status`,
@@ -272,10 +280,10 @@ Current prompt selections:
 
 | Role / purpose | Default OpenRouter (`ollama` selector) | Optional `vllm` pipeline |
 | --- | --- | --- |
-| Orchestrator routing | `v5` | `v5` |
+| Orchestrator routing | `v6` | `v6` |
 | Orchestrator offline/legacy graph indexing | `v2` | `v2` |
-| Retriever | `v6` | `v6` |
-| Researcher | `v5` | `v5` |
+| Retriever | `v7` | `v7` |
+| Researcher | `v6` | `v6` |
 | Analyst | `v6` | `v4` |
 | Mentor | `v4` | `v4` |
 | LLM postprocess quality/graph | `v1` | `v1` |
@@ -409,7 +417,33 @@ tokens, provider attempts, and latency. Functional gates remain separate from
 report-only efficiency limits and optional semantic judges.
 Unmet semantic prerequisites are skipped/N/A; provider/parser/schema failures
 remain execution errors. Claim faithfulness uses a compact 4,096-token
-structured contract while Boolean judges use 512 tokens.
+structured contract while Boolean judges use 512 tokens. Judge provider/model
+selection is explicit and separate from runtime Analyst configuration. Live and
+judge evaluation use one persistent, exclusively locked effort ledger under
+the Git-common main checkout's `data/evaluation/portfolio_budget/`; same-day
+normalized quota metadata no more than 15 minutes old at entry and every
+reservation, at most 50 runtime/retry/judge attempts per UTC day, at least 20
+requests of local demo headroom, and stage/whole-effort ceilings guard dispatch.
+The B0/final allocations are 33/59 within the unchanged 92-attempt effort.
+Existing state needs the [explicit daily policy amendment](full_evaluation_report_runbook.md#prospective-daily-policy-amendment),
+which preserves spending and uncertainty. Fresh prospective capacity evidence
+can support an authorized current-day change without reconstructing old limits;
+account, key, free-route and external limits must be independently verified.
+Fresh continuation quota is explicitly registered from a reviewed capture and
+checked under the live-session lock; per-attempt snapshots preserve the prior
+quota file and observation baselines. Metadata may tighten daily policy;
+rollover, restart and aliases cannot loosen it.
+Standalone restored collection requires `--budget-ledger` pointing to the
+original existing absolute canonical ledger; original/restored admissions reject
+alternate or copied ledgers. State binds the original path and fixed daily policy;
+restoration never resets counts.
+The production index-storage default remains Redis; an explicitly selected
+local evaluation index uses existing `INDEX_STORAGE` JSON (`storage_type` and
+`storage_path`) as described in the [evaluation runbook](full_evaluation_report_runbook.md#explicit-local-index-for-evaluation).
+Stage resume binds actual chat-limit/path settings, selected prompts and storage
+manifests; published job replay adds no duplicate observation. Command flags do
+not authorize collection. See [collection limits and the B0 checkpoint](runtime_evaluation.md#portfolio-collection-budgets-and-b0-checkpoint)
+for readiness, resume, and archive-only claim boundaries.
 
 `backend/evaluation/evaluation_reporting.py` registers both executors in
 immutable evaluation history under `data/evaluation` and renders one
@@ -472,8 +506,8 @@ Important boundaries to preserve:
   tested and trace-backed runtime scenarios now measure representative behavior,
   but broader stochastic baselines still require reviewed, quota-aware live runs.
 - Exact-token adequacy checks intentionally do not infer synonyms. They can only
-  enforce aliases supplied by the Retriever and do not filter broad queries with
-  an empty `required_topics` list.
+  enforce aliases supplied by the Retriever and do not establish semantic
+  relevance for explicit broad queries with an empty `required_topics` list.
 - Long-form Analyst and Mentor calls remain the most latency-sensitive runtime
   components.
 - Web research improves the current turn but is not persisted back into the
