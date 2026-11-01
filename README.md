@@ -65,16 +65,10 @@ credentials, private corpus, downloaded models, or services. See
 [setup, usage, and offline gates](docs/project_overview.md#setup-and-offline-checks)
 for the complete commands and integration boundary.
 
-Live and judge collection require explicit authorization and a persistent shared
-budget; CLI confirmation flags alone do not authorize calls. The current policy
-allows up to 50 attempts/day and B0/final allocations of 33/59 within 92 overall.
-Existing 24-policy ledgers require an explicit reviewed amendment; an existing
-day limit remains binding unless accepted historical-origin or fresh prospective
-capacity evidence supports a change. Resumed final runs require an explicitly
-registered fresh quota observation and retain its capture-bound baseline.
-B0 preserves the
-current OpenRouter deployment. See the
-[collection limits and readiness boundary](docs/runtime_evaluation.md#portfolio-collection-budgets-and-b0-checkpoint).
+Live and judge evaluation require explicit provider confirmation, a fresh quota
+observation, and a durable local request guard. See the
+[request guard](docs/runtime_evaluation.md#evaluation-request-guard) for limits
+and the operator's responsibility to verify external quota.
 
 Runtime token metrics report availability and coverage, including unknown usage;
 they are not complete billing totals. See the
@@ -83,7 +77,7 @@ they are not complete billing totals. See the
 The published evaluation is **historical and incomplete**; it does not measure
 current answer quality or establish an improvement from graph retrieval. Updated
 configuration capture changes future evaluation fingerprints; see the
-[evaluation provenance contract](docs/runtime_evaluation.md#immutable-history-and-fingerprints). The [optional fixed-judge pilot](docs/runtime_evaluation.md#optional-semantic-judges) pins observed serving identity and shares one counted transient retry across four assessments; it has separate execution prerequisites, including a registered model-specific quota.
+[evaluation provenance contract](docs/runtime_evaluation.md#immutable-history-and-fingerprints).
 
 | Documentation | What to assess |
 | --- | --- |
@@ -91,7 +85,7 @@ configuration capture changes future evaluation fingerprints; see the
 | [Data pipeline runbook](docs/optimized_pipeline_runbook.md) | Preparing storage and starting the app |
 | [Evaluation guide](docs/runtime_evaluation.md) | Contracts, metric definitions, provenance, and limitations |
 | [Retrieval comparison](docs/retrieval_ablation.md) | Local graph and reranker findings and their limits |
-| [Controlled final report](reports/evaluation/portfolio_final_20261031.md) | Current saved runtime outcomes, retrieval evidence, partial judge pilot and limitations |
+| [Controlled final report](reports/evaluation/controlled_final_20261031.md) | Current saved runtime outcomes, retrieval evidence, partial judge pilot and limitations |
 | [Published evidence](reports/evaluation/README.md) | Historical scorecards and their missing coverage |
 | [Full report runbook](docs/full_evaluation_report_runbook.md) | Asset/service-dependent evaluation and explicit publication |
-| [Collection budgets and B0 checkpoint](docs/runtime_evaluation.md#portfolio-collection-budgets-and-b0-checkpoint) | Explicit authorization, shared attempt limits, and baseline claim limits |
+| [Evaluation request guard](docs/runtime_evaluation.md#evaluation-request-guard) | Explicit confirmation, shared attempt limits, and quota evidence |

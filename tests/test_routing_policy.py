@@ -355,7 +355,7 @@ def test_retriever_checks_policy_before_invoking_tools(scope, policy, topics, al
 def test_development_topic_cases_both_retrieval_paths(
     query, policy, topics, evidence, expected, mode
 ):
-    from test_retrieval_evidence import FakeNode, FakeNodeWithScore, FakeRetriever
+    from synthetic_evidence import FakeNode, FakeNodeWithScore, FakeRetriever
 
     from backend.configs.constants import RETRIEVAL_TOPIC_MISMATCH
     from backend.workflows.agents.tools import search_knowledge_base

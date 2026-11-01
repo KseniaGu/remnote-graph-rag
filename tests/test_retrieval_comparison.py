@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from test_analyst_retrieval import (
+from synthetic_analyst import (
     FakeTextNode,
     FakeVectorStore,
     RaisingReranker,
@@ -12,7 +12,7 @@ from test_analyst_retrieval import (
     make_indexer,
     make_metadata,
 )
-from test_retrieval_benchmark import make_case_payload
+from synthetic_retrieval_case import make_case_payload
 
 from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.evaluation.evaluation_reporting import _build_scorecard, _retrieval_metrics

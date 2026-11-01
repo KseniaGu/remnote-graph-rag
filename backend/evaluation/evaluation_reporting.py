@@ -1578,20 +1578,6 @@ def _render_metric_table(
         _append_table(lines, ("Metric", "Result"), rows)
 
 
-def _render_mapping(
-    lines: list[str], title: str, mapping: dict[str, Any], value_name: str
-) -> None:
-    lines.extend(["", f"### {title}", ""])
-    _append_table(
-        lines,
-        ("Case", "Result"),
-        [
-            (f"`{_markdown_text(name)}`", _metric_value(value_name, observed))
-            for name, observed in mapping.items()
-        ],
-    )
-
-
 def _render_failure_types(lines: list[str], failures: dict[str, Any]) -> None:
     lines.extend(["", "### Failure types", ""])
     if not failures:
