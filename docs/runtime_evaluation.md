@@ -300,6 +300,27 @@ the missing requirements remain visible. The CLI accepts an exact fingerprint
 without either policy flag, but documented publication always pairs the exact
 fingerprint with one flag so intent is explicit.
 
+## Publish saved observations
+
+Publish the reviewed, sanitized October inputs without running or rescoring an
+evaluation:
+
+```bash
+uv run --locked python scripts/build_evaluation_report.py --publish \
+  --saved-runtime reports/evaluation/history/controlled-observations/runtime.json \
+  --saved-retrieval reports/evaluation/history/controlled-observations/retrieval.json \
+  --saved-judge reports/evaluation/history/controlled-observations/judge.json \
+  --saved-report reports/evaluation/history/controlled-observations/source-report.md
+```
+
+These four files are sanitized publication inputs; raw evidence and traces stay
+private. The command generates the report, JSON, provenance, latest aliases and
+index from the saved inputs. It preserves each component's own identity and does
+not score or pool the populations. Historical scorecards retain their own
+fingerprints. Rebuilding or publishing an older observation does not replace a
+newer `latest` alias; existing history snapshots are not overwritten. Input
+hashes bind the saved-observation provenance.
+
 ## Immutable history and fingerprints
 
 Evaluation artifacts use this layout:
@@ -347,14 +368,15 @@ ones; historical runs and published reports are not regenerated or rewritten.
 For the same deterministic retrieval or offline invocation, only the newest
 completed run contributes to current metrics. Older and failed runs remain in
 `history.json`. Live repetitions accumulate. Judge rows aggregate only under
-the same dimension, provider, model, and rubric identity. Root `latest.*`
-always copies one fingerprint's scorecard.
+the same dimension, provider, model, and rubric identity. Working
+`data/evaluation/latest.*` selects one fingerprint; published `reports/evaluation/latest.*`
+selects the newest observation and can present a separately identified saved bundle.
 
 Archived evaluation output and legacy scratch directories are excluded from current history.
 The report builder scans only `data/evaluation/runs/*/manifest.json`.
 
 The tracked publication layer is `reports/evaluation`. It contains only the
-selected scorecard, a generated index, and sanitized provenance. Raw traces,
+selected reports, a generated index, and sanitized provenance. Raw traces,
 runtime records, evidence text, and tool outputs remain in ignored working
 history. See the full runbook for the detailed distinction between runs,
 fingerprints, working `latest` aliases, and published snapshots.
@@ -610,8 +632,7 @@ evaluation, and one aggregate quality score remain out of scope.
 The [published scorecards](../reports/evaluation/README.md) are historical and
 incomplete. They are not measurements of the current OpenRouter runtime or a
 paired graph-versus-vector improvement. Semantic judge errors and unavailable
-scores must remain visible. No fresh evaluation campaign is part of the M1
-offline engineering checks.
+scores must remain visible. No new measurements are implied by publishing these saved observations.
 
 Use [the setup and offline gates](project_overview.md#setup-and-offline-checks)
 for a locked clean-checkout test run without `.env`, credentials, private

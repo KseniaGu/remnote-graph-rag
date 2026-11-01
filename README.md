@@ -20,8 +20,8 @@ The backend uses **Python, LangGraph, and LlamaIndex**; the web interface uses
 **Reflex and Plotly**. Storage adapters support local files, Redis, Pinecone,
 MongoDB, Neo4j, and Memgraph; deployment uses Google Cloud Run.
 
-Ollama is the intended primary LLM backend. The public demo currently uses
-OpenRouter `openrouter/free` automatic routing to keep operating costs low.
+The default LLM pipeline uses OpenRouter `openrouter/free` automatic routing;
+the pipeline selector retains `ollama` as a compatibility alias.
 
 ```mermaid
 flowchart LR
@@ -70,22 +70,25 @@ observation, and a durable local request guard. See the
 [request guard](docs/runtime_evaluation.md#evaluation-request-guard) for limits
 and the operator's responsibility to verify external quota.
 
-Runtime token metrics report availability and coverage, including unknown usage;
-they are not complete billing totals. See the
-[usage accounting method](docs/runtime_evaluation.md#token-usage-availability).
+## Evaluation results
 
-The published evaluation is **historical and incomplete**; it does not measure
-current answer quality or establish an improvement from graph retrieval. Updated
-configuration capture changes future evaluation fingerprints; see the
-[evaluation provenance contract](docs/runtime_evaluation.md#immutable-history-and-fingerprints).
+The [complete latest evaluation report](reports/evaluation/latest.md) describes
+controlled observations from October 2026, not every later code revision:
 
-| Documentation | What to assess |
+- **Runtime compliance:** 10 of 12 completed observations passed their
+  deterministic contracts; two failed and three of 15 planned were interrupted.
+- **Retrieved evidence:** frozen Precision@10 averaged 33.57% for source-only
+  retrieval and 34.29% for graph-assisted retrieval (21 observations each).
+  These scores measure reviewed source support, not answer correctness.
+- **Generated-answer quality:** unmeasured. The single attempted judge request
+  returned HTTP 429; three other eligible assessments were unstarted.
+
+The tested routing/retrieval prompt versions, original evaluator identities,
+separate populations, missing usage and limitations are in the complete report.
+The sample does not establish a general graph advantage or production quality.
+
+| Documentation | Purpose |
 | --- | --- |
-| [Project overview](docs/project_overview.md) | Architecture, model/storage defaults, setup, testing, design boundaries |
+| [Project overview](docs/project_overview.md) | Architecture, configuration and offline checks |
 | [Data pipeline runbook](docs/optimized_pipeline_runbook.md) | Preparing storage and starting the app |
-| [Evaluation guide](docs/runtime_evaluation.md) | Contracts, metric definitions, provenance, and limitations |
-| [Retrieval comparison](docs/retrieval_ablation.md) | Local graph and reranker findings and their limits |
-| [Controlled final report](reports/evaluation/controlled_final_20261031.md) | Current saved runtime outcomes, retrieval evidence, partial judge pilot and limitations |
-| [Published evidence](reports/evaluation/README.md) | Historical scorecards and their missing coverage |
-| [Full report runbook](docs/full_evaluation_report_runbook.md) | Asset/service-dependent evaluation and explicit publication |
-| [Evaluation request guard](docs/runtime_evaluation.md#evaluation-request-guard) | Explicit confirmation, shared attempt limits, and quota evidence |
+| [Evaluation evidence](reports/evaluation/README.md) | Latest results, history, methodology and publication instructions |

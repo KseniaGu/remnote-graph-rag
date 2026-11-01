@@ -16,6 +16,7 @@ from backend.evaluation.evaluation_reporting import (  # noqa: E402
     DEFAULT_REPORTS_ROOT,
     build_evaluation_reports,
     publish_evaluation_report,
+    publish_saved_evaluation,
 )
 
 
@@ -70,11 +71,49 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Exact campaign run ID used by --verify-run-fingerprints.",
     )
 
+    parser.add_argument(
+        "--saved-runtime", type=Path, help="Reviewed runtime observation summary JSON."
+    )
+    parser.add_argument(
+        "--saved-retrieval", type=Path, help="Sanitized retrieval aggregate JSON."
+    )
+    parser.add_argument("--saved-judge", type=Path, help="Sanitized judge status JSON.")
+    parser.add_argument(
+        "--saved-report",
+        type=Path,
+        help="Optional sanitized detailed findings in Markdown.",
+    )
+
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    saved = (args.saved_runtime, args.saved_retrieval, args.saved_judge)
+    if any(saved) or args.saved_report:
+        if (
+            not args.publish
+            or not all(saved)
+            or args.fingerprint
+            or args.audit_completeness
+            or args.verify_run_fingerprints
+        ):
+            print(
+                "Saved publication requires --publish and all three saved JSON inputs.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            result = publish_saved_evaluation(
+                *saved,
+                reports_root=args.reports_root,
+                source_report_path=args.saved_report,
+            )
+        except (ValueError, OSError) as exc:
+            print(f"Saved publication failed: {exc}", file=sys.stderr)
+            return 2
+        print(f"Published {result['snapshot']} to {result['history_directory']}.")
+        return 0
     if args.verify_run_fingerprints:
         if not args.run_id:
             print(

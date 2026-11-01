@@ -1,0 +1,81 @@
+{
+  "publication_kind": "saved-observations",
+  "publication_id": "controlled-observations",
+  "observation_end": "2026-10-31",
+  "runtime_fingerprints": [
+    "1095d6342e69b04143ef971d",
+    "2b1301ae85cf5a5a77713187",
+    "aacdf873baacf605652888e1"
+  ],
+  "runtime_provenance": {
+    "fingerprint_groups": [
+      {
+        "fingerprint": "1095d6342e69b04143ef971d",
+        "observations": 7,
+        "completed": 7
+      },
+      {
+        "fingerprint": "2b1301ae85cf5a5a77713187",
+        "observations": 2,
+        "completed": 2
+      },
+      {
+        "fingerprint": "aacdf873baacf605652888e1",
+        "observations": 6,
+        "completed": 3,
+        "interrupted": 3
+      }
+    ],
+    "inventory_sha256": "7e63ed839833b45304c00d100ffd475517cc37e2f7c7c961d32aff5ef9d5df0f",
+    "scenario_contract_sha256": "b0dfd1af372437e8c52257c70613e76130efe9721907300252b81d1bc4619f31",
+    "prompt_tree_sha256": "f2f9faf450f38376fee1340064b8ce0a6f19bcaaa1afb519cae28ebdd51e1f4b",
+    "storage_manifest_sha256": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7",
+    "observation_dates_utc": [
+      "2026-10-30",
+      "2026-10-31"
+    ]
+  },
+  "retrieval_provenance": {
+    "accepted_source_tree": "339884ef4f716dfc497033c5e3428acec3d3e50f",
+    "source_patch_sha256": "6dece11dd472b0bc48b5a51b44728fb0da241240675b76341707c4ffad856a60",
+    "snapshot_manifest_sha256": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7",
+    "embedding_model": "all-MiniLM-L6-v2",
+    "local_reranker_model": "Qwen3-Reranker-0.6B",
+    "source_candidate_k": 30,
+    "source_final_k": 6,
+    "context_max_characters": 7000,
+    "reranker_candidate_k": 10,
+    "reranker_input_max_characters": 1200,
+    "source_hashes_sha256": {
+      "accepted_scoring_summary": "89c4af956c946279c2d7298f97b9c78cd94b19d4ed3a50606965a2135681ee82",
+      "accepted_scoring_observations": "50dddce5daac2c70798dae49f9f1b8ddc270c7c2442312ddd917fbfd0307fdfb",
+      "operational_comparisons": "c23da92e032b93d6b71b9e9aa7fb88be812313ab622193451884b486e9526c90",
+      "run_inventory": "3612946908cb3c5b264b5031cae235b62e65a35798301de67d49d84a85363883",
+      "development_contract": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+      "frozen_contract": "0238baa2c9a549dd0a252f5756cf5e16408792c42a5263ace8d7107183e52c8b",
+      "annotation_handoff": "3537fdccc281ece9e6c77b586f876264603ca9d038d57191a25271d4d164bd18",
+      "score_helper_source": "51074e4ab486bfbceed9a6c26785889bcfd3e489937d19f3c5f7c8b986a99d3b"
+    },
+    "labels": "98 new required pairs AI-assisted and user-endorsed, 77 prior reviewed development pairs, eight prior approved frozen pairs, plus one later point decision; not independent expert or judge ratings",
+    "provenance_limit": "Hashes match retained artifacts; they do not establish an independent pre-execution snapshot."
+  },
+  "judge_evaluator_fingerprint": "e3545f82672e7197c6e567f2",
+  "judge_provenance": {
+    "configured_judge_model": "xingchen-agi/xing4.0-29b-a4b:free",
+    "configured_endpoint": "Phala only, no fallback",
+    "observed_serving_identity": null,
+    "source_stop_freeze_sha256": "a5aaea3904a6966d45eb6548ad6d7782219d23cb1415a858d47ea21ccc041561",
+    "source_v3_freeze_sha256": "e8b2726d7c1f9d3d58ac13604da8457fd7e489dddbb51df161837a477c47bec2"
+  },
+  "input_hashes": {
+    "runtime_sha256": "f76c7551bea8c6dc738bef26f9c3033247146a770c0f2b358ab385ff9323a30c",
+    "retrieval_sha256": "1daff4425b6fa019f8b0210366cd74c2ea82019ec0431530bf320923eb5164b6",
+    "judge_sha256": "c4f7024abf5b3d2b693fec83dbe0aeb3493a0b826f7fdbe180cfe33b39c022a6",
+    "source_report_sha256": "85df4d2ac259469c2bfc2a3344009f47b61b6b95bfda750789e621487570063b"
+  },
+  "excluded_content": [
+    "raw traces",
+    "private evidence",
+    "credentials"
+  ]
+}
