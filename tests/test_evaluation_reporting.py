@@ -288,6 +288,9 @@ class EvaluationReportingTests(unittest.TestCase):
                 run_dir / "actual_evidence.jsonl",
                 [{"case_id": "case", "excerpt": "private fixture evidence"}],
             )
+            diagnostics = run_dir / "diagnostics"
+            diagnostics.mkdir()
+            (diagnostics / "events.jsonl").write_text("private diagnostic marker")
             manifest = register_completed_run(
                 run_dir,
                 run_kind="retrieval",
@@ -314,6 +317,13 @@ class EvaluationReportingTests(unittest.TestCase):
                 (reports_root / "latest_provenance.json").read_text(encoding="utf-8")
             )
             history_directories = list((reports_root / "history").iterdir())
+            published_text = "".join(
+                path.read_text() for path in reports_root.rglob("*") if path.is_file()
+            )
+            self.assertNotIn("private diagnostic marker", published_text)
+            self.assertFalse(
+                any(path.name == "diagnostics" for path in reports_root.rglob("*"))
+            )
 
         self.assertEqual(manifest["evaluation_fingerprint"], latest["fingerprint"])
         self.assertEqual(first["snapshot"], second["snapshot"])

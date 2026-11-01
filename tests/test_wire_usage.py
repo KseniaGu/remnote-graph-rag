@@ -9,8 +9,8 @@ from langchain_core.messages import HumanMessage
 from langchain_openrouter import ChatOpenRouter
 from openrouter import OpenRouter
 from openrouter.errors import ResponseValidationError
-from test_runtime_evaluation import make_scenario
-from test_wp41_response_capture import FakeGraph, wrapper
+from synthetic_runtime import make_scenario
+from synthetic_workflow import FakeGraph, wrapper
 
 from backend.evaluation import runtime_live
 from backend.evaluation.runtime_evaluation import (
@@ -342,10 +342,12 @@ def test_streaming_response_is_not_buffered_by_evaluation_hook():
     ],
 )
 def test_real_judge_consumer_uses_wire_not_adapter_defaults(wire, expected):
-    from test_runtime_evaluation import normalize_trace_runs, root_run
+    from synthetic_runtime import root_run
 
-    from backend.evaluation.runtime_evaluation import evaluate_with_openevals_judge
-    from scripts.evaluate_runtime_workflow import _configure_pilot_judge
+    from backend.evaluation.runtime_evaluation import (
+        evaluate_with_openevals_judge,
+        normalize_trace_runs,
+    )
 
     model = _adapter(wire)
     scenario = make_scenario()
@@ -358,7 +360,7 @@ def test_real_judge_consumer_uses_wire_not_adapter_defaults(wire, expected):
             scenario,
             record,
             "analyst_usefulness",
-            judge=_configure_pilot_judge(model, "analyst_usefulness"),
+            judge=model,
             judge_provider="openrouter",
             judge_model="fixture",
             structured_output_method="json_schema",
@@ -589,7 +591,9 @@ def test_openrouter_adapter_with_serving_provider_label_still_untrusted(monkeypa
 
 
 def test_identity_unknown_trace_serialization_never_passes_token_budget():
-    from test_runtime_evaluation import normalize_trace_runs, root_run
+    from synthetic_runtime import root_run
+
+    from backend.evaluation.runtime_evaluation import normalize_trace_runs
 
     runs = root_run()
     root = next(run for run in runs if not run.get("parent_run_id"))

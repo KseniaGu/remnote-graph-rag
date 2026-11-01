@@ -25,12 +25,32 @@ from backend.configs.messages import (
     ERROR_WORKFLOW_TIMEOUT,
 )
 from backend.configs.storage import StorageSettings
-from backend.evaluation.portfolio_budget import (
-    EvaluationBudgetUnavailable,
-    current_evaluation_budget,
-)
 from backend.utils.chat_errors import UserFacingChatError
 from backend.utils.helpers import logger
+
+
+class EvaluationBudgetUnavailable(RuntimeError):
+    reason = "evaluation_guard_unavailable"
+
+
+class EvaluationBudgetExceeded(RuntimeError):
+    reason = "evaluation_guard_exhausted"
+
+
+_EVALUATION_BUDGET = contextvars.ContextVar("evaluation_guard", default=None)
+
+
+def current_evaluation_budget():
+    return _EVALUATION_BUDGET.get()
+
+
+@contextmanager
+def bind_evaluation_budget(guard):
+    token = _EVALUATION_BUDGET.set(guard)
+    try:
+        yield guard
+    finally:
+        _EVALUATION_BUDGET.reset(token)
 
 
 class ChatLimitError(UserFacingChatError):

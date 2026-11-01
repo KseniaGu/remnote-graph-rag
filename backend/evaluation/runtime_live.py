@@ -14,11 +14,6 @@ from typing import Any
 
 from backend.configs.constants import RECURSION_LIMIT
 from backend.configs.search import KnowledgeGraphSearchSettings
-from backend.evaluation.portfolio_budget import (
-    EvaluationBudgetExceeded,
-    EvaluationBudgetUnavailable,
-    current_evaluation_budget,
-)
 from backend.evaluation.runtime_evaluation import (
     FailureObservation,
     GraphObservation,
@@ -36,6 +31,9 @@ from backend.evaluation.runtime_evaluation import (
 )
 from backend.utils.chat_limits import (
     ChatTurnContext,
+    EvaluationBudgetExceeded,
+    EvaluationBudgetUnavailable,
+    current_evaluation_budget,
     provider_status_code,
     reset_current_chat_turn,
     set_current_chat_turn,
@@ -598,8 +596,7 @@ def _append_diagnostic(
     budget = current_evaluation_budget()
     item["attempts"] = context.llm_provider_attempts
     item["retries"] = context.retries_used
-    item["reservation_ids"] = budget.provenance()["reservation_ids"] if budget else []
-    item["job_ids"] = budget.provenance()["job_ids"] if budget else []
+    item["guard"] = budget.provenance() if budget else {}
     bounded = _bounded_diagnostic(item)
     encoded = json.dumps(bounded, ensure_ascii=False)
     if len(encoded) >= 16000:

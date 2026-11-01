@@ -419,31 +419,12 @@ Unmet semantic prerequisites are skipped/N/A; provider/parser/schema failures
 remain execution errors. Claim faithfulness uses a compact 4,096-token
 structured contract while Boolean judges use 512 tokens. Judge provider/model
 selection is explicit and separate from runtime Analyst configuration. Live and
-judge evaluation use one persistent, exclusively locked effort ledger under
-the Git-common main checkout's `data/evaluation/portfolio_budget/`; same-day
-normalized quota metadata no more than 15 minutes old at entry and every
-reservation, at most 50 runtime/retry/judge attempts per UTC day, at least 20
-requests of local demo headroom, and stage/whole-effort ceilings guard dispatch.
-The B0/final allocations are 33/59 within the unchanged 92-attempt effort.
-Existing state needs the [explicit daily policy amendment](full_evaluation_report_runbook.md#prospective-daily-policy-amendment),
-which preserves spending and uncertainty. Fresh prospective capacity evidence
-can support an authorized current-day change without reconstructing old limits;
-account, key, free-route and external limits must be independently verified.
-Fresh continuation quota is explicitly registered from a reviewed capture and
-checked under the live-session lock; per-attempt snapshots preserve the prior
-quota file and observation baselines. Metadata may tighten daily policy;
-rollover, restart and aliases cannot loosen it.
-Standalone restored collection requires `--budget-ledger` pointing to the
-original existing absolute canonical ledger; original/restored admissions reject
-alternate or copied ledgers. State binds the original path and fixed daily policy;
-restoration never resets counts.
-The production index-storage default remains Redis; an explicitly selected
-local evaluation index uses existing `INDEX_STORAGE` JSON (`storage_type` and
-`storage_path`) as described in the [evaluation runbook](full_evaluation_report_runbook.md#explicit-local-index-for-evaluation).
-Stage resume binds actual chat-limit/path settings, selected prompts and storage
-manifests; published job replay adds no duplicate observation. Command flags do
-not authorize collection. See [collection limits and the B0 checkpoint](runtime_evaluation.md#portfolio-collection-budgets-and-b0-checkpoint)
-for readiness, resume, and archive-only claim boundaries.
+judge evaluation use a separate persistent request guard shared across worktrees.
+It enforces an operator-supplied daily ceiling, current quota observation,
+headroom and per-invocation limits before dispatch. See the
+[evaluation request guard](runtime_evaluation.md#evaluation-request-guard).
+The historical accounting remains separate. Production index storage defaults
+to Redis; the evaluation runbook describes the explicit local index option.
 
 `backend/evaluation/evaluation_reporting.py` registers both executors in
 immutable evaluation history under `data/evaluation` and renders one

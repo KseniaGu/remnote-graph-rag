@@ -88,7 +88,7 @@ The focused correction passes existing bounded history and summary through
 [Researcher message assembly](../../backend/workflows/learner.py) and selects the
 [shared v6 prompt](../../backend/llm/prompts/learner_workflow/researcher/v6.yaml),
 without lowering adequacy thresholds.
-[Scripted regression cases](../../tests/test_wp44_medusa_context.py) cover both
+[Scripted regression cases](../../tests/test_researcher_context.py) cover both
 retrieval modes, context-preserving web fallback, adequate evidence staying
 local and source exhaustion; the saved focused gate was 27 passed / 1 expected
 failure, which demonstrates wiring rather than live model adherence.

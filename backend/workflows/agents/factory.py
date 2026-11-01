@@ -18,7 +18,7 @@ except ImportError:
 
 from backend.configs.constants import MAX_RETRIES, WORKFLOW_LOGGING
 from backend.configs.enums import LLMProviderType
-from backend.evaluation.portfolio_budget import (
+from backend.utils.chat_limits import (
     EvaluationBudgetUnavailable,
     current_evaluation_budget,
 )
@@ -79,17 +79,24 @@ class AgentsFactory:
 
             # max_retries=0 alone leaves the SDK's default retry policy active.
             # Explicit None disables it; transports also disallow retries/redirects.
+            sync_client = httpx.Client(
+                transport=httpx.HTTPTransport(retries=0), follow_redirects=False
+            )
+            try:
+                async_client = httpx.AsyncClient(
+                    transport=httpx.AsyncHTTPTransport(retries=0),
+                    follow_redirects=False,
+                )
+            except BaseException:
+                sync_client.close()
+                raise
+            evaluation_budget.register_clients(sync_client, async_client)
             client = OpenRouter(
                 api_key=api_key,
                 retry_config=None,
                 timeout_ms=int(model_settings.request_timeout * 1000),
-                client=httpx.Client(
-                    transport=httpx.HTTPTransport(retries=0), follow_redirects=False
-                ),
-                async_client=httpx.AsyncClient(
-                    transport=httpx.AsyncHTTPTransport(retries=0),
-                    follow_redirects=False,
-                ),
+                client=sync_client,
+                async_client=async_client,
             )
             return ChatOpenRouter(
                 model=model_settings.model_name,

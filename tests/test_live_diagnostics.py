@@ -4,10 +4,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from test_runtime_evaluation import make_scenario
+from synthetic_runtime import make_scenario
 
 from backend.evaluation import runtime_live
-from backend.evaluation.portfolio_budget import EvaluationBudgetUnavailable
+from backend.utils.chat_limits import EvaluationBudgetUnavailable
 from scripts import evaluate_runtime_workflow as cli
 
 
@@ -93,62 +93,6 @@ def test_partial_diagnostics_survive_budget_guard_stop(tmp_path):
     assert model["response_metadata"]["model"] == "actual"
     assert events[-1]["event"] == "exception"
     assert events[-1]["exception_chain"][0]["type"] == "EvaluationBudgetUnavailable"
-
-
-def test_r2_cli_does_not_replay_uncertain_r1(tmp_path, monkeypatch, capsys):
-    from test_portfolio_budget import quota
-
-    from backend.evaluation.runtime_evaluation import RuntimeRecord
-
-    quota_path = tmp_path / "quota.json"
-    quota_path.write_text(json.dumps(quota()))
-    ledger = tmp_path / "ledger.json"
-    monkeypatch.setattr(cli, "campaign_ledger", lambda root, **kwargs: ledger)
-    calls = []
-
-    async def fake_run(scenario, *, repetition):
-        calls.append(repetition)
-        if repetition == 1:
-            raise EvaluationBudgetUnavailable("uncertain fixture")
-        return RuntimeRecord(
-            scenario_id=scenario.id,
-            scenario_version=scenario.version,
-            run_id="fixture-r2",
-            source_mode="controlled_live",
-            input=scenario.input,
-            repetition=repetition,
-        )
-
-    monkeypatch.setattr(cli, "run_controlled_live_scenario", fake_run)
-    args = [
-        "live",
-        "--case-id",
-        "out_of_scope_biological_cats",
-        "--confirm-provider-calls",
-        "--budget-stage",
-        "B0",
-        "--provider-quota",
-        str(quota_path),
-        "--evaluation-root",
-        str(tmp_path / "eval"),
-    ]
-    assert cli.main([*args, "--output-dir", str(tmp_path / "r1")]) == 2
-    before = json.loads(ledger.read_text())["jobs"][
-        "B0:live:out_of_scope_biological_cats:v1:r1"
-    ].copy()
-    assert before["status"] == "started"
-    assert (
-        cli.main([*args, "--repetition", "2", "--output-dir", str(tmp_path / "r2")])
-        == 0
-    )
-    assert (
-        "provider attempts in published observations: unknown"
-        in capsys.readouterr().out
-    )
-    jobs = json.loads(ledger.read_text())["jobs"]
-    assert calls == [1, 2]
-    assert jobs["B0:live:out_of_scope_biological_cats:v1:r1"] == before
-    assert jobs["B0:live:out_of_scope_biological_cats:v1:r2"]["status"] == "completed"
 
 
 def test_evaluation_retry_requires_concrete_transport_or_5xx():
@@ -280,86 +224,3 @@ def test_diagnostic_run_does_not_fabricate_record_after_exception(tmp_path):
         json.loads(path.read_text().splitlines()[-1])["exception_chain"][0]["type"]
         == "ValueError"
     )
-
-
-def test_fourth_cats_attempt_is_blocked_before_transport(tmp_path, monkeypatch):
-    from datetime import UTC, datetime, timedelta
-
-    from test_portfolio_budget import quota
-
-    from backend.configs.chat_limits import ChatLimitsSettings
-    from backend.evaluation import portfolio_budget as budget_module
-    from backend.utils.chat_limits import ChatLimitService, get_current_chat_turn
-
-    now = datetime.now(UTC)
-
-    class Clock(datetime):
-        moment = None
-
-        @classmethod
-        def now(cls, tz=None):
-            return cls.moment
-
-    Clock.moment = now - timedelta(days=1)
-    monkeypatch.setattr(budget_module, "datetime", Clock)
-    ledger = tmp_path / "ledger.json"
-    for count in (24, 6):
-        with budget_module.EvaluationBudget(
-            ledger,
-            stage="B0",
-            run_id=f"prior-{count}",
-            quota=quota(Clock.moment, remaining_requests=100),
-        ) as guard:
-            for _ in range(count):
-                guard.reserve("llm", provider="openrouter", model="openrouter/free")
-        Clock.moment = now
-    sent = []
-    limits = ChatLimitService(
-        settings=ChatLimitsSettings(_env_file=None, shared_quotas_enabled=False)
-    )
-
-    class Graph:
-        async def astream_events(self, *args, **kwargs):
-            for number in range(4):
-                await limits.reserve_llm_attempt(
-                    get_current_chat_turn(), "openrouter", "orchestrator"
-                )
-                sent.append(number)
-                yield {
-                    "event": "on_chain_start",
-                    "name": "orchestrator",
-                    "metadata": {"langgraph_node": "orchestrator"},
-                    "data": {},
-                }
-
-    wrapper = SimpleNamespace(
-        _graph=Graph(),
-        _ensure_initialized=lambda: None,
-        _convert_messages=lambda messages: [],
-    )
-    monkeypatch.setattr(runtime_live, "get_workflow", lambda: wrapper)
-    monkeypatch.setattr(
-        runtime_live, "_disable_tavily_transport_retries", lambda wrapper: None
-    )
-    path = tmp_path / "guard.jsonl"
-    with (
-        budget_module.EvaluationBudget(
-            ledger,
-            stage="B0",
-            run_id="cats-r2",
-            quota=quota(now, remaining_requests=100),
-        ) as guard,
-        budget_module.bind_evaluation_budget(guard),
-    ):
-        guard.begin_job("live:cats:v1:r2")
-        with pytest.raises(budget_module.EvaluationBudgetExceeded, match="B0 llm"):
-            asyncio.run(
-                runtime_live.run_controlled_live_scenario(
-                    make_scenario(), repetition=2, diagnostics_path=path
-                )
-            )
-    assert sent == [0, 1, 2]
-    assert len(json.loads(ledger.read_text())["reservations"]) == 33
-    terminal = json.loads(path.read_text().splitlines()[-1])
-    assert terminal["exception_chain"][0]["type"] == "EvaluationBudgetExceeded"
-    assert len(terminal["reservation_ids"]) == 3

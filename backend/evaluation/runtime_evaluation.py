@@ -17,7 +17,7 @@ from typing import Any, Literal
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from backend.evaluation.portfolio_budget import (
+from backend.utils.chat_limits import (
     EvaluationBudgetExceeded,
     EvaluationBudgetUnavailable,
     current_evaluation_budget,

@@ -1,4 +1,4 @@
-"""Offline WP4.4 retrieval and contextual web-handoff regressions."""
+"""Offline retrieval and contextual web-handoff regressions."""
 
 import asyncio
 from pathlib import Path
@@ -76,7 +76,7 @@ DEVELOPMENT_CASES = [
         [["RetNet"]],
         "ResNet uses residual image blocks.",
         "topic_mismatch",
-        "synthetic identity distinction, WP4.1 control",
+        "synthetic identity distinction",
     ),
     (
         "mla_attention",
@@ -85,7 +85,7 @@ DEVELOPMENT_CASES = [
         [["MLA", "Multi-Head Latent Attention"]],
         "Ordinary attention uses queries and keys.",
         "topic_mismatch",
-        "synthetic identity distinction, WP4.1 control",
+        "synthetic identity distinction",
     ),
     (
         "partial",
@@ -121,7 +121,7 @@ DEVELOPMENT_CASES = [
         [],
         "Adam uses adaptive moments.",
         "adequate",
-        "synthetic broad positive, WP4.1 control",
+        "synthetic broad positive",
     ),
     (
         "empty",
@@ -165,7 +165,7 @@ def _synthetic_kb(case, mode):
 
         return search_knowledge_base(analyst_pipeline=Pipeline())
 
-    from test_retrieval_evidence import FakeNode, FakeNodeWithScore, FakeRetriever
+    from synthetic_evidence import FakeNode, FakeNodeWithScore, FakeRetriever
 
     metadata = {"path": ["Medusa"]} if name == "path_only" else {}
     nodes = (

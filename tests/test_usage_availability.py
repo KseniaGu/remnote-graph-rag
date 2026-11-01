@@ -117,8 +117,8 @@ def test_live_uses_all_captured_events_not_partial_turn_counter(monkeypatch):
     import asyncio
 
     from langchain_core.messages import AIMessage
-    from test_runtime_evaluation import make_scenario
-    from test_wp41_response_capture import FakeGraph, wrapper
+    from synthetic_runtime import make_scenario
+    from synthetic_workflow import FakeGraph, wrapper
 
     from backend.evaluation import runtime_live
     from backend.utils.chat_limits import get_current_chat_turn
@@ -193,9 +193,12 @@ def test_canonical_zero_precedes_legacy_and_legacy_ollama_supported():
 
 
 def test_unavailable_or_legacy_total_cannot_pass_budget():
-    from test_runtime_evaluation import make_scenario, normalize_trace_runs, root_run
+    from synthetic_runtime import make_scenario, root_run
 
-    from backend.evaluation.runtime_evaluation import score_runtime_record
+    from backend.evaluation.runtime_evaluation import (
+        normalize_trace_runs,
+        score_runtime_record,
+    )
 
     scenario = make_scenario()
     scenario.expectations.budgets.max_total_tokens = 10
@@ -262,9 +265,12 @@ def test_judge_error_and_skip_keep_separate_attempts_and_available_usage():
 
 
 def test_exported_trace_keeps_explicit_attempts_and_never_invents_retries():
-    from test_runtime_evaluation import make_scenario, normalize_trace_runs, root_run
+    from synthetic_runtime import make_scenario, root_run
 
-    from backend.evaluation.runtime_evaluation import score_runtime_record
+    from backend.evaluation.runtime_evaluation import (
+        normalize_trace_runs,
+        score_runtime_record,
+    )
 
     runs = root_run()
     root = next(item for item in runs if not item.get("parent_run_id"))

@@ -1,4 +1,4 @@
-from test_analyst_retrieval import (
+from synthetic_analyst import (
     FakeTextNode,
     FakeVectorStore,
     RaisingReranker,

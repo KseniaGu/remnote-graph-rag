@@ -7,7 +7,9 @@ import asyncio
 import hashlib
 import json
 import os
+import subprocess
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,25 +19,16 @@ if str(ROOT) not in sys.path:
 from backend.configs.search import KnowledgeGraphSearchSettings  # noqa: E402
 from backend.evaluation.evaluation_reporting import (  # noqa: E402
     DEFAULT_EVALUATION_ROOT,
-    _hash_tree,
     allocate_run_dir,
-    build_evaluation_snapshot,
     current_evaluation_fingerprint,
     is_evaluation_report_schema,
     register_completed_run,
     register_failed_run,
 )
-from backend.evaluation.portfolio_budget import (  # noqa: E402
-    EvaluationBudget,
-    EvaluationBudgetUnavailable,
-    bind_evaluation_budget,
-    campaign_ledger,
-)
+from backend.evaluation.request_guard import EvaluationGuard  # noqa: E402
 from backend.evaluation.runtime_evaluation import (  # noqa: E402
     SEMANTIC_JUDGE_OUTPUT_TOKEN_LIMITS,
     SEMANTIC_JUDGE_RUBRICS,
-    RuntimeRecord,
-    SemanticJudgeResult,
     evaluate_with_agentevals,
     evaluate_with_openevals_judge,
     load_runtime_records,
@@ -46,6 +39,10 @@ from backend.evaluation.runtime_evaluation import (  # noqa: E402
     write_runtime_artifacts,
 )
 from backend.evaluation.runtime_live import run_controlled_live_scenario  # noqa: E402
+from backend.utils.chat_limits import (  # noqa: E402
+    EvaluationBudgetUnavailable,
+    bind_evaluation_budget,
+)
 
 DEFAULT_SCENARIOS = ROOT / "evals" / "runtime" / "scenarios.json"
 DEFAULT_TRACE_EXPORT = ROOT / "exports" / "langsmith_traces_20260816T233652Z.json"
@@ -75,6 +72,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _add_common_args(live)
     _add_budget_args(live)
     live.add_argument(
+        "--max-web-attempts",
+        type=int,
+        default=0,
+        help="Maximum web provider attempts in this run; requires --allow-tavily.",
+    )
+    live.add_argument(
         "--case-id",
         action="append",
         required=True,
@@ -99,21 +102,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Allow cases whose contract requires deep_web_research.",
     )
     live.add_argument(
-        "--pre-dispatch-receipt",
-        type=Path,
-        help="Write a receipt only for a failure before final runtime admission.",
-    )
-    live.add_argument(
-        "--require-registered-quota",
-        action="store_true",
-        help="Require a previously capture-bound quota baseline under the campaign lock.",
-    )
-    live.add_argument(
-        "--require-final-runtime-admission",
-        action="store_true",
-        help="Require six-attempt final runtime admission under the campaign lock.",
-    )
-    live.add_argument(
         "--allow-expanded-live-suite",
         action="store_true",
         help="Permit more than three total live runs after explicit quota review.",
@@ -131,11 +119,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _add_budget_args(judge)
     judge.add_argument("--judge-provider", choices=("openrouter",))
     judge.add_argument("--judge-model")
-    judge.add_argument(
-        "--fixed-judge-pilot",
-        action="store_true",
-        help="Use the approved fixed-model, Phala-only evaluation pilot configuration.",
-    )
     source = judge.add_mutually_exclusive_group(required=True)
     source.add_argument("--source-run", help="Exact evaluation run ID, or latest.")
     source.add_argument(
@@ -169,74 +152,55 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _add_budget_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--budget-stage", choices=("B0", "final"))
-    parser.add_argument(
-        "--budget-ledger",
-        type=Path,
-        help="Existing absolute original canonical ledger; required for restored sources. Aliases must resolve to the approved binding.",
-    )
     parser.add_argument(
         "--provider-quota",
         type=Path,
-        help="Quota JSON no older than 15 minutes on this UTC day; supplied limits can only tighten the fixed 50-attempt daily ceiling and 20-request headroom.",
+        help="Required fresh quota observation JSON for the configured provider and model.",
+    )
+    parser.add_argument(
+        "--max-provider-attempts",
+        type=int,
+        help="Required maximum provider attempts in this run, including retries.",
     )
 
 
-def _evaluation_session(args: argparse.Namespace, output_dir: Path) -> EvaluationBudget:
-    if (output_dir / "manifest.json").exists():
+def _evaluation_session(args: argparse.Namespace, output_dir: Path) -> EvaluationGuard:
+    if (output_dir / "manifest.json").exists() or (
+        output_dir / "partial_judge_results.jsonl"
+    ).exists():
         args._active_output_dir = None
+        raise ValueError("evaluation output already has a manifest")
+    if args.provider_quota is None or args.max_provider_attempts is None:
         raise ValueError(
-            "evaluation output already has a manifest; resume into a new output directory"
+            "live/judge requires --provider-quota and --max-provider-attempts"
         )
-    if not args.budget_stage or not args.provider_quota:
-        raise ValueError("live/judge requires --budget-stage and --provider-quota")
-    ledger = campaign_ledger(ROOT, override=args.budget_ledger)
-    quota = json.loads(args.provider_quota.read_text(encoding="utf-8"))
-    from backend.configs.paths import PathSettings
-    from backend.utils.chat_limits import get_chat_limit_service
-
-    paths = PathSettings()
-    configuration = {
-        "evaluation_fingerprint": current_evaluation_fingerprint(),
-        "application_configuration": build_evaluation_snapshot({})["fingerprint_input"][
-            "application_configuration"
-        ],
-        "chat_limits": get_chat_limit_service().settings.model_dump(mode="json"),
-        "paths": paths.model_dump(mode="json"),
-        "selected_prompt_tree_hash": _hash_tree(paths.prompts_dir),
-        "selected_storage_manifest_hashes": {
-            str(path.relative_to(paths.local_storage_dir)): hashlib.sha256(
-                path.read_bytes()
-            ).hexdigest()
-            for path in sorted(paths.local_storage_dir.rglob("*manifest*.json"))
-            if path.is_file()
-        },
-    }
-    budget = EvaluationBudget(
+    common = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    ledger = Path(common).parent / "data/evaluation/request_guard/ledger.json"
+    guard = EvaluationGuard(
         ledger,
-        stage=args.budget_stage,
-        run_id=output_dir.name,
-        quota=quota,
-        configuration=configuration,
+        quota=json.loads(args.provider_quota.read_text(encoding="utf-8")),
+        max_attempts=args.max_provider_attempts,
+        max_web_attempts=getattr(args, "max_web_attempts", 0),
     )
-    budget.allow_tavily = bool(getattr(args, "allow_tavily", False))
-    budget.require_registered_observation = bool(
-        getattr(args, "require_registered_quota", False)
-        or getattr(args, "fixed_judge_pilot", False)
+    guard.allow_tavily = (
+        bool(getattr(args, "allow_tavily", False))
+        and getattr(args, "max_web_attempts", 0) > 0
     )
-    args._budget = budget
-    return budget
+    args._budget = guard
+    return guard
 
 
-def _save_job(output_dir: Path, job_id: str, result) -> Path:
-    job_dir = output_dir / "jobs"
-    job_dir.mkdir(parents=True, exist_ok=True)
-    artifact = job_dir / (hashlib.sha256(job_id.encode()).hexdigest() + ".json")
-    with artifact.open("x", encoding="utf-8") as handle:
-        handle.write(result.model_dump_json(indent=2))
-        handle.flush()
-        os.fsync(handle.fileno())
-    return artifact
+@asynccontextmanager
+async def _live_session(args: argparse.Namespace, output_dir: Path):
+    async with _evaluation_session(args, output_dir) as guard:
+        with bind_evaluation_budget(guard):
+            yield guard
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -322,7 +286,6 @@ def _live_repetitions(args: argparse.Namespace) -> list[int]:
 
 
 async def run_live(args: argparse.Namespace) -> int:
-    args._final_admitted = False
     if not args.confirm_provider_calls:
         raise ValueError("live evaluation requires --confirm-provider-calls")
     repetitions = _live_repetitions(args)
@@ -339,10 +302,6 @@ async def run_live(args: argparse.Namespace) -> int:
             "initial live validation is capped at three total runs; use "
             "--allow-expanded-live-suite only after quota review and approval"
         )
-    if getattr(args, "require_final_runtime_admission", False) and (
-        args.budget_stage != "final" or total_runs != 1
-    ):
-        raise ValueError("final runtime admission requires exactly one final-stage run")
     tavily_cases = [
         scenario.id
         for scenario in selected
@@ -364,13 +323,7 @@ async def run_live(args: argparse.Namespace) -> int:
     output_dir = args.output_dir or _default_output_dir("live", args.evaluation_root)
     args._active_output_dir = output_dir
 
-    with (
-        _evaluation_session(args, output_dir) as budget,
-        bind_evaluation_budget(budget),
-    ):
-        if getattr(args, "require_final_runtime_admission", False):
-            budget.require_final_runtime_admission()
-            args._final_admitted = True
+    async with _live_session(args, output_dir) as budget:
         max_expected_provider_calls = sum(
             scenario.expectations.budgets.max_provider_attempts or 6
             for scenario in selected
@@ -383,50 +336,22 @@ async def run_live(args: argparse.Namespace) -> int:
         )
 
         records = []
-        publication_jobs = []
         for scenario in selected:
             for repetition in repetitions:
-                identity = f"live:{scenario.id}:v{scenario.version}:r{repetition}"
-                contract = {
-                    "scenario": scenario.model_dump(mode="json"),
-                    "configuration": budget.configuration,
-                }
-                saved = budget.begin_job(
-                    identity,
-                    contract_digest=hashlib.sha256(
-                        json.dumps(contract, sort_keys=True).encode()
-                    ).hexdigest(),
+                diagnostic_args = (
+                    {
+                        "diagnostics_path": output_dir
+                        / "diagnostics"
+                        / f"{scenario.id}-r{repetition}.jsonl"
+                    }
+                    if args.capture_diagnostics
+                    else {}
                 )
-                if saved is not None and budget.is_published(identity):
-                    continue
-                if saved is not None:
-                    record = RuntimeRecord.model_validate_json(
-                        saved.read_text(encoding="utf-8")
-                    )
-                else:
-                    diagnostic_args = (
-                        {
-                            "diagnostics_path": output_dir
-                            / "diagnostics"
-                            / f"{scenario.id}-r{repetition}.jsonl"
-                        }
-                        if args.capture_diagnostics
-                        else {}
-                    )
-                    record = await run_controlled_live_scenario(
-                        scenario, repetition=repetition, **diagnostic_args
-                    )
-                    record.provenance["evaluation_budget"] = budget.provenance()
-                    budget.complete_job(
-                        identity, _save_job(output_dir, identity, record)
-                    )
+                record = await run_controlled_live_scenario(
+                    scenario, repetition=repetition, **diagnostic_args
+                )
+                record.provenance["evaluation_guard"] = budget.provenance()
                 records.append(record)
-                publication_jobs.append(identity)
-        if not records:
-            print(
-                "Selected live jobs are already published; no calls or new report contributions."
-            )
-            return 0
         results = [
             score_runtime_record(scenario_by_id[record.scenario_id], record)
             for record in records
@@ -438,7 +363,6 @@ async def run_live(args: argparse.Namespace) -> int:
                 for record in records
             ]
         output_dir = args._active_output_dir
-        budget.prepare_publication(publication_jobs, output_dir / "manifest.json")
         summary = write_runtime_artifacts(
             output_dir,
             records,
@@ -460,11 +384,10 @@ async def run_live(args: argparse.Namespace) -> int:
                 "analyst_retrieval_mode": search_settings.analyst_retrieval_mode,
                 "visualizer_retrieval_mode": search_settings.visualizer_retrieval_mode,
                 "scenario_versions": {item.id: item.version for item in selected},
-                "evaluation_budget": budget.provenance(),
+                "evaluation_guard": budget.provenance(),
             },
             evaluation_root=args.evaluation_root,
         )
-        budget.finish_publication(publication_jobs)
         actual_attempts = (
             sum(record.usage.provider_attempts for record in records)
             if all(record.usage.provider_attempts is not None for record in records)
@@ -512,129 +435,6 @@ def _resolve_source_records(
     if not candidates:
         raise ValueError("no completed runtime run contains every selected case")
     return max(candidates, key=lambda item: item[0])[1]
-
-
-def _configure_pilot_judge(judge, dimension: str):
-    """Applies the fixed judge settings without changing production model settings."""
-    return judge.model_copy(
-        update={
-            "temperature": 0.0,
-            "max_tokens": 8192 if dimension == "claim_faithfulness" else 512,
-            "reasoning": {"effort": "none"},
-            "openrouter_provider": {
-                "only": ["Phala"],
-                "allow_fallbacks": False,
-                "require_parameters": True,
-            },
-        }
-    )
-
-
-def _pilot_result_safe(result: SemanticJudgeResult) -> bool:
-    return (
-        result.status == "success"
-        and not result.confirmed_truncation
-        and result.observed_model
-        in {
-            "xingchen-agi/xing4.0-29b-a4b:free",
-            "xingchen-agi/xing4.0-29b-a4b-20261015",
-        }
-        and result.observed_provider.casefold() == "phala"
-    )
-
-
-def _pilot_retryable(result: SemanticJudgeResult) -> bool:
-    if result.status != "error" or not result.provider_call_attempted:
-        return False
-    if result.confirmed_truncation or result.parser_classification in {
-        "malformed_json",
-        "schema_validation_failure",
-        "structured_output_parse_failure",
-    }:
-        return False
-    if result.observed_model and result.observed_model not in {
-        "xingchen-agi/xing4.0-29b-a4b:free",
-        "xingchen-agi/xing4.0-29b-a4b-20261015",
-    }:
-        return False
-    if result.observed_provider and result.observed_provider.casefold() != "phala":
-        return False
-    if result.http_status_code is not None:
-        return (
-            result.transport_status == "completed"
-            and result.parser_classification == "provider_failure"
-            and 500 <= result.http_status_code <= 599
-        )
-    return result.error_type in {
-        "TimeoutError",
-        "ConnectError",
-        "ConnectTimeout",
-        "ReadTimeout",
-        "WriteTimeout",
-        "PoolTimeout",
-        "ConnectionError",
-        "APIConnectionError",
-        "APITimeoutError",
-    }
-
-
-def _pilot_observations_match(
-    result: SemanticJudgeResult, budget: EvaluationBudget
-) -> bool:
-    """Compare every observed identity in an assessment, including failed attempts."""
-    observed: dict[str, str] = {}
-    for attempt in [*result.prior_attempts, result.model_dump(mode="json")]:
-        if not isinstance(attempt, dict):
-            return False
-        model = attempt.get("observed_model", "")
-        provider = attempt.get("observed_provider", "")
-        if not isinstance(model, str) or not isinstance(provider, str):
-            return False
-        if model and model not in {
-            "xingchen-agi/xing4.0-29b-a4b:free",
-            "xingchen-agi/xing4.0-29b-a4b-20261015",
-        }:
-            return False
-        if provider and provider.casefold() != "phala":
-            return False
-        if not budget.pilot_retry_identity_matches(model, provider):
-            return False
-        for key, value in (("model", model), ("provider", provider)):
-            if value and key in observed and observed[key] != value:
-                return False
-            if value:
-                observed[key] = value
-    return True
-
-
-def _combine_pilot_attempts(result: SemanticJudgeResult, failed: SemanticJudgeResult):
-    result.prior_attempts = [failed.model_dump(mode="json")]
-    duplicate_id = bool(
-        failed.observed_request_id
-        and failed.observed_request_id == result.observed_request_id
-    )
-    for field in ("input_tokens", "output_tokens", "total_tokens"):
-        parts = [item.usage.token_coverage.get(field, {}) for item in (failed, result)]
-        observed = sum(part.get("observed", 0) for part in parts)
-        subtotals = [
-            part.get("subtotal") for part in parts if part.get("subtotal") is not None
-        ]
-        subtotal = sum(subtotals) if subtotals else None
-        complete = not duplicate_id and all(
-            part.get("complete") is True for part in parts
-        )
-        if duplicate_id:
-            observed = 0
-            subtotal = None
-        result.usage.token_coverage[field] = {
-            "observed": observed,
-            "attempted": 2,
-            "subtotal": subtotal,
-            "complete": complete,
-        }
-        setattr(result.usage, field, subtotal if complete else None)
-    result.usage.provider_attempts = 2
-    result.usage.retries = 1
 
 
 def run_judge(args: argparse.Namespace) -> int:
@@ -697,15 +497,6 @@ def run_judge(args: argparse.Namespace) -> int:
 
     if not args.judge_provider or not args.judge_model:
         raise ValueError("judge requires separate --judge-provider and --judge-model")
-    if args.fixed_judge_pilot and (
-        args.judge_provider != "openrouter"
-        or args.judge_model != "xingchen-agi/xing4.0-29b-a4b:free"
-        or args.structured_output_method != "json_schema"
-        or not set(dimensions) <= {"claim_faithfulness", "graph_usefulness"}
-    ):
-        raise ValueError(
-            "fixed judge pilot requires its approved model, JSON Schema, and dimensions"
-        )
     from backend.configs.enums import ModelRoleType
     from backend.configs.models import OpenRouterSettings
     from backend.workflows.agents.factory import AgentsFactory
@@ -717,11 +508,7 @@ def run_judge(args: argparse.Namespace) -> int:
     provider_name = str(provider_value)
     model_name = str(settings.model_name)
     output_limits = {
-        dimension: (
-            8192
-            if args.fixed_judge_pilot and dimension == "claim_faithfulness"
-            else SEMANTIC_JUDGE_OUTPUT_TOKEN_LIMITS[dimension]
-        )
+        dimension: SEMANTIC_JUDGE_OUTPUT_TOKEN_LIMITS[dimension]
         for dimension in dimensions
     }
 
@@ -730,118 +517,18 @@ def run_judge(args: argparse.Namespace) -> int:
         f"jobs={[(scenario.id, dimension) for scenario, _, dimension in jobs]}, "
         f"provider={provider_name}, model={model_name}, "
         f"structured_output={args.structured_output_method}, "
-        f"output_limits={output_limits}, shared_pilot_retries={1 if args.fixed_judge_pilot else 0}."
+        f"output_limits={output_limits}, retries=0."
     )
     with (
         _evaluation_session(args, output_dir) as budget,
         bind_evaluation_budget(budget),
     ):
-        budget.fixed_judge_pilot = args.fixed_judge_pilot
-        if budget.is_registered_fixed_judge_quota() and not args.fixed_judge_pilot:
-            raise EvaluationBudgetUnavailable(
-                "registered fixed judge quota requires fixed pilot profile"
-            )
-        if args.fixed_judge_pilot and budget.quota.get("model") != model_name:
-            raise EvaluationBudgetUnavailable(
-                "fixed judge model differs from quota observation"
-            )
-        if args.fixed_judge_pilot:
-            for job_id, artifact in budget.completed_judge_artifacts():
-                saved_result = SemanticJudgeResult.model_validate_json(
-                    artifact.read_text(encoding="utf-8")
-                )
-                if (
-                    saved_result.judge_model != model_name
-                    or saved_result.judge_provider != provider_name
-                ):
-                    continue
-                if not budget.pilot_job_profile(job_id, saved_result.dimension):
-                    continue
-                if saved_result.status == "skipped":
-                    continue
-                if not _pilot_result_safe(
-                    saved_result
-                ) or not _pilot_observations_match(saved_result, budget):
-                    raise EvaluationBudgetUnavailable(
-                        "fixed judge pilot found an unsafe saved result"
-                    )
-                budget.match_pilot_identity(
-                    saved_result.observed_model, saved_result.observed_provider
-                )
         judge_results = []
-        publication_jobs = []
-        publication_records = {}
         for scenario, record, dimension in jobs:
-            record_hash = hashlib.sha256(
-                json.dumps(
-                    record.model_dump(mode="json"),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode()
-            ).hexdigest()
-            contract = {
-                "scenario": scenario.model_dump(mode="json"),
-                "record_sha256": record_hash,
-                "source_records_file_sha256": records_source_sha256,
-                "dimension": dimension,
-                "provider": provider_name,
-                "model": model_name,
-                "method": args.structured_output_method,
-                "judge_profile": "fixed-pilot-v1"
-                if args.fixed_judge_pilot
-                else "standard-v2",
-                "configuration": budget.configuration,
-            }
-            contract_digest = hashlib.sha256(
-                json.dumps(contract, sort_keys=True).encode()
-            ).hexdigest()
-            identity = f"judge:semantic-v2:{contract_digest}"
-            saved = budget.begin_job(
-                identity,
-                contract_digest=contract_digest,
-                require_setup_recovery=(
-                    args.fixed_judge_pilot
-                    and scenario.id == "contextual_mamba_visualization"
-                    and dimension == "graph_usefulness"
-                    and records_source_sha256
-                    == "efa5b77ae9ed40d12220a014f2529dc83c00857817d61fb2f7484c1b1c7a1d73"
-                ),
+            judge_settings = settings.model_copy(
+                update={"temperature": 0.0, "max_tokens": output_limits[dimension]}
             )
-            if saved is not None:
-                prior_result = SemanticJudgeResult.model_validate_json(
-                    saved.read_text(encoding="utf-8")
-                )
-                if (
-                    args.fixed_judge_pilot
-                    and prior_result.status != "skipped"
-                    and (
-                        not _pilot_result_safe(prior_result)
-                        or not _pilot_observations_match(prior_result, budget)
-                    )
-                ):
-                    raise EvaluationBudgetUnavailable(
-                        "fixed judge pilot stopped on an unsafe saved result"
-                    )
-                if args.fixed_judge_pilot and prior_result.status == "success":
-                    budget.match_pilot_identity(
-                        prior_result.observed_model, prior_result.observed_provider
-                    )
-                if budget.is_published(identity):
-                    continue
-                judge_results.append(prior_result)
-                publication_jobs.append(identity)
-                publication_records[record.run_id] = record
-                continue
-            updates = {"temperature": 0.0}
-            output_limit = output_limits[dimension]
-            if "num_predict" in settings.__class__.model_fields:
-                updates["num_predict"] = output_limit
-            if "max_tokens" in settings.__class__.model_fields:
-                updates["max_tokens"] = output_limit
-            judge_settings = settings.model_copy(update=updates)
             judge = AgentsFactory.get_llm_by_role(judge_settings)
-            if args.fixed_judge_pilot:
-                judge = _configure_pilot_judge(judge, dimension)
             result = evaluate_with_openevals_judge(
                 scenario,
                 record,
@@ -849,60 +536,23 @@ def run_judge(args: argparse.Namespace) -> int:
                 judge=judge,
                 judge_provider=provider_name,
                 judge_model=model_name,
-                configured_output_token_limit=output_limit,
+                configured_output_token_limit=output_limits[dimension],
                 structured_output_method=args.structured_output_method,
-                strict_structured_output=args.fixed_judge_pilot,
             )
-            if (
-                args.fixed_judge_pilot
-                and _pilot_retryable(result)
-                and budget.pilot_retry_identity_matches(
-                    result.observed_model, result.observed_provider
-                )
-            ):
-                if budget.claim_pilot_retry(result.model_dump(mode="json")):
-                    failed = result
-                    result = evaluate_with_openevals_judge(
-                        scenario,
-                        record,
-                        dimension,
-                        judge=judge,
-                        judge_provider=provider_name,
-                        judge_model=model_name,
-                        configured_output_token_limit=output_limit,
-                        structured_output_method=args.structured_output_method,
-                        strict_structured_output=True,
-                    )
-                    _combine_pilot_attempts(result, failed)
-            budget.complete_job(identity, _save_job(output_dir, identity, result))
             judge_results.append(result)
-            publication_jobs.append(identity)
-            publication_records[record.run_id] = record
-            if (
-                args.fixed_judge_pilot
-                and result.status != "skipped"
-                and (
-                    not _pilot_result_safe(result)
-                    or not _pilot_observations_match(result, budget)
-                )
-            ):
-                raise EvaluationBudgetUnavailable(
-                    "fixed judge pilot stopped: error, truncation or missing/unexpected serving identity"
-                )
-            if args.fixed_judge_pilot and result.status == "success":
-                budget.match_pilot_identity(
-                    result.observed_model, result.observed_provider
-                )
-            if result.http_status_code == 429:
-                raise EvaluationBudgetUnavailable(
-                    "judge HTTP 429 stopped the batch; refresh quota before resuming"
-                )
-        if not judge_results:
-            print(
-                "Selected judge jobs are already published; no calls or new report contributions."
+            output_dir.mkdir(parents=True, exist_ok=True)
+            fd = os.open(
+                output_dir / "partial_judge_results.jsonl",
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o600,
             )
-            return 0
-        published_records = list(publication_records.values())
+            with os.fdopen(fd, "a", encoding="utf-8") as handle:
+                handle.write(result.model_dump_json() + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            if result.http_status_code == 429:
+                raise EvaluationBudgetUnavailable("judge HTTP 429 stopped the batch")
+        published_records = selected_records
         scenario_results = [
             score_runtime_record(scenario_by_id[record.scenario_id], record)
             for record in published_records
@@ -911,7 +561,6 @@ def run_judge(args: argparse.Namespace) -> int:
             (result.usage.provider_attempts or 0) for result in judge_results
         )
         output_dir = args._active_output_dir
-        budget.prepare_publication(publication_jobs, output_dir / "manifest.json")
         write_runtime_artifacts(
             output_dir,
             published_records,
@@ -931,7 +580,6 @@ def run_judge(args: argparse.Namespace) -> int:
                 "dimensions": dimensions,
                 "repetition": args.repetition,
                 "structured_output_method": args.structured_output_method,
-                "fixed_judge_pilot": args.fixed_judge_pilot,
             },
             configuration={
                 "judge_provider": provider_name,
@@ -942,26 +590,10 @@ def run_judge(args: argparse.Namespace) -> int:
                 "judge_rubric_versions": dict.fromkeys(
                     dimensions, "runtime-semantic-v2"
                 ),
-                "judge_profile": "fixed-pilot-v1"
-                if args.fixed_judge_pilot
-                else "standard-v2",
-                "judge_provider_policy": {
-                    "only": ["Phala"],
-                    "allow_fallbacks": False,
-                    "require_parameters": True,
-                }
-                if args.fixed_judge_pilot
-                else None,
-                "judge_reasoning": {"effort": "none"}
-                if args.fixed_judge_pilot
-                else None,
-                "judge_strict_schema": args.fixed_judge_pilot,
-                "judge_include_raw": args.fixed_judge_pilot,
-                "evaluation_budget": budget.provenance(),
+                "evaluation_guard": budget.provenance(),
             },
             evaluation_root=args.evaluation_root,
         )
-        budget.finish_publication(publication_jobs)
         succeeded = sum(result.status == "success" for result in judge_results)
         skipped = sum(result.status == "skipped" for result in judge_results)
         errors = sum(result.status == "error" for result in judge_results)
@@ -1004,20 +636,6 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 evaluation_root=args.evaluation_root,
             )
-        receipt = getattr(args, "pre_dispatch_receipt", None)
-        if (
-            receipt is not None
-            and getattr(args, "require_final_runtime_admission", False)
-            and not getattr(args, "_final_admitted", True)
-        ):
-            with receipt.open("x", encoding="utf-8") as handle:
-                json.dump(
-                    {"dispatch_started": False, "error_type": type(exc).__name__},
-                    handle,
-                    sort_keys=True,
-                )
-                handle.flush()
-                os.fsync(handle.fileno())
         print(f"Runtime evaluation failed: {exc}", file=sys.stderr)
         return 2
 
