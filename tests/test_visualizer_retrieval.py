@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
+import pytest
 from llama_index.core.vector_stores import VectorStoreQueryResult
 
 from backend.configs.search import KnowledgeGraphSearchSettings
@@ -148,7 +149,191 @@ def make_indexer(vector_store, graph_store, docs=None, settings=None):
     )
 
 
+class KnownFocusExclusionFailure(AssertionError):
+    """Identifies the known failure to exclude incidental graph nodes."""
+
+
 class VisualizerRetrievalPipelineTests(unittest.TestCase):
+    def _partial_anchor_focus_fixture(self):
+        root = FakeGraphNode("concept_orion", "Orion", source_chunk_ids=["chunk_orion"])
+        family = FakeGraphNode(
+            "concept_family", "Sequence Family", source_chunk_ids=["chunk_orion"]
+        )
+        variant = FakeGraphNode(
+            "concept_variant", "Nova", source_chunk_ids=["chunk_orion"]
+        )
+        detail = FakeGraphNode(
+            "concept_detail", "Useful Mechanism", source_chunk_ids=["chunk_orion"]
+        )
+        bridge = FakeGraphNode(
+            "concept_bridge", "Model Architecture", source_chunk_ids=["chunk_other"]
+        )
+        incidental = FakeGraphNode(
+            "concept_incidental", "Forest Technique", source_chunk_ids=["chunk_other"]
+        )
+        evaluation = FakeGraphNode(
+            "concept_evaluation", "Validation Method", source_chunk_ids=["chunk_other"]
+        )
+        focused_chunk = FakeGraphNode(
+            "chunk_orion", "Orion Chunk", node_label="text_chunk"
+        )
+        other_chunk = FakeGraphNode(
+            "chunk_other", "Other Chunk", node_label="text_chunk"
+        )
+
+        def mention(chunk):
+            return FakeRelation("MENTIONS", {"evidence_chunk_ids": [chunk]})
+
+        graph_store = FakeGraphStore(
+            [
+                root,
+                family,
+                variant,
+                detail,
+                bridge,
+                incidental,
+                evaluation,
+                focused_chunk,
+                other_chunk,
+            ],
+            [
+                (focused_chunk, mention("chunk_orion"), family),
+                (focused_chunk, mention("chunk_orion"), variant),
+                (other_chunk, mention("chunk_other"), bridge),
+                (
+                    root,
+                    FakeRelation("IS_A", {"evidence_chunk_ids": ["chunk_orion"]}),
+                    family,
+                ),
+                (
+                    variant,
+                    FakeRelation("IS_A", {"evidence_chunk_ids": ["chunk_orion"]}),
+                    family,
+                ),
+                (
+                    variant,
+                    FakeRelation("USES", {"evidence_chunk_ids": ["chunk_orion"]}),
+                    detail,
+                ),
+                (
+                    bridge,
+                    FakeRelation("RELATED_TO", {"evidence_chunk_ids": ["chunk_other"]}),
+                    incidental,
+                ),
+                (
+                    evaluation,
+                    FakeRelation("RELATED_TO", {"evidence_chunk_ids": ["chunk_other"]}),
+                    bridge,
+                ),
+            ],
+        )
+        docs = {
+            "chunk_orion": FakeTextNode(
+                "chunk_orion",
+                "Orion model architecture includes Nova.",
+                make_source_metadata(source="Orion", path=["Orion"]),
+            ),
+            "chunk_other": FakeTextNode(
+                "chunk_other",
+                "An unrelated model architecture discusses validation.",
+                make_source_metadata(source="Other", path=["Other"]),
+            ),
+        }
+        return VisualizerRetrievalPipeline(
+            make_indexer(
+                FakeVectorStore(
+                    {"postprocessed_retrieval_chunk": ["chunk_orion", "chunk_other"]}
+                ),
+                graph_store,
+                docs,
+            )
+        )
+
+    def test_specific_query_focus_fixture_preserves_useful_and_explicit_generic_controls(
+        self,
+    ) -> None:
+        pipeline = self._partial_anchor_focus_fixture()
+        query = "Orion model architecture"
+        anchors = {candidate.node_id for candidate in pipeline._resolve_anchors(query)}
+        self.assertEqual(anchors, {"concept_orion", "concept_bridge"})
+        self.assertIn(
+            "concept_bridge",
+            {item.node_id for item in pipeline._resolve_anchors("Model Architecture")},
+        )
+        self.assertTrue(
+            {"concept_orion", "concept_bridge"}.issubset(
+                {
+                    item.node_id
+                    for item in pipeline._resolve_anchors("Orion vs Model Architecture")
+                }
+            )
+        )
+        source_ids = pipeline._filter_source_chunks_for_anchors(
+            ["chunk_orion", "chunk_other"], pipeline._resolve_anchors(query)
+        )
+        self.assertEqual(set(source_ids), {"chunk_orion", "chunk_other"})
+        anchor_candidates = pipeline._resolve_anchors(query)
+        mentioned = pipeline._concepts_mentioned_by_chunks(source_ids, query)
+        semantic = pipeline._semantic_edges_for_query(
+            query, anchor_candidates, mentioned, source_ids, {}
+        )
+        support = {
+            (edge.subject_id, edge.predicate, edge.object_id): edge.evidence_chunk_ids
+            for edge in semantic
+        }
+        self.assertEqual(
+            support[("concept_variant", "USES", "concept_detail")], ["chunk_orion"]
+        )
+        nodes, triplets, _ = pipeline.visualize([query])
+        self.assertTrue(
+            {
+                "concept_orion",
+                "concept_family",
+                "concept_variant",
+                "concept_detail",
+            }.issubset(nodes)
+        )
+        self.assertIn(("concept_orion", "IS_A", "concept_family"), triplets)
+        self.assertIn(("concept_variant", "USES", "concept_detail"), triplets)
+        self.assertIn(("concept_orion", "RELATED_TO", "concept_variant"), triplets)
+
+    def test_focus_fixture_projection_preserves_node_and_endpoint_identity(
+        self,
+    ) -> None:
+        from backend.knowledge_graph.indexer import KnowledgeGraphIndexer
+
+        pipeline = self._partial_anchor_focus_fixture()
+        nodes, triplets, _ = pipeline.visualize(["Orion model architecture"])
+        indexer = SimpleNamespace(
+            index=SimpleNamespace(property_graph_store=pipeline.graph_store)
+        )
+        graph = KnowledgeGraphIndexer.generate_nx_graph_from(indexer, nodes, triplets)
+        endpoints = {(subject, object_) for subject, _, object_ in triplets}
+        self.assertTrue(
+            all(subject in nodes and object_ in nodes for subject, object_ in endpoints)
+        )
+        self.assertEqual(set(nodes), set(graph.nodes))
+        self.assertEqual(endpoints, set(graph.edges))
+        for subject, predicate, object_ in triplets:
+            self.assertEqual(predicate, graph.edges[subject, object_]["relation"])
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=KnownFocusExclusionFailure,
+        reason="Known generic partial-anchor leakage; XPASS requires review of this limitation",
+    )
+    def test_specific_query_excludes_incidental_generic_partial_anchor(self) -> None:
+        """Document the unmet focus expectation without prescribing a pruning rule."""
+        pipeline = self._partial_anchor_focus_fixture()
+        query = "Orion model architecture"
+        nodes, _, _ = pipeline.visualize([query])
+        if not {
+            "concept_bridge",
+            "concept_incidental",
+            "concept_evaluation",
+        }.isdisjoint(nodes):
+            raise KnownFocusExclusionFailure("Incidental graph nodes were included")
+
     def test_exact_anchor_resolution_emits_semantic_concept_relation(self) -> None:
         text_classification = FakeGraphNode(
             "concept_text", "Text Classification", aliases=["text classification"]

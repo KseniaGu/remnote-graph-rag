@@ -333,7 +333,7 @@ class RemNoteParser:
         nodes_to_update = []
         nodes_iter = self.kg_storage.storage_context.docstore.docs.items()
 
-        for node_id, node_info in tqdm(
+        for _node_id, node_info in tqdm(
             nodes_iter, desc="Updating nodes with external urls"
         ):
             if not node_info.metadata.get(HAS_UNPARSED_URL_MARKER):

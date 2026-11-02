@@ -33,7 +33,7 @@ def main():
         models_settings.embedder.model_path, trust_remote_code=True, embed_batch_size=5
     )
     # reranker = CohereRerank(api_key=os.environ["COHERE_API_KEY"], top_n=10)
-    knowledge_graph_indexer = KnowledgeGraphIndexer(
+    KnowledgeGraphIndexer(
         kg_storage.storage_context,
         path_settings,
         storage_settings.document_storage.storage_type,

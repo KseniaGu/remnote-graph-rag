@@ -64,7 +64,7 @@ class DedupTracker:
         return label
 
     def process(self, text: str, prefix: str, max_chars: int) -> str:
-        """Return formatted text – full on first occurrence, ref label on repeats."""
+        """Return formatted text - full on first occurrence, ref label on repeats."""
         existing = self.label_of(text)
         if existing:
             preview = text[:90].replace("\n", " ").strip()
@@ -545,8 +545,10 @@ def format_trace(trace_id: str, runs_by_id: dict, dedup: DedupTracker) -> str:
 
         # TOOL RUNS that belong to this LLM step (immediate retriever tools
         # executed because of this LLM's tool_calls). Match by parent chain.
-        for tool_run in _tool_runs_for_step(llm_run, runs_by_id):
-            out.append(_format_tool_run(tool_run))
+        out.extend(
+            _format_tool_run(tool_run)
+            for tool_run in _tool_runs_for_step(llm_run, runs_by_id)
+        )
 
     return "\n".join(out)
 

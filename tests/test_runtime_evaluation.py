@@ -1,10 +1,13 @@
+import asyncio
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from langchain_core.exceptions import OutputParserException
+from synthetic_runtime import llm_run, make_scenario, root_run
 
 from backend.evaluation.runtime_evaluation import (
     RuntimeRecord,
@@ -45,157 +48,6 @@ class FakeStructuredJudge:
 
 class ProviderFailure(RuntimeError):
     status_code = 500
-
-
-def make_scenario(**overrides):
-    payload = {
-        "schema_version": "runtime-evaluation",
-        "id": "runtime_case",
-        "version": 1,
-        "review_status": "reviewed",
-        "description": "Synthetic runtime contract.",
-        "trace_ids": ["trace_1"],
-        "input": {"user_message": "Explain Mamba"},
-        "expectations": {
-            "allowed_worker_sequences": [["retriever", "analyst"]],
-            "required_agents": ["retriever", "analyst"],
-            "required_tools": ["search_knowledge_base"],
-            "request_scope": "in_scope",
-            "allowed_retrieval_statuses": ["adequate"],
-            "retrieval_outcome": "adequate",
-            "sources_exhausted": False,
-            "requested_modality": "text",
-            "final_response_required": True,
-            "forbidden_failure_types": ["provider_error"],
-            "budgets": {
-                "max_worker_steps": 2,
-                "max_provider_attempts": 3,
-                "max_tavily_searches": 0,
-            },
-        },
-        "provenance": ["synthetic"],
-    }
-    payload.update(overrides)
-    return RuntimeScenario.model_validate(payload)
-
-
-def llm_run(*, stop_reason="stop", content="ok", tool_calls=None):
-    return {
-        "_id": "llm_1",
-        "trace_id": "trace_1",
-        "parent_run_id": "wrapper_1",
-        "name": "ChatOllama",
-        "run_type": "llm",
-        "status": "success",
-        "start_time": "2026-01-01T00:00:03Z",
-        "prompt_tokens": 10,
-        "completion_tokens": 2,
-        "extra": {
-            "metadata": {
-                "langgraph_node": "retriever",
-                "ls_provider": "ollama",
-                "ls_model_name": "model",
-            }
-        },
-        "outputs": {
-            "generations": [
-                [
-                    {
-                        "message": {
-                            "kwargs": {
-                                "content": content,
-                                "tool_calls": tool_calls or [],
-                                "response_metadata": {"done_reason": stop_reason},
-                            }
-                        }
-                    }
-                ]
-            ]
-        },
-    }
-
-
-def root_run(*, retrieval_status="adequate", sources_exhausted=False):
-    human = {"type": "human", "kwargs": {"content": "Explain Mamba"}}
-    answer = {
-        "type": "ai",
-        "kwargs": {
-            "content": "Grounded answer.",
-            "additional_kwargs": {"agent": "[ANALYST]"},
-        },
-    }
-    return [
-        {
-            "_id": "root_1",
-            "trace_id": "trace_1",
-            "parent_run_id": None,
-            "name": "LangGraph",
-            "run_type": "chain",
-            "status": "success",
-            "start_time": "2026-01-01T00:00:00Z",
-            "latency": 1.25,
-            "prompt_tokens": 10,
-            "completion_tokens": 2,
-            "total_tokens": 12,
-            "inputs": {"messages": [human]},
-            "outputs": {
-                "messages": [human, answer],
-                "request_scope": "in_scope",
-                "sources_exhausted": sources_exhausted,
-                "next_step": "__end__",
-                "visual_artifacts": [],
-            },
-            "extra": {
-                "metadata": {
-                    "thread_id": "thread_1",
-                    "revision_id": "fixture-revision",
-                }
-            },
-        },
-        {
-            "_id": "orchestrator_1",
-            "trace_id": "trace_1",
-            "parent_run_id": "root_1",
-            "name": "orchestrator",
-            "run_type": "chain",
-            "status": "success",
-            "start_time": "2026-01-01T00:00:01Z",
-            "outputs": {"next_step": "retriever"},
-        },
-        {
-            "_id": "retriever_1",
-            "trace_id": "trace_1",
-            "parent_run_id": "root_1",
-            "name": "retriever",
-            "run_type": "chain",
-            "status": "success",
-            "start_time": "2026-01-01T00:00:02Z",
-            "outputs": {"retrieval_status": retrieval_status},
-        },
-        llm_run(),
-        {
-            "_id": "tool_1",
-            "trace_id": "trace_1",
-            "parent_run_id": "retriever_1",
-            "name": "search_knowledge_base",
-            "run_type": "tool",
-            "status": "success",
-            "start_time": "2026-01-01T00:00:04Z",
-            "inputs": {"queries": ["Mamba"], "api_key": "never-export"},
-            "outputs": {"output": [{"id": "chunk_mamba"}]},
-            "extra": {"metadata": {"langgraph_node": "retriever"}},
-        },
-        {
-            "_id": "analyst_1",
-            "trace_id": "trace_1",
-            "parent_run_id": "root_1",
-            "name": "analyst",
-            "run_type": "chain",
-            "status": "success",
-            "start_time": "2026-01-01T00:00:05Z",
-            "outputs": {},
-        },
-    ]
 
 
 class RuntimeEvaluationTests(unittest.TestCase):
@@ -243,8 +95,210 @@ class RuntimeEvaluationTests(unittest.TestCase):
         self.assertEqual(["chunk_mamba"], record.evidence_ids)
         self.assertEqual("[REDACTED]", record.tools[0].arguments["api_key"])
         self.assertEqual("adequate", record.retrieval_outcome)
-        self.assertEqual(1, record.usage.provider_attempts)
+        self.assertIsNone(record.usage.provider_attempts)
+        self.assertEqual(
+            1, record.usage.turn_telemetry["captured_provider_event_observations"]
+        )
         self.assertTrue(record.terminated)
+
+    def test_openrouter_trace_preserves_configured_and_observed_identity(self):
+        runs = root_run(retrieval_status="no_results")
+        run = next(item for item in runs if item.get("run_type") == "llm")
+        run["extra"]["metadata"].update(
+            ls_provider="openrouter", ls_model_name="openrouter/free"
+        )
+        run.pop("prompt_tokens")
+        run.pop("completion_tokens")
+        kwargs = run["outputs"]["generations"][0][0]["message"]["kwargs"]
+        kwargs.update(
+            content="",
+            response_metadata={
+                "model_provider": "openrouter",
+                "provider": "Synthetic Serving Provider",
+                "model_name": "resolved/model",
+                "finish_reason": "length",
+                "token_usage": {"prompt_tokens": 21, "completion_tokens": 7},
+                "api_key": "SECRET",
+                "raw_response": "PRIVATE BODY",
+            },
+        )
+        runs = [item for item in runs if item.get("run_type") != "tool"]
+
+        record = normalize_trace_runs(runs, make_scenario())
+        provider = record.providers[0]
+        self.assertEqual("openrouter/free", provider.configured_model)
+        self.assertEqual("openrouter", provider.configured_provider)
+        self.assertEqual("resolved/model", provider.model)
+        self.assertEqual("Synthetic Serving Provider", provider.provider)
+        self.assertEqual("length", provider.stop_reason)
+        self.assertEqual((None, None), (provider.input_tokens, provider.output_tokens))
+        self.assertEqual("invalid_model_output", record.retrieval_outcome)
+        self.assertIn("model_output_truncated", {item.code for item in record.failures})
+        self.assertNotIn("SECRET", record.model_dump_json())
+        self.assertNotIn("PRIVATE BODY", record.model_dump_json())
+
+    def test_trace_openrouter_adapter_label_keeps_serving_provider_unknown(self):
+        runs = root_run()
+        run = next(item for item in runs if item.get("run_type") == "llm")
+        run["extra"]["metadata"].update(
+            ls_provider="openrouter", ls_model_name="openrouter/free"
+        )
+        kwargs = run["outputs"]["generations"][0][0]["message"]["kwargs"]
+        kwargs["response_metadata"] = {
+            "model_provider": "openrouter",
+            "model_name": "resolved/model",
+        }
+        provider = normalize_trace_runs(runs, make_scenario()).providers[0]
+        self.assertEqual("", provider.provider)
+        self.assertEqual("openrouter", provider.configured_provider)
+        self.assertEqual("resolved/model", provider.model)
+
+    def test_trace_uses_resolved_model_when_router_alias_is_also_returned(self):
+        runs = root_run()
+        run = next(item for item in runs if item.get("run_type") == "llm")
+        kwargs = run["outputs"]["generations"][0][0]["message"]["kwargs"]
+        kwargs["response_metadata"] = {
+            "model_name": "openrouter/free",
+            "model": "actual/resolved-model",
+        }
+        record = normalize_trace_runs(runs, make_scenario())
+        self.assertEqual("actual/resolved-model", record.providers[0].model)
+
+    def test_trace_usage_preserves_explicit_zero_and_canonical_message_counts(self):
+        for top_level, expected in (
+            ({}, (0, 3)),
+            ({"prompt_tokens": 0, "completion_tokens": 0}, (0, 0)),
+        ):
+            with self.subTest(top_level=top_level):
+                runs = root_run()
+                run = next(item for item in runs if item.get("run_type") == "llm")
+                run.pop("prompt_tokens")
+                run.pop("completion_tokens")
+                run.update(top_level)
+                kwargs = run["outputs"]["generations"][0][0]["message"]["kwargs"]
+                kwargs["usage_metadata"] = {"input_tokens": 0, "output_tokens": 3}
+                kwargs["response_metadata"]["token_usage"] = {
+                    "prompt_tokens": 21,
+                    "completion_tokens": 7,
+                }
+                provider = normalize_trace_runs(runs, make_scenario()).providers[0]
+                self.assertEqual(
+                    expected, (provider.input_tokens, provider.output_tokens)
+                )
+
+    def test_trace_keeps_unobserved_identity_unknown_and_legacy_usage(self):
+        for response in ({}, {"model_name": "openrouter/free"}):
+            with self.subTest(response=response):
+                runs = root_run()
+                run = next(item for item in runs if item.get("run_type") == "llm")
+                run["extra"]["metadata"].update(
+                    ls_provider="openrouter", ls_model_name="openrouter/free"
+                )
+                kwargs = run["outputs"]["generations"][0][0]["message"]["kwargs"]
+                kwargs["response_metadata"] = response
+                provider = normalize_trace_runs(runs, make_scenario()).providers[0]
+                self.assertEqual("", provider.model)
+                self.assertEqual("", provider.provider)
+                self.assertEqual("openrouter/free", provider.configured_model)
+                # Normalized OpenRouter trace counters lack wire provenance.
+                self.assertEqual(
+                    (None, None), (provider.input_tokens, provider.output_tokens)
+                )
+
+    def test_live_event_captures_openai_metadata_and_legacy_done_reason(self):
+        from backend.evaluation import runtime_live
+
+        for response, usage, expected_provider in (
+            (
+                {
+                    "model_provider": "openrouter",
+                    "provider": "Synthetic Serving Provider",
+                    "model": "resolved/model",
+                    "finish_reason": "length",
+                    "token_usage": {"prompt_tokens": 21, "completion_tokens": 7},
+                },
+                {},
+                "Synthetic Serving Provider",
+            ),
+            (
+                {
+                    "model_provider": "openrouter",
+                    "model": "resolved/model",
+                    "finish_reason": "length",
+                    "token_usage": {"prompt_tokens": 21, "completion_tokens": 7},
+                },
+                {},
+                "",
+            ),
+            (
+                {
+                    "model_provider": "ollama",
+                    "model_name": "legacy-model",
+                    "done_reason": "length",
+                },
+                {"input_tokens": 21, "output_tokens": 7},
+                "ollama",
+            ),
+        ):
+            with self.subTest(response=response):
+
+                class Graph:
+                    async def astream_events(
+                        self, initial_state, *, response=response, usage=usage, **kwargs
+                    ):
+                        yield {
+                            "event": "on_chat_model_end",
+                            "run_id": "synthetic-llm",
+                            "metadata": {
+                                "langgraph_node": "retriever",
+                                "ls_provider": "openrouter",
+                                "ls_model_name": "openrouter/free",
+                            },
+                            "data": {
+                                "output": SimpleNamespace(
+                                    response_metadata=response,
+                                    usage_metadata=usage,
+                                    content="",
+                                    tool_calls=[],
+                                )
+                            },
+                        }
+                        yield {
+                            "event": "on_chain_end",
+                            "name": "LangGraph",
+                            "data": {
+                                "output": {
+                                    "retrieval_status": "no_results",
+                                    "next_step": "__end__",
+                                }
+                            },
+                        }
+
+                wrapper = SimpleNamespace(
+                    _graph=Graph(),
+                    _ensure_initialized=lambda: None,
+                    _convert_messages=lambda messages: [],
+                    _get_fallback_message=lambda state: "Synthetic fallback",
+                )
+                with patch.object(runtime_live, "get_workflow", return_value=wrapper):
+                    record = asyncio.run(
+                        runtime_live.run_controlled_live_scenario(make_scenario())
+                    )
+                provider = record.providers[0]
+                self.assertEqual("length", provider.stop_reason)
+                self.assertEqual("openrouter/free", provider.configured_model)
+                self.assertEqual("openrouter", provider.configured_provider)
+                self.assertEqual(expected_provider, provider.provider)
+                self.assertEqual(
+                    response.get("model") or response.get("model_name"), provider.model
+                )
+                self.assertEqual(
+                    (None, None),
+                    (provider.input_tokens, provider.output_tokens),
+                )
+                self.assertIn(
+                    "model_output_truncated", {item.code for item in record.failures}
+                )
 
     def test_runtime_record_rejects_evidence_above_item_bound(self):
         record = normalize_trace_runs(root_run(), make_scenario())
@@ -638,10 +692,10 @@ class RuntimeEvaluationTests(unittest.TestCase):
 
         self.assertEqual("success", result.status)
         self.assertTrue(result.score)
-        self.assertEqual("runtime-semantic-v1", result.rubric_version)
+        self.assertEqual("runtime-semantic-v2", result.rubric_version)
         self.assertEqual("Grounded answer.", observed["outputs"]["response"])
         self.assertFalse(observed["continuous"])
-        self.assertIn("required_output_schema", observed["prompt"])
+        self.assertNotIn("required_output_schema", observed["prompt"])
         self.assertEqual(512, result.configured_output_token_limit)
         self.assertEqual("completed", result.transport_status)
         self.assertEqual("success", result.parser_classification)

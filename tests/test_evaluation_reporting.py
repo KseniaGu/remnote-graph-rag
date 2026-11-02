@@ -28,8 +28,8 @@ def write_identity_fixture(root: Path) -> None:
     files = {
         "pyproject.toml": "[project]\nname = 'fixture'\n",
         "uv.lock": "version = 1\n",
-        "evals/runtime/scenarios.json": "[]\n",
-        "evals/retrieval/benchmark_cases.jsonl": "{}\n",
+        "backend/evaluation/cases/runtime/scenarios.json": "[]\n",
+        "backend/evaluation/cases/retrieval/benchmark_cases.jsonl": "{}\n",
         "scripts/evaluate_runtime_workflow.py": "RUNTIME = 1\n",
         "scripts/evaluate_retrieval_pipeline.py": "RETRIEVAL = 1\n",
         "scripts/build_evaluation_report.py": "REPORT = 1\n",
@@ -44,6 +44,34 @@ def write_identity_fixture(root: Path) -> None:
 
 
 class EvaluationReportingTests(unittest.TestCase):
+    def test_snapshot_records_effective_openrouter_reasoning_without_credentials(self):
+        from pydantic import SecretStr
+
+        from backend.configs.models import get_model_settings
+
+        settings = get_model_settings()
+        settings.analyst.api_key = SecretStr("synthetic-secret")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_identity_fixture(root)
+            with (
+                patch.object(evaluation_reporting, "ROOT", root),
+                patch(
+                    "backend.configs.models.get_model_settings", return_value=settings
+                ),
+            ):
+                snapshot = evaluation_reporting.build_evaluation_snapshot({})
+        models = snapshot["fingerprint_input"]["application_configuration"]["models"]
+        self.assertEqual("openrouter", models["analyst"]["provider"])
+        self.assertEqual("openrouter/free", models["analyst"]["model_name"])
+        self.assertEqual({"effort": "low"}, models["analyst"]["reasoning"])
+        self.assertEqual(8192, models["analyst"]["max_tokens"])
+        self.assertEqual(120.0, models["analyst"]["request_timeout"])
+        self.assertEqual(1024, models["researcher"]["with_tools"]["max_tokens"])
+        self.assertEqual(4096, models["researcher"]["structured"]["max_tokens"])
+        self.assertEqual("[REDACTED]", models["analyst"]["api_key"])
+        self.assertNotIn("synthetic-secret", json.dumps(snapshot))
+
     def test_latest_deterministic_run_replaces_snapshot_but_history_is_immutable(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -260,6 +288,9 @@ class EvaluationReportingTests(unittest.TestCase):
                 run_dir / "actual_evidence.jsonl",
                 [{"case_id": "case", "excerpt": "private fixture evidence"}],
             )
+            diagnostics = run_dir / "diagnostics"
+            diagnostics.mkdir()
+            (diagnostics / "events.jsonl").write_text("private diagnostic marker")
             manifest = register_completed_run(
                 run_dir,
                 run_kind="retrieval",
@@ -286,6 +317,13 @@ class EvaluationReportingTests(unittest.TestCase):
                 (reports_root / "latest_provenance.json").read_text(encoding="utf-8")
             )
             history_directories = list((reports_root / "history").iterdir())
+            published_text = "".join(
+                path.read_text() for path in reports_root.rglob("*") if path.is_file()
+            )
+            self.assertNotIn("private diagnostic marker", published_text)
+            self.assertFalse(
+                any(path.name == "diagnostics" for path in reports_root.rglob("*"))
+            )
 
         self.assertEqual(manifest["evaluation_fingerprint"], latest["fingerprint"])
         self.assertEqual(first["snapshot"], second["snapshot"])
@@ -394,8 +432,18 @@ class EvaluationReportingTests(unittest.TestCase):
             relevant_files = [
                 repository_root / "backend" / "app.py",
                 repository_root / "backend" / "llm" / "prompts" / "judge.txt",
-                repository_root / "evals" / "runtime" / "scenarios.json",
-                repository_root / "evals" / "retrieval" / "benchmark_cases.jsonl",
+                repository_root
+                / "backend"
+                / "evaluation"
+                / "cases"
+                / "runtime"
+                / "scenarios.json",
+                repository_root
+                / "backend"
+                / "evaluation"
+                / "cases"
+                / "retrieval"
+                / "benchmark_cases.jsonl",
                 repository_root / "pyproject.toml",
                 repository_root / "uv.lock",
                 repository_root / "storage" / "application_manifest.json",
@@ -492,7 +540,12 @@ class EvaluationReportingTests(unittest.TestCase):
             root = Path(tmp)
             scenarios = json.loads(
                 (
-                    evaluation_reporting.ROOT / "evals" / "runtime" / "scenarios.json"
+                    evaluation_reporting.ROOT
+                    / "backend"
+                    / "evaluation"
+                    / "cases"
+                    / "runtime"
+                    / "scenarios.json"
                 ).read_text(encoding="utf-8")
             )
 

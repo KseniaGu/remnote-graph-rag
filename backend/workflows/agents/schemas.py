@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal, get_args
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ResearchResult(BaseModel):
@@ -29,6 +29,8 @@ class ResearchResult(BaseModel):
 
 class RoutingDecision(BaseModel):
     """Determines the next agent to act."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     request_scope: Literal["in_scope", "out_of_scope", "ambiguous"] = Field(
         description="Whether the latest request is within the assistant's broad technical scope"
@@ -81,6 +83,10 @@ class State(BaseModel):
             default="unclassified",
             description="Scope classification for the current user turn.",
         )
+    )
+    routing_validated: bool = Field(
+        default=False,
+        description="Whether the current turn has a validated routing decision.",
     )
     retrieval_status: Literal[
         "not_run", "adequate", "no_results", "below_threshold", "topic_mismatch"

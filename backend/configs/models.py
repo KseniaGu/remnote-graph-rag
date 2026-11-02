@@ -55,11 +55,15 @@ class BaseLLMSettings(BaseSettings):
         return self.model_dump(
             include={"temperature", "top_p", "max_tokens", "base_url"}
         )
-    
+
     def openrouter_chat_params(self) -> dict[str, Any]:
-        return self.model_dump(
-            include={"temperature", "top_p", "max_tokens", "reasoning"}
+        """Converts application timeout seconds to the OpenRouter adapter's milliseconds."""
+        params = self.model_dump(
+            include={"temperature", "top_p", "max_tokens", "reasoning"},
+            exclude_none=True,
         )
+        params["request_timeout"] = int(self.request_timeout * 1000)
+        return params
 
     def gemini_chat_params(self) -> dict[str, Any]:
         return self.model_dump(include={"temperature"})
@@ -115,7 +119,10 @@ class OpenRouterSettings(BaseLLMSettings):
 
     Extends base LLM settings with OpenRouter-specific configurations.
     """
+
     model_config = BaseLLMSettings.model_config_with_prefix("OPENROUTER_")
+    provider: LLMProviderType = LLMProviderType.openrouter
+    reasoning: dict[str, Any] | None = None
     api_key: SecretStr | None = None
     top_p: float = 0.5
     max_tokens: int = 128
@@ -191,8 +198,8 @@ class RerankerSettings(LocalModelSettings):
 class ResearcherModelSettings(BaseSettings):
     """Configuration settings for the Researcher agent.
 
-    Holds two OllamaSettings variants used in the two-phase research process:
-    one for tool-calling and one for structured output synthesis.
+    Holds separate provider settings for tool calling and structured synthesis.
+    The default pipeline uses OpenRouter automatic routing for both stages.
     """
 
     # vLLM self-hosted alternative: Qwen3.5-9B (provider=vllm, base_url=VLLM_ROUTING_URL)
@@ -212,7 +219,7 @@ class ResearcherModelSettings(BaseSettings):
         temperature=0.0,
         top_p=0.3,
         max_tokens=1024,
-        request_timeout=120.0,  
+        request_timeout=120.0,
         provider=LLMProviderType.openrouter,
     )
     # vLLM self-hosted alternative: Qwen3.5-9B (same instance as with_tools)
@@ -234,7 +241,7 @@ class ResearcherModelSettings(BaseSettings):
         request_timeout=120.0,
         provider=LLMProviderType.openrouter,
     )
-    prompt_version: str = "v5"
+    prompt_version: str = "v6"
 
 
 class ModelSettings(BaseSettings):
@@ -257,7 +264,7 @@ class ModelSettings(BaseSettings):
     #     top_p=1.0,
     #     num_predict=2048,
     #     request_timeout=120.0,
-    #     prompt_version={"graph_index": "v2", "routing": "v5"},
+    #     prompt_version={"graph_index": "v2", "routing": "v6"},
     # )
     orchestrator: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.orchestrator,
@@ -266,7 +273,7 @@ class ModelSettings(BaseSettings):
         temperature=0.0,
         max_tokens=2048,
         request_timeout=120.0,
-        prompt_version={"graph_index": "v2", "routing": "v5"},
+        prompt_version={"graph_index": "v2", "routing": "v6"},
         provider=LLMProviderType.openrouter,
     )
     # vLLM self-hosted alternative: Qwen/Qwen3.5-9B (same instance as orchestrator)
@@ -279,7 +286,7 @@ class ModelSettings(BaseSettings):
     #     top_p=0.3,
     #     num_predict=512,
     #     request_timeout=120.0,
-    #     prompt_version="v6",
+    #     prompt_version="v7",
     # )
     retriever: LocalModelSettings | BaseLLMSettings = OpenRouterSettings(
         role=ModelRoleType.retriever,
@@ -288,7 +295,7 @@ class ModelSettings(BaseSettings):
         top_p=0.3,
         max_tokens=512,
         request_timeout=120.0,
-        prompt_version="v6",
+        prompt_version="v7",
         provider=LLMProviderType.openrouter,
     )
     researcher: ResearcherModelSettings = ResearcherModelSettings()
@@ -348,7 +355,7 @@ class ModelSettings(BaseSettings):
 
 
 def _ollama_models() -> ModelSettings:
-    """Ollama Cloud pipeline (default)."""
+    """OpenRouter pipeline selected by the legacy ``ollama`` compatibility alias."""
     return ModelSettings()
 
 
@@ -365,7 +372,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.0,
             max_tokens=2048,
-            prompt_version={"graph_index": "v2", "routing": "v5"},
+            prompt_version={"graph_index": "v2", "routing": "v6"},
         ),
         retriever=OpenAISettings(
             role=ModelRoleType.retriever,
@@ -374,7 +381,7 @@ def _vllm_models() -> ModelSettings:
             base_url=routing_url,
             temperature=0.0,
             max_tokens=512,
-            prompt_version="v6",
+            prompt_version="v7",
         ),
         researcher=ResearcherModelSettings(
             with_tools=OpenAISettings(
@@ -421,8 +428,8 @@ _PIPELINES = {"ollama": _ollama_models, "vllm": _vllm_models}
 def get_model_settings() -> ModelSettings:
     """Returns ModelSettings for the active LLM pipeline.
 
-    Reads the LLM_PIPELINE environment variable (default: 'ollama').
-    Supported values: 'ollama', 'vllm'.
+    Reads LLM_PIPELINE (default: 'ollama'). The 'ollama' selector is a
+    compatibility alias for the OpenRouter pipeline; 'vllm' selects vLLM.
     """
     pipeline = os.environ.get("LLM_PIPELINE", "ollama")
     if pipeline not in _PIPELINES:

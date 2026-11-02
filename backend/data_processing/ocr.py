@@ -71,10 +71,7 @@ class PaddleOCRPipeline:
 
         output = self.pipeline.predict(input=str(input_file))
 
-        markdown_list = []
-
-        for res in output:
-            markdown_list.append(res.markdown)
+        markdown_list = [res.markdown for res in output]
 
         markdown_texts = self.pipeline.concatenate_markdown_pages(markdown_list)
         with mkd_file_path.open("w", encoding="utf-8") as f:

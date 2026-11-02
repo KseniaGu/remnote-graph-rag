@@ -1,0 +1,28 @@
+name: Quality
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.3"
+          python-version: "3.11.15"
+          enable-cache: true
+      - name: Install locked development and evaluation dependencies
+        run: uv sync --locked --group dev --group evaluation
+      - name: Ruff lint
+        run: uv run --no-sync ruff check .
+      - name: Ruff format
+        run: uv run --no-sync ruff format --check .
+      - name: Full offline suite with network disabled
+        run: sudo unshare --net -- .venv/bin/python scripts/check_offline.py

@@ -114,19 +114,134 @@ class AnalystRetrievalPipeline:
         settings: KnowledgeGraphSearchSettings | None = None,
         reranker_settings: Any | None = None,
         reranker: Any | None = None,
+        *,
+        source_only: bool = False,
     ) -> None:
         self.indexer = knowledge_graph_indexer
+        self.source_only = source_only
         self.settings = settings or knowledge_graph_indexer.kg_search_settings
         self.reranker_settings = reranker_settings or RerankerSettings()
-        self.access = RetrievalStoreAccess(knowledge_graph_indexer)
+        self.access = RetrievalStoreAccess(
+            knowledge_graph_indexer, include_graph=not source_only
+        )
         self.embedder = self.access.embedder
         self.storage_context = self.access.storage_context
         self.vector_store = self.access.vector_store
         self.graph_store = self.access.graph_store
         self.reranker = (
-            reranker if reranker is not None else self._create_configured_reranker()
+            None
+            if source_only
+            else (
+                reranker if reranker is not None else self._create_configured_reranker()
+            )
         )
         self._reranker_failure_logged = False
+        self._observation: dict[str, Any] | None = None
+
+    def start_observation(self) -> None:
+        """Start per-case counters without measuring initialization or health checks."""
+        requested = (
+            "disabled" if self.source_only else self.settings.analyst_reranker_mode
+        )
+        self._observation = {
+            "embedding_operations": 0,
+            "reranking_operations": 0,
+            "reranking_failures": 0,
+            "reranking_applied_ids": 0,
+            "reranking_incomplete_operations": 0,
+            "requested_reranker_mode": requested,
+        }
+
+    def finish_observation(self) -> dict[str, Any]:
+        """Return per-case operation counts and the observed reranker disposition."""
+        observation = self._observation
+        self._observation = None
+        if observation is None:
+            raise RuntimeError("No retrieval observation is active")
+        requested = observation["requested_reranker_mode"]
+        if observation["reranking_failures"]:
+            effective = "fallback"
+        elif observation["reranking_incomplete_operations"]:
+            effective = (
+                "partial" if observation["reranking_applied_ids"] else "fallback"
+            )
+        elif requested == "disabled" and observation["reranking_operations"]:
+            effective = "injected"
+        elif requested == "disabled":
+            effective = "disabled"
+        elif self.reranker is None:
+            effective = "fallback"
+        elif not observation["reranking_operations"]:
+            effective = "not_invoked"
+        else:
+            effective = requested
+        return {**observation, "effective_reranker_mode": effective}
+
+    def observe_context(self, results: list[dict[str, Any]]) -> dict[str, Any]:
+        """Count items rendered by the existing formatter from retrieved results.
+
+        This evaluation-only observation runs after retrieval; it makes no
+        embedding, vector, graph, or reranker calls.
+        """
+        remaining_chars = max(
+            0, self.settings.analyst_context_max_chars - len("RETRIEVER RESULTS:\n\n")
+        )
+        included = [
+            (index, result)
+            for index, result in enumerate(results)
+            if result["sources"] or result["relations"]
+        ]
+        counts_by_query = [0] * len(results)
+        source_id_by_chunk: dict[str, str] = {}
+        emitted_source_ids: set[str] = set()
+        blocks = []
+        source_count = relation_count = 0
+        for index, (original_index, result) in enumerate(included):
+            for source in result["sources"]:
+                if source.node_id not in source_id_by_chunk:
+                    source_id_by_chunk[source.node_id] = (
+                        f"S{len(source_id_by_chunk) + 1}"
+                    )
+            remaining_results = max(1, len(included) - index)
+            block_budget = max(0, remaining_chars // remaining_results)
+            block = self._format_query_result(
+                result["query"],
+                result["sources"],
+                result["relations"],
+                block_budget,
+                relation_sources=result.get("relation_sources"),
+                source_id_by_chunk=source_id_by_chunk,
+                emitted_source_ids=emitted_source_ids,
+            )
+            if block:
+                sources = sum(
+                    line.startswith("[SOURCE] ") for line in block.splitlines()
+                )
+                relations = sum(
+                    line.startswith("[RELATION] ") for line in block.splitlines()
+                )
+                source_count += sources
+                relation_count += relations
+                counts_by_query[original_index] = sources + relations
+                blocks.append(block)
+                emitted_source_ids.update(
+                    source.node_id for source in result["sources"]
+                )
+                remaining_chars -= len(block) + 2
+            if remaining_chars <= 0:
+                break
+        context = (
+            "RETRIEVER RESULTS:\n\n" + "\n\n".join(blocks)
+            if blocks
+            else "No relevant information found."
+        )
+        return {
+            "context_count": source_count + relation_count,
+            "context_source_count": source_count,
+            "context_relation_count": relation_count,
+            "context_counts_by_query": counts_by_query,
+            "context_characters": len(context),
+        }
 
     @property
     def health_report(self):
@@ -177,7 +292,24 @@ class AnalystRetrievalPipeline:
 
     def _search_one(self, query: str) -> dict[str, Any]:
         source_candidates = self._retrieve_source_candidates(query)
+        candidate_count = len(source_candidates)
         source_candidates = self._dedupe_sources(source_candidates)
+        if self.source_only:
+            final_sources = self._select_final_sources(
+                self._sort_sources(source_candidates)
+            )
+            return {
+                "query": query,
+                "sources": final_sources,
+                "relations": [],
+                "relation_sources": [],
+                "diagnostics": {
+                    "candidate_count": candidate_count,
+                    "final_count": len(final_sources),
+                    "relation_count": 0,
+                    "source_only": True,
+                },
+            }
         source_candidates = self._rerank_sources(query, source_candidates)
         self._attach_mentioned_concepts(source_candidates)
         if self.reranker is None:
@@ -206,6 +338,12 @@ class AnalystRetrievalPipeline:
             "sources": final_sources,
             "relations": final_relations,
             "relation_sources": relation_sources,
+            "diagnostics": {
+                "candidate_count": candidate_count,
+                "final_count": len(final_sources),
+                "relation_count": len(final_relations),
+                "source_only": False,
+            },
         }
 
     def _retrieve_source_candidates(self, query: str) -> list[SourceCandidate]:
@@ -220,6 +358,8 @@ class AnalystRetrievalPipeline:
             )
             return []
 
+        if self._observation is not None:
+            self._observation["embedding_operations"] += 1
         query_embedding = self.embedder.get_query_embedding(query)
         query_result = self._query_vector_store(
             query_embedding, node_kind=POSTPROCESSED_PASSAGE_KIND
@@ -304,9 +444,13 @@ class AnalystRetrievalPipeline:
             for candidate in rerank_candidates
         ]
 
+        if self._observation is not None:
+            self._observation["reranking_operations"] += 1
         try:
             reranked_nodes = self.reranker.postprocess_nodes(nodes, query_str=query)
         except Exception:
+            if self._observation is not None:
+                self._observation["reranking_failures"] += 1
             self._log_reranker_failure()
             return candidates
 
@@ -319,6 +463,14 @@ class AnalystRetrievalPipeline:
             candidate.rank_score = self._raw_reranker_score(reranked.score)
             candidate.reranked = True
             reranked_ids.append(candidate.node_id)
+
+        if self._observation is not None:
+            submitted = {candidate.node_id for candidate in rerank_candidates}
+            applied = set(reranked_ids) & submitted
+            self._observation["reranking_applied_ids"] += len(applied)
+            self._observation["reranking_incomplete_operations"] += int(
+                not submitted.issubset(applied)
+            )
 
         ordered = self._sort_sources(
             [
@@ -609,9 +761,13 @@ class AnalystRetrievalPipeline:
             for relation in rerank_relations
         ]
 
+        if self._observation is not None:
+            self._observation["reranking_operations"] += 1
         try:
             reranked_nodes = self.reranker.postprocess_nodes(nodes, query_str=query)
         except Exception:
+            if self._observation is not None:
+                self._observation["reranking_failures"] += 1
             self._log_reranker_failure()
             return sorted(
                 relations, key=lambda item: (item.score, -item.rank), reverse=True
@@ -628,6 +784,14 @@ class AnalystRetrievalPipeline:
             relation.reranked = True
             reranked_ids.add(relation.relation_id)
             ordered.append(relation)
+
+        if self._observation is not None:
+            submitted = {relation.relation_id for relation in rerank_relations}
+            applied = reranked_ids & submitted
+            self._observation["reranking_applied_ids"] += len(applied)
+            self._observation["reranking_incomplete_operations"] += int(
+                not submitted.issubset(applied)
+            )
 
         ordered = self._sort_relations(ordered)
         ordered.extend(
@@ -1485,8 +1649,10 @@ class AnalystRetrievalPipeline:
                 for part in path
                 if self._clean_path_part(part)
             ]
-            for idx in range(len(cleaned_parts), 0, -1):
-                candidates.append(" > ".join(cleaned_parts[:idx]))
+            candidates.extend(
+                " > ".join(cleaned_parts[:idx])
+                for idx in range(len(cleaned_parts), 0, -1)
+            )
 
         if metadata.source:
             candidates.append(metadata.source)

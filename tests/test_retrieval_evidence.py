@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from pydantic import ValidationError
+from synthetic_evidence import FakeNode, FakeNodeWithScore, FakeRetriever
 
 from backend.configs.constants import (
     RETRIEVAL_BELOW_THRESHOLD,
@@ -22,29 +23,6 @@ from backend.workflows.agents.tools import (
     get_subgraphs_to_visualize,
     search_knowledge_base,
 )
-
-
-class FakeNode:
-    def __init__(
-        self, text: str, node_id: str = "node_1", metadata: dict | None = None
-    ) -> None:
-        self.text = text
-        self.node_id = node_id
-        self.metadata = metadata or {}
-
-
-class FakeNodeWithScore:
-    def __init__(self, node: FakeNode, score: float | None = 0.9) -> None:
-        self.node = node
-        self.score = score
-
-
-class FakeRetriever:
-    def __init__(self, results_by_query: dict[str, list]) -> None:
-        self.results_by_query = results_by_query
-
-    def retrieve(self, query: str) -> list:
-        return list(self.results_by_query.get(query, []))
 
 
 class RaisingRetriever:
@@ -231,7 +209,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
             )
         )
 
-        output = tool.invoke({"queries": f"[{query}]"})
+        output = tool.invoke({"queries": f"[{query}]", "topic_policy": "broad"})
         query_schema = tool.args_schema.model_json_schema()["properties"]["queries"]
 
         self.assertIn("Optimizer source", output)
@@ -241,6 +219,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
     def test_required_topics_are_normalized_and_deduplicated(self) -> None:
         value = KnowledgeSearchInput(
             queries=["RetNet"],
+            topic_policy="named",
             required_topics=[[" RetNet ", "retnet", "Retentive   Network"]],
         )
 
@@ -258,7 +237,9 @@ class RetrievalEvidenceTests(unittest.TestCase):
             with self.subTest(required_topics=required_topics):
                 with self.assertRaises(ValidationError):
                     KnowledgeSearchInput(
-                        queries=["topic"], required_topics=required_topics
+                        queries=["topic"],
+                        topic_policy="named",
+                        required_topics=required_topics,
                     )
 
     def test_retnet_requirement_is_not_satisfied_by_resnet_or_query_header(
@@ -280,6 +261,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         output = tool.invoke(
             {
                 "queries": ["RetNet architecture"],
+                "topic_policy": "named",
                 "required_topics": [["RetNet", "Retentive Network"]],
             }
         )
@@ -303,6 +285,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         output = tool.invoke(
             {
                 "queries": ["MLA"],
+                "topic_policy": "named",
                 "required_topics": [["Multi-Head Latent Attention", "MLA"]],
             }
         )
@@ -320,7 +303,13 @@ class RetrievalEvidenceTests(unittest.TestCase):
             )
         )
 
-        output = tool.invoke({"queries": ["EAGLT"], "required_topics": [["EAGLT"]]})
+        output = tool.invoke(
+            {
+                "queries": ["EAGLT"],
+                "topic_policy": "named",
+                "required_topics": [["EAGLT"]],
+            }
+        )
 
         self.assertEqual(RETRIEVAL_TOPIC_MISMATCH, output)
 
@@ -343,6 +332,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         output = tool.invoke(
             {
                 "queries": ["MLA"],
+                "topic_policy": "named",
                 "required_topics": [["Multi-Head Latent Attention"]],
             }
         )
@@ -369,6 +359,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         output = tool.invoke(
             {
                 "queries": ["retentive models"],
+                "topic_policy": "named",
                 "required_topics": [["RetNet"]],
             }
         )
@@ -391,6 +382,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         output = tool.invoke(
             {
                 "queries": ["retentive model"],
+                "topic_policy": "named",
                 "required_topics": [["RetNet"]],
             }
         )
@@ -410,6 +402,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         output = tool.invoke(
             {
                 "queries": ["RetNet"],
+                "topic_policy": "named",
                 "required_topics": [["RetNet", "Retentive Network"]],
             }
         )
@@ -430,6 +423,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         output = tool.invoke(
             {
                 "queries": ["RetNet versus Mamba"],
+                "topic_policy": "named",
                 "required_topics": [["RetNet"], ["Mamba"]],
             }
         )
@@ -447,7 +441,9 @@ class RetrievalEvidenceTests(unittest.TestCase):
             )
         )
 
-        output = tool.invoke({"queries": ["optimizers"], "required_topics": []})
+        output = tool.invoke(
+            {"queries": ["optimizers"], "topic_policy": "broad", "required_topics": []}
+        )
 
         self.assertIn("Adam uses adaptive moments", output)
 
@@ -458,7 +454,13 @@ class RetrievalEvidenceTests(unittest.TestCase):
             )
         )
 
-        output = tool.invoke({"queries": ["RetNet"], "required_topics": [["RetNet"]]})
+        output = tool.invoke(
+            {
+                "queries": ["RetNet"],
+                "topic_policy": "named",
+                "required_topics": [["RetNet"]],
+            }
+        )
 
         self.assertEqual(RETRIEVAL_BELOW_THRESHOLD, output)
 
@@ -469,7 +471,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         ]
         tool = search_knowledge_base(FakeRetriever({"q": nodes}), RaisingReranker())
         with patch("backend.workflows.agents.tools.logger.error"):
-            output = tool.invoke({"queries": ["q"]})
+            output = tool.invoke({"queries": ["q"], "topic_policy": "broad"})
 
         self.assertIn("Result 0", output)
         self.assertIn("Result 9", output)
@@ -479,7 +481,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
         tool = search_knowledge_base(RaisingRetriever())
 
         with self.assertRaises(KnowledgeBaseUnavailable) as raised:
-            tool.invoke({"queries": ["q"]})
+            tool.invoke({"queries": ["q"], "topic_policy": "broad"})
 
         self.assertEqual(
             "I couldn't access the knowledge base right now. Please try again shortly.",

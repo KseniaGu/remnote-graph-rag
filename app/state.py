@@ -559,7 +559,7 @@ class AppState(rx.State):
             message_dom_id=message_dom_id,
             timestamp=meta,
         )
-        self.session_history = (self.session_history + [item])[
+        self.session_history = ([*self.session_history, item])[
             -MAX_SIDEBAR_HISTORY_ITEMS:
         ]
         self.selected_session_history_id = item.id
@@ -812,7 +812,7 @@ class AppState(rx.State):
             async with self:
                 self.active_agent = agent_name
                 if agent_name not in self.agent_history:
-                    self.agent_history = self.agent_history + [agent_name]
+                    self.agent_history = [*self.agent_history, agent_name]
             await asyncio.sleep(CACHED_AGENT_REPLAY_LATENCY)
         async with self:
             self.active_agent = ""
@@ -832,7 +832,7 @@ class AppState(rx.State):
                 and agent_name != "system"
                 and agent_name not in self.agent_history
             ):
-                self.agent_history = self.agent_history + [agent_name]
+                self.agent_history = [*self.agent_history, agent_name]
 
         for chunk in _cached_response_chunks(rendered_content):
             async with self:
@@ -843,14 +843,15 @@ class AppState(rx.State):
             self.active_agent = ""
             self.streaming_content = ""
             self.streaming_agent = ""
-            self.messages = self.messages + [
+            self.messages = [
+                *self.messages,
                 Message(
                     content=rendered_content,
                     role="assistant",
                     agent=agent_name,
                     timestamp=datetime.now().strftime("%H:%M"),
                     dom_id=f"message-{uuid.uuid4().hex}",
-                )
+                ),
             ]
 
     @rx.event(background=True)
@@ -952,13 +953,14 @@ class AppState(rx.State):
             message_dom_id = f"message-{uuid.uuid4().hex}"
 
             # Add user message
-            self.messages = self.messages + [
+            self.messages = [
+                *self.messages,
                 Message(
                     content=user_message,
                     role="user",
                     timestamp=timestamp,
                     dom_id=message_dom_id,
-                )
+                ),
             ]
             self._append_session_history_item(
                 user_message, timestamp, message_index, message_dom_id
@@ -1029,8 +1031,9 @@ class AppState(rx.State):
                         self.active_agent = event.data["agent"]
                         admission.context.agents.add(event.data["agent"])
                         if event.data["agent"] not in self.agent_history:
-                            self.agent_history = self.agent_history + [
-                                event.data["agent"]
+                            self.agent_history = [
+                                *self.agent_history,
+                                event.data["agent"],
                             ]
 
                     elif event.type == WorkflowEventType.AGENT_END:
@@ -1073,14 +1076,15 @@ class AppState(rx.State):
                             )
                         self.streaming_content = ""
                         self.streaming_agent = ""
-                        self.messages = self.messages + [
+                        self.messages = [
+                            *self.messages,
                             Message(
                                 content=_normalize_math_delimiters(content),
                                 role="assistant",
                                 agent=agent_name,
                                 timestamp=datetime.now().strftime("%H:%M"),
                                 dom_id=f"message-{uuid.uuid4().hex}",
-                            )
+                            ),
                         ]
 
                     elif event.type == WorkflowEventType.ERROR:

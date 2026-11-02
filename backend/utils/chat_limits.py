@@ -29,6 +29,30 @@ from backend.utils.chat_errors import UserFacingChatError
 from backend.utils.helpers import logger
 
 
+class EvaluationBudgetUnavailable(RuntimeError):
+    reason = "evaluation_guard_unavailable"
+
+
+class EvaluationBudgetExceeded(RuntimeError):
+    reason = "evaluation_guard_exhausted"
+
+
+_EVALUATION_BUDGET = contextvars.ContextVar("evaluation_guard", default=None)
+
+
+def current_evaluation_budget():
+    return _EVALUATION_BUDGET.get()
+
+
+@contextmanager
+def bind_evaluation_budget(guard):
+    token = _EVALUATION_BUDGET.set(guard)
+    try:
+        yield guard
+    finally:
+        _EVALUATION_BUDGET.reset(token)
+
+
 class ChatLimitError(UserFacingChatError):
     """Base exception for a user-safe chat restriction failure."""
 
@@ -531,7 +555,12 @@ class ChatLimitService:
         role: str,
     ) -> None:
         """Reserves one LLM provider attempt before network I/O."""
+        evaluation_budget = current_evaluation_budget()
         if context is None:
+            if evaluation_budget is not None:
+                raise EvaluationBudgetUnavailable(
+                    "evaluation request requires a turn context"
+                )
             return
         if context.llm_provider_attempts >= self.settings.max_llm_attempts_per_turn:
             raise WorkflowBudgetExceeded
@@ -563,19 +592,42 @@ class ChatLimitService:
                     attempt_count=count,
                     daily_limit=self.settings.ollama_attempts_per_day,
                 )
+        if evaluation_budget is not None:
+            evaluation_budget.reserve(
+                "llm", provider=provider_name, model=evaluation_budget.quota["model"]
+            )
         context.llm_provider_attempts += 1
         context.agents.add(role)
 
     def begin_tavily_search(self, context: ChatTurnContext | None) -> None:
         """Charges one logical Tavily search before its provider attempts."""
+        evaluation_budget = current_evaluation_budget()
+        if evaluation_budget is not None:
+            if context is None or not evaluation_budget.allow_tavily:
+                raise EvaluationBudgetUnavailable(
+                    "Tavily requires explicit evaluation opt-in and turn context"
+                )
         if context is None:
             return
         if context.tavily_logical_searches >= self.settings.tavily_searches_per_turn:
             raise WorkflowBudgetExceeded
+        if evaluation_budget is not None:
+            evaluation_budget.reserve("web_search")
         context.tavily_logical_searches += 1
 
     async def reserve_tavily_attempt(self, context: ChatTurnContext | None) -> None:
         """Reserves daily and monthly Tavily capacity before network I/O."""
+        evaluation_budget = current_evaluation_budget()
+        if evaluation_budget is not None:
+            if (
+                context is None
+                or not evaluation_budget.allow_tavily
+                or context.tavily_logical_searches == 0
+            ):
+                raise EvaluationBudgetUnavailable(
+                    "Tavily requires a reserved logical search"
+                )
+            evaluation_budget.reserve("web_attempt")
         if context is None:
             return
         if self.settings.shared_quotas_enabled:

@@ -883,15 +883,14 @@ class LLMPostprocessTests(unittest.TestCase):
     def test_concept_resolution_bounds_production_like_weak_chain_clusters(
         self,
     ) -> None:
-        mentions = []
-        for index in range(60):
-            mentions.append(
-                make_concept_mention(
-                    f"Shared Topic {index}",
-                    mention_id=f"m{index}",
-                    concept_type="METHOD" if index % 2 else "CONCEPT",
-                )
+        mentions = [
+            make_concept_mention(
+                f"Shared Topic {index}",
+                mention_id=f"m{index}",
+                concept_type="METHOD" if index % 2 else "CONCEPT",
             )
+            for index in range(60)
+        ]
 
         resolution = build_concept_resolution_from_mentions(mentions)
 

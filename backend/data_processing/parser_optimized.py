@@ -13,6 +13,7 @@ import unicodedata
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -733,7 +734,7 @@ def common_path(paths: Iterable[list[str]]) -> list[str]:
     if not normalized_paths:
         return []
     prefix: list[str] = []
-    for values in zip(*normalized_paths):
+    for values in zip(*normalized_paths, strict=False):
         if len(set(values)) != 1:
             break
         prefix.append(values[0])
@@ -1163,7 +1164,7 @@ class OptimizedRemNoteParser:
             for candidate in source_candidates:
                 key = (candidate.source, tuple(candidate.heading_path))
                 candidate_text = "\n".join(
-                    item.text for item in current_candidates + [candidate]
+                    item.text for item in [*current_candidates, candidate]
                 )
                 key_changed = current_key is not None and key != current_key
                 over_max_chars = (
@@ -1407,7 +1408,7 @@ class OptimizedRemNoteParser:
         context_text = context.get("context_text")
         context_block_ids = list(context.get("context_block_ids") or [])
         artifact_path_label = f"external:{resource.url_hash}"
-        chunk_path = context_path + [artifact_path_label]
+        chunk_path = [*context_path, artifact_path_label]
         breadcrumb = semantic_path_text(context_path)
         semantic_context = semantic_context_text(context_text)
 
@@ -1459,7 +1460,7 @@ class OptimizedRemNoteParser:
                 continue
             if start_line is None:
                 start_line = line_number
-            candidate = "\n".join(buffer + [text])
+            candidate = "\n".join([*buffer, text])
             if buffer and len(candidate) > max_chars:
                 flush(line_number - 1)
                 start_line = line_number
@@ -2158,7 +2159,7 @@ class RemNoteParserOptimized:
             ordered = sorted(
                 group_chunks, key=lambda item: (item.line_start, item.line_end, item.id)
             )
-            for previous_chunk, next_chunk in zip(ordered, ordered[1:]):
+            for previous_chunk, next_chunk in pairwise(ordered):
                 previous_node = nodes_by_id[previous_chunk.id]
                 next_node = nodes_by_id[next_chunk.id]
                 previous_node.relationships[next_relationship] = related_node_info(

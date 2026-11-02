@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import os
+import subprocess
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +25,7 @@ from backend.evaluation.evaluation_reporting import (  # noqa: E402
     register_completed_run,
     register_failed_run,
 )
+from backend.evaluation.request_guard import EvaluationGuard  # noqa: E402
 from backend.evaluation.runtime_evaluation import (  # noqa: E402
     SEMANTIC_JUDGE_OUTPUT_TOKEN_LIMITS,
     SEMANTIC_JUDGE_RUBRICS,
@@ -34,8 +39,14 @@ from backend.evaluation.runtime_evaluation import (  # noqa: E402
     write_runtime_artifacts,
 )
 from backend.evaluation.runtime_live import run_controlled_live_scenario  # noqa: E402
+from backend.utils.chat_limits import (  # noqa: E402
+    EvaluationBudgetUnavailable,
+    bind_evaluation_budget,
+)
 
-DEFAULT_SCENARIOS = ROOT / "evals" / "runtime" / "scenarios.json"
+DEFAULT_SCENARIOS = (
+    ROOT / "backend" / "evaluation" / "cases" / "runtime" / "scenarios.json"
+)
 DEFAULT_TRACE_EXPORT = ROOT / "exports" / "langsmith_traces_20260816T233652Z.json"
 
 
@@ -61,13 +72,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "live", help="Explicitly invoke selected cases through the compiled workflow."
     )
     _add_common_args(live)
+    _add_budget_args(live)
+    live.add_argument(
+        "--max-web-attempts",
+        type=int,
+        default=0,
+        help="Maximum web provider attempts in this run; requires --allow-tavily.",
+    )
     live.add_argument(
         "--case-id",
         action="append",
         required=True,
         help="Scenario ID to run; repeat for additional cases.",
     )
-    live.add_argument("--repetitions", type=int, default=1)
+    repetitions = live.add_mutually_exclusive_group()
+    repetitions.add_argument("--repetitions", type=int, default=1)
+    repetitions.add_argument("--repetition", type=int, help="Run only this repetition.")
+    live.add_argument(
+        "--capture-diagnostics",
+        action="store_true",
+        help="Save private bounded live callback diagnostics.",
+    )
     live.add_argument(
         "--confirm-provider-calls",
         action="store_true",
@@ -93,6 +118,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "judge", help="Run explicitly selected semantic checks over saved records."
     )
     _add_common_args(judge)
+    _add_budget_args(judge)
+    judge.add_argument("--judge-provider", choices=("openrouter",))
+    judge.add_argument("--judge-model")
     source = judge.add_mutually_exclusive_group(required=True)
     source.add_argument("--source-run", help="Exact evaluation run ID, or latest.")
     source.add_argument(
@@ -123,6 +151,58 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Permit more than three judge calls after explicit quota review.",
     )
     return parser.parse_args(argv)
+
+
+def _add_budget_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--provider-quota",
+        type=Path,
+        help="Required fresh quota observation JSON for the configured provider and model.",
+    )
+    parser.add_argument(
+        "--max-provider-attempts",
+        type=int,
+        help="Required maximum provider attempts in this run, including retries.",
+    )
+
+
+def _evaluation_session(args: argparse.Namespace, output_dir: Path) -> EvaluationGuard:
+    if (output_dir / "manifest.json").exists() or (
+        output_dir / "partial_judge_results.jsonl"
+    ).exists():
+        args._active_output_dir = None
+        raise ValueError("evaluation output already has a manifest")
+    if args.provider_quota is None or args.max_provider_attempts is None:
+        raise ValueError(
+            "live/judge requires --provider-quota and --max-provider-attempts"
+        )
+    common = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    ledger = Path(common).parent / "data/evaluation/request_guard/ledger.json"
+    guard = EvaluationGuard(
+        ledger,
+        quota=json.loads(args.provider_quota.read_text(encoding="utf-8")),
+        max_attempts=args.max_provider_attempts,
+        max_web_attempts=getattr(args, "max_web_attempts", 0),
+    )
+    guard.allow_tavily = (
+        bool(getattr(args, "allow_tavily", False))
+        and getattr(args, "max_web_attempts", 0) > 0
+    )
+    args._budget = guard
+    return guard
+
+
+@asynccontextmanager
+async def _live_session(args: argparse.Namespace, output_dir: Path):
+    async with _evaluation_session(args, output_dir) as guard:
+        with bind_evaluation_budget(guard):
+            yield guard
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -197,11 +277,20 @@ def run_offline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _live_repetitions(args: argparse.Namespace) -> list[int]:
+    if args.repetition is not None:
+        if args.repetition <= 0:
+            raise ValueError("--repetition must be positive")
+        return [args.repetition]
+    if args.repetitions <= 0:
+        raise ValueError("--repetitions must be positive")
+    return list(range(1, args.repetitions + 1))
+
+
 async def run_live(args: argparse.Namespace) -> int:
     if not args.confirm_provider_calls:
         raise ValueError("live evaluation requires --confirm-provider-calls")
-    if args.repetitions <= 0:
-        raise ValueError("--repetitions must be positive")
+    repetitions = _live_repetitions(args)
 
     scenarios = load_runtime_scenarios(args.scenarios)
     scenario_by_id = {scenario.id: scenario for scenario in scenarios}
@@ -209,7 +298,7 @@ async def run_live(args: argparse.Namespace) -> int:
     if unknown:
         raise ValueError(f"unknown case IDs: {', '.join(unknown)}")
     selected = [scenario_by_id[case_id] for case_id in dict.fromkeys(args.case_id)]
-    total_runs = len(selected) * args.repetitions
+    total_runs = len(selected) * len(repetitions)
     if total_runs > 3 and not args.allow_expanded_live_suite:
         raise ValueError(
             "initial live validation is capped at three total runs; use "
@@ -236,71 +325,83 @@ async def run_live(args: argparse.Namespace) -> int:
     output_dir = args.output_dir or _default_output_dir("live", args.evaluation_root)
     args._active_output_dir = output_dir
 
-    max_expected_provider_calls = (
-        sum(
+    async with _live_session(args, output_dir) as budget:
+        max_expected_provider_calls = sum(
             scenario.expectations.budgets.max_provider_attempts or 6
             for scenario in selected
+        ) * len(repetitions)
+        print(
+            "Controlled live plan: "
+            f"cases={[scenario.id for scenario in selected]}, repetitions={repetitions}, "
+            f"maximum configured provider attempts={max_expected_provider_calls}, "
+            f"Tavily={'enabled' if args.allow_tavily else 'disabled'}, judge=disabled."
         )
-        * args.repetitions
-    )
-    print(
-        "Controlled live plan: "
-        f"cases={[scenario.id for scenario in selected]}, repetitions={args.repetitions}, "
-        f"maximum configured provider attempts={max_expected_provider_calls}, "
-        f"Tavily={'enabled' if args.allow_tavily else 'disabled'}, judge=disabled."
-    )
 
-    records = []
-    for scenario in selected:
-        for repetition in range(1, args.repetitions + 1):
-            records.append(  # noqa: PERF401 - await each paid run sequentially
-                await run_controlled_live_scenario(
-                    scenario,
-                    repetition=repetition,
+        records = []
+        for scenario in selected:
+            for repetition in repetitions:
+                diagnostic_args = (
+                    {
+                        "diagnostics_path": output_dir
+                        / "diagnostics"
+                        / f"{scenario.id}-r{repetition}.jsonl"
+                    }
+                    if args.capture_diagnostics
+                    else {}
                 )
-            )
-    results = [
-        score_runtime_record(scenario_by_id[record.scenario_id], record)
-        for record in records
-    ]
-    framework_results = None
-    if args.framework == "agentevals":
-        framework_results = [
-            evaluate_with_agentevals(scenario_by_id[record.scenario_id], record)
+                record = await run_controlled_live_scenario(
+                    scenario, repetition=repetition, **diagnostic_args
+                )
+                record.provenance["evaluation_guard"] = budget.provenance()
+                records.append(record)
+        results = [
+            score_runtime_record(scenario_by_id[record.scenario_id], record)
             for record in records
         ]
-    output_dir = args._active_output_dir
-    summary = write_runtime_artifacts(
-        output_dir,
-        records,
-        results,
-        source="controlled_live",
-        framework_results=framework_results,
-    )
-    register_completed_run(
-        output_dir,
-        run_kind="live",
-        invocation={
-            "case_ids": [item.id for item in selected],
-            "repetitions": args.repetitions,
-            "framework": args.framework,
-            "allow_tavily": args.allow_tavily,
-        },
-        configuration={
-            "analyst_retrieval_mode": search_settings.analyst_retrieval_mode,
-            "visualizer_retrieval_mode": search_settings.visualizer_retrieval_mode,
-            "scenario_versions": {item.id: item.version for item in selected},
-        },
-        evaluation_root=args.evaluation_root,
-    )
-    actual_attempts = sum(record.usage.provider_attempts for record in records)
-    actual_searches = sum(record.usage.tavily_searches for record in records)
-    print(
-        f"Live evaluation wrote {len(records)} records to {output_dir} "
-        f"({summary['passed_count']} pass, {summary['failed_count']} fail; "
-        f"provider attempts: {actual_attempts}; Tavily attempts: {actual_searches}; judge calls: 0)."
-    )
-    return 0
+        framework_results = None
+        if args.framework == "agentevals":
+            framework_results = [
+                evaluate_with_agentevals(scenario_by_id[record.scenario_id], record)
+                for record in records
+            ]
+        output_dir = args._active_output_dir
+        summary = write_runtime_artifacts(
+            output_dir,
+            records,
+            results,
+            source="controlled_live",
+            framework_results=framework_results,
+        )
+        register_completed_run(
+            output_dir,
+            run_kind="live",
+            invocation={
+                "case_ids": [item.id for item in selected],
+                "repetitions": args.repetitions,
+                "selected_repetitions": repetitions,
+                "framework": args.framework,
+                "allow_tavily": args.allow_tavily,
+            },
+            configuration={
+                "analyst_retrieval_mode": search_settings.analyst_retrieval_mode,
+                "visualizer_retrieval_mode": search_settings.visualizer_retrieval_mode,
+                "scenario_versions": {item.id: item.version for item in selected},
+                "evaluation_guard": budget.provenance(),
+            },
+            evaluation_root=args.evaluation_root,
+        )
+        actual_attempts = (
+            sum(record.usage.provider_attempts for record in records)
+            if all(record.usage.provider_attempts is not None for record in records)
+            else "unknown"
+        )
+        actual_searches = sum(record.usage.tavily_searches for record in records)
+        print(
+            f"Live evaluation wrote {len(records)} records to {output_dir} "
+            f"({summary['passed_count']} pass, {summary['failed_count']} fail; "
+            f"provider attempts in published observations: {actual_attempts}; Tavily attempts: {actual_searches}; judge calls: 0)."
+        )
+        return 0
 
 
 def _resolve_source_records(
@@ -358,6 +459,7 @@ def run_judge(args: argparse.Namespace) -> int:
         args.evaluation_root,
         list(dict.fromkeys(args.case_id)),
     )
+    records_source_sha256 = hashlib.sha256(records_path.read_bytes()).hexdigest()
     records = load_runtime_records(records_path)
     selected_records = []
     for case_id in dict.fromkeys(args.case_id):
@@ -395,10 +497,15 @@ def run_judge(args: argparse.Namespace) -> int:
             "--allow-expanded-judge-suite only after quota review and approval"
         )
 
-    from backend.configs.models import get_model_settings
+    if not args.judge_provider or not args.judge_model:
+        raise ValueError("judge requires separate --judge-provider and --judge-model")
+    from backend.configs.enums import ModelRoleType
+    from backend.configs.models import OpenRouterSettings
     from backend.workflows.agents.factory import AgentsFactory
 
-    settings = get_model_settings().analyst
+    settings = OpenRouterSettings(
+        role=ModelRoleType.analyst, model_name=args.judge_model, temperature=0.0
+    )
     provider_value = getattr(settings.provider, "value", settings.provider)
     provider_name = str(provider_value)
     model_name = str(settings.model_name)
@@ -414,72 +521,90 @@ def run_judge(args: argparse.Namespace) -> int:
         f"structured_output={args.structured_output_method}, "
         f"output_limits={output_limits}, retries=0."
     )
-    judge_results = []
-    for scenario, record, dimension in jobs:
-        updates = {"temperature": 0.0}
-        output_limit = SEMANTIC_JUDGE_OUTPUT_TOKEN_LIMITS[dimension]
-        if "num_predict" in settings.__class__.model_fields:
-            updates["num_predict"] = output_limit
-        if "max_tokens" in settings.__class__.model_fields:
-            updates["max_tokens"] = output_limit
-        judge_settings = settings.model_copy(update=updates)
-        judge = AgentsFactory.get_llm_by_role(judge_settings)
-        judge_results.append(
-            evaluate_with_openevals_judge(
+    with (
+        _evaluation_session(args, output_dir) as budget,
+        bind_evaluation_budget(budget),
+    ):
+        judge_results = []
+        for scenario, record, dimension in jobs:
+            judge_settings = settings.model_copy(
+                update={"temperature": 0.0, "max_tokens": output_limits[dimension]}
+            )
+            judge = AgentsFactory.get_llm_by_role(judge_settings)
+            result = evaluate_with_openevals_judge(
                 scenario,
                 record,
                 dimension,
                 judge=judge,
                 judge_provider=provider_name,
                 judge_model=model_name,
-                configured_output_token_limit=output_limit,
+                configured_output_token_limit=output_limits[dimension],
                 structured_output_method=args.structured_output_method,
             )
+            judge_results.append(result)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            fd = os.open(
+                output_dir / "partial_judge_results.jsonl",
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o600,
+            )
+            with os.fdopen(fd, "a", encoding="utf-8") as handle:
+                handle.write(result.model_dump_json() + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            if result.http_status_code == 429:
+                raise EvaluationBudgetUnavailable("judge HTTP 429 stopped the batch")
+        published_records = selected_records
+        scenario_results = [
+            score_runtime_record(scenario_by_id[record.scenario_id], record)
+            for record in published_records
+        ]
+        attempted_calls = sum(
+            (result.usage.provider_attempts or 0) for result in judge_results
         )
-    scenario_results = [
-        score_runtime_record(scenario_by_id[record.scenario_id], record)
-        for record in selected_records
-    ]
-    attempted_calls = sum(result.provider_call_attempted for result in judge_results)
-    output_dir = args._active_output_dir
-    write_runtime_artifacts(
-        output_dir,
-        selected_records,
-        scenario_results,
-        source=str(records_path),
-        judge_results=judge_results,
-        judge_provider_calls=attempted_calls,
-    )
-    register_completed_run(
-        output_dir,
-        run_kind="judge",
-        invocation={
-            "source_run": args.source_run,
-            "records": str(records_path),
-            "case_ids": list(dict.fromkeys(args.case_id)),
-            "dimensions": dimensions,
-            "repetition": args.repetition,
-            "structured_output_method": args.structured_output_method,
-        },
-        configuration={
-            "judge_provider": provider_name,
-            "judge_model": model_name,
-            "judge_temperature": 0,
-            "judge_output_token_limits": output_limits,
-            "judge_structured_output_method": args.structured_output_method,
-            "judge_rubric_versions": dict.fromkeys(dimensions, "v1"),
-        },
-        evaluation_root=args.evaluation_root,
-    )
-    succeeded = sum(result.status == "success" for result in judge_results)
-    skipped = sum(result.status == "skipped" for result in judge_results)
-    errors = sum(result.status == "error" for result in judge_results)
-    print(
-        f"Judge evaluation wrote {len(judge_results)} results to {output_dir} "
-        f"({succeeded} successful, {skipped} skipped, {errors} error; "
-        f"provider calls attempted: {attempted_calls})."
-    )
-    return 0
+        output_dir = args._active_output_dir
+        write_runtime_artifacts(
+            output_dir,
+            published_records,
+            scenario_results,
+            source=str(records_path),
+            judge_results=judge_results,
+            judge_provider_calls=attempted_calls,
+        )
+        register_completed_run(
+            output_dir,
+            run_kind="judge",
+            invocation={
+                "source_run": args.source_run,
+                "records": str(records_path),
+                "source_records_file_sha256": records_source_sha256,
+                "case_ids": list(dict.fromkeys(args.case_id)),
+                "dimensions": dimensions,
+                "repetition": args.repetition,
+                "structured_output_method": args.structured_output_method,
+            },
+            configuration={
+                "judge_provider": provider_name,
+                "judge_model": model_name,
+                "judge_temperature": 0,
+                "judge_output_token_limits": output_limits,
+                "judge_structured_output_method": args.structured_output_method,
+                "judge_rubric_versions": dict.fromkeys(
+                    dimensions, "runtime-semantic-v2"
+                ),
+                "evaluation_guard": budget.provenance(),
+            },
+            evaluation_root=args.evaluation_root,
+        )
+        succeeded = sum(result.status == "success" for result in judge_results)
+        skipped = sum(result.status == "skipped" for result in judge_results)
+        errors = sum(result.status == "error" for result in judge_results)
+        print(
+            f"Judge evaluation wrote {len(judge_results)} results to {output_dir} "
+            f"({succeeded} successful, {skipped} skipped, {errors} error; "
+            f"provider attempts in published results: {attempted_calls})."
+        )
+        return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -492,12 +617,25 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(run_live(args))
     except (OSError, ValueError, RuntimeError) as exc:
         output_dir = getattr(args, "_active_output_dir", None)
-        if output_dir is not None:
+        manifest_path = output_dir / "manifest.json" if output_dir is not None else None
+        completed = (
+            manifest_path is not None
+            and manifest_path.is_file()
+            and json.loads(manifest_path.read_text(encoding="utf-8")).get("status")
+            == "completed"
+        )
+        if output_dir is not None and not completed:
             register_failed_run(
                 output_dir,
                 run_kind=args.command,
                 invocation={"argv": list(argv) if argv is not None else sys.argv[1:]},
                 error=f"{type(exc).__name__}: {exc}",
+                configuration={
+                    "operational_outcome": getattr(exc, "reason", "evaluation_failed"),
+                    "evaluation_budget": args._budget.provenance()
+                    if hasattr(args, "_budget")
+                    else None,
+                },
                 evaluation_root=args.evaluation_root,
             )
         print(f"Runtime evaluation failed: {exc}", file=sys.stderr)

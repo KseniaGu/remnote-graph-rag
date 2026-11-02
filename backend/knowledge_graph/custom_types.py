@@ -323,13 +323,13 @@ class CustomEntityNode(EntityNode):
     """Custom EntityNode that generates ASCII-safe IDs for compatibility with Pinecone and other vector stores.
 
     This addresses the limitation where some vector stores (like Pinecone) require ASCII-only IDs,
-    but entity names may contain Unicode characters (e.g., '×', '→', etc.).
+    but entity names may contain Unicode characters (e.g., '\N{MULTIPLICATION SIGN}', '\N{RIGHTWARDS ARROW}', etc.).
 
     Uses SHA256 hash for consistent, ASCII-safe IDs computed once at initialization.
     Original entity name is always preserved in the 'name' attribute.
     """
 
-    def __init__(self, name: str, label: str = "", properties: dict = None):
+    def __init__(self, name: str, label: str = "", properties: dict | None = None):
         """Initializes entity node with cached ASCII-safe ID.
 
         Args:
