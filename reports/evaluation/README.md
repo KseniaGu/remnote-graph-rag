@@ -35,7 +35,7 @@ the retrieval comparison; its measurements are not system-evaluation scores.
 ## Automated Software Checks
 
 Synthetic and mocked tests exercise application and evaluator contracts without
-turning CI into a live evaluation. See the [offline testing instructions](../../README.md)
-and [CI workflow](../../.github/workflows/quality.yml). Methodology and execution
+turning CI into a live evaluation. See the [offline testing instructions](../../docs/project_overview.md#setup-and-offline-checks)
+and [CI workflow definition](../../.github/workflows/quality.yml). Methodology and execution
 are described in the [evaluation guide](../../docs/runtime_evaluation.md) and
 [report runbook](../../docs/full_evaluation_report_runbook.md).
