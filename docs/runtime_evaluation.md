@@ -307,14 +307,19 @@ running an evaluation or rescoring historical observations:
 
 ```bash
 uv run --locked python scripts/build_evaluation_report.py --publish \
-  --system-august-scorecard reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/scorecard.json \
-  --system-august-provenance reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/provenance.json \
+  --system-reference-scorecard reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/scorecard.json \
+  --system-reference-provenance reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/provenance.json \
   --system-runtime reports/evaluation/history/controlled-observations/runtime.json \
-  --system-metrics reports/evaluation/history/system-evaluation-october/october-metrics.json \
-  --system-judge reports/evaluation/history/controlled-observations/judge.json
+  --system-metrics reports/evaluation/inputs/runtime-metrics.json \
+  --system-judge reports/evaluation/inputs/system-judge-status.json
 ```
 
-The August scorecard and prior October snapshot remain unchanged. The edition
+The publisher derives an immutable edition identity from the runtime publication ID
+and input hashes. A later edition on the same observation date can set a larger
+positive `publication_revision` in its runtime input to select it as latest.
+Per-dimension judge scores and statuses come from the supplied judge input; no
+overall quality score is inferred. The preserved scorecard presentation was
+checked against `main` commit `76659bd6c02de3d52815e48b5e9d0faa401e7a21`. The August scorecard and prior October snapshot remain unchanged. The edition
 contains separately identified August imported-trace/live results and October
 evaluator groups; it does not combine their scores or imply improvement.
 October metrics were derived from 12 already-scored completed live runs. Their

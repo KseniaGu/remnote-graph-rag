@@ -103,23 +103,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--system-august-scorecard", type=Path, help="Preserved August scorecard JSON."
-    )
-    parser.add_argument(
-        "--system-august-provenance",
+        "--system-reference-scorecard",
+        "--system-august-scorecard",
+        dest="system_august_scorecard",
         type=Path,
-        help="Preserved August provenance JSON.",
+        help="Preserved reference scorecard JSON.",
     )
     parser.add_argument(
-        "--system-runtime", type=Path, help="Sanitized October runtime summary JSON."
+        "--system-reference-provenance",
+        "--system-august-provenance",
+        dest="system_august_provenance",
+        type=Path,
+        help="Preserved reference provenance JSON.",
+    )
+    parser.add_argument(
+        "--system-runtime", type=Path, help="Sanitized runtime summary JSON."
     )
     parser.add_argument(
         "--system-metrics",
         type=Path,
-        help="Derived metrics from already-scored October runs.",
+        help="Derived metrics from already-scored runs.",
     )
     parser.add_argument(
-        "--system-judge", type=Path, help="Sanitized October judge status JSON."
+        "--system-judge", type=Path, help="Sanitized judge status JSON."
     )
 
     return parser.parse_args(argv)

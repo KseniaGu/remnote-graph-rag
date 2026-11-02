@@ -4,6 +4,7 @@ from collections import Counter
 from typing import Any
 
 from backend.evaluation.evaluation_reporting import (
+    _reliability_metrics,
     _runtime_task_metrics,
     _values_summary,
 )
@@ -14,10 +15,15 @@ def aggregate_scored_runs(groups: dict[str, list[dict[str, Any]]]) -> dict[str, 
     result = {}
     for fingerprint, rows in groups.items():
         statuses: dict[str, Counter] = {}
+        gating: dict[str, Counter] = {}
         for row in rows:
             for check in row.get("checks", []):
                 name = f"{check['dimension']}.{check['name']}"
                 statuses.setdefault(name, Counter())[check["status"]] += 1
+                if type(check.get("gating")) is bool:
+                    gating.setdefault(name, Counter())[
+                        str(check["gating"]).lower()
+                    ] += 1
         checks = {
             name: {
                 "passed": counts["pass"],
@@ -52,11 +58,49 @@ def aggregate_scored_runs(groups: dict[str, list[dict[str, Any]]]) -> dict[str, 
             values = [row.get("metrics", {}).get(name) for row in rows]
             observed = [value for value in values if type(value) is bool]
             reliability[name] = {"observed": len(observed), "count": sum(observed)}
+        metric_checks = {
+            "routing_correctness": "routing.worker_sequence",
+            "required_agent_compliance": "routing.required_agents",
+            "forbidden_agent_compliance": "routing.forbidden_agents",
+            "one_tool_per_worker": "tools.one_tool_per_worker",
+            "retrieval_status_correctness": "retrieval.retrieval_status",
+            "source_exhaustion_correctness": "fallback.sources_exhausted",
+            "final_response_rate": "answer.final_response_present",
+            "modality_correctness": "modality.requested_modality",
+            "termination_rate": "termination.terminated",
+        }
+        metric_fields = {
+            "tool_selection_correctness": "tool_selection_correct",
+            "tool_argument_validity": "tool_argument_valid",
+            "local_to_web_fallback_correctness": "fallback_correct",
+            "unnecessary_web_rate": "unnecessary_web",
+        }
+        populations = {
+            name: sum(statuses.get(check, {}).values())
+            for name, check in metric_checks.items()
+        }
+        populations.update(
+            {
+                name: sum(row.get("metrics", {}).get(field) is not None for row in rows)
+                for name, field in metric_fields.items()
+            }
+        )
+        populations["task_success_rate"] = len(rows)
+        populations["graph_contract_rate"] = sum(
+            any(
+                check.get("dimension") == "graph"
+                and check.get("status") not in {"not_applicable", "not_observed"}
+                for check in row.get("checks", [])
+            )
+            for row in rows
+        )
         result[fingerprint] = {
+            "rate_populations": populations,
             "scored": len(rows),
             "reliability": reliability,
             "passed": sum(row["passed"] is True for row in rows),
             "checks": checks,
+            "gating": {name: dict(counts) for name, counts in gating.items()},
             "recorded_rates": _runtime_task_metrics(rows),
             "failure_types": dict(
                 Counter(
@@ -76,6 +120,7 @@ def derive_saved_runs(run_dirs):
 
     groups = {}
     sources = []
+    records_by_group = {}
     seen = set()
     for run_dir in run_dirs:
         folder = Path(run_dir)
@@ -113,6 +158,7 @@ def derive_saved_runs(run_dirs):
             raise ValueError("scored and runtime records must match uniquely")
         seen.add(identity)
         groups.setdefault(fingerprint, []).append({**row, "_source_run_kind": "live"})
+        records_by_group.setdefault(fingerprint, []).append(record)
         sources.append(
             {
                 "fingerprint": fingerprint,
@@ -125,6 +171,11 @@ def derive_saved_runs(run_dirs):
             }
         )
     helper = Path(__file__).with_name("evaluation_reporting.py")
+    aggregates = aggregate_scored_runs(groups)
+    for fingerprint, rows in groups.items():
+        aggregates[fingerprint]["recorded_reliability"] = _reliability_metrics(
+            rows, records_by_group[fingerprint]
+        )
     return {
         "schema": "saved-runtime-aggregation-v1",
         "derivation_code_sha256": {
@@ -133,168 +184,156 @@ def derive_saved_runs(run_dirs):
         },
         "method": "Aggregated saved case-result checks and recorded metrics using evaluation_reporting; no rescoring. Eligible check counts exclude not-observed and not-applicable checks.",
         "sources": sources,
-        "groups": aggregate_scored_runs(groups),
+        "groups": aggregates,
     }
 
 
 def _render_system_report(report):
-    august = report["august"]
-    october = report["october"]
-    runtime = october["runtime"]
+    from backend.evaluation.evaluation_reporting import _render_scorecard
+
+    previous = report["reference"]
+    current = report["current"]
+    runtime, judge = current["runtime"], current["judge"]
+    # The scorecard renderer consumes the original saved values; it does not rescore.
+    original = _render_scorecard(previous["scorecard"])
+    original = "\n".join(
+        "#" + line if line.startswith("#") else line for line in original.splitlines()
+    )
     lines = [
-        "# System evaluation: historical editions",
+        "# System evaluation: consolidated report",
         "",
-        "August and October are separate observations with different configurations and evaluator identities. They are not a controlled before/after comparison.",
+        "The editions below have distinct populations, configurations and evaluator identities. They are not a controlled before/after comparison.",
         "",
-        "## August evaluation",
+        f"## Reference evaluation — {previous['observation_end']} UTC",
         "",
-        f"- August 22, 2026 UTC. Fingerprint: `{august['fingerprint']}`. The original scorecard contains {august['mode_breakdown']['offline']['sample_count']} imported-trace observations and {august['mode_breakdown']['live']['sample_count']} live executions.",
-        f"- Imported traces: {august['mode_breakdown']['offline']['passed_count']} passed / {august['mode_breakdown']['offline']['sample_count']} scored; live: {august['mode_breakdown']['live']['passed_count']} passed / {august['mode_breakdown']['live']['sample_count']} scored.",
-        "- The imported trace configuration requires verification. The following historical scorecard rates combine the August sources only; metric-specific eligibility counts were not recorded.",
-        "- The trace's source configuration is not established by the recorded live-configuration snapshot.",
+        f"Imported traces: {previous['mode_breakdown']['offline']['sample_count']}; live executions: {previous['mode_breakdown']['live']['sample_count']}. The imported-trace configuration is not established by the recorded live configuration.",
         "",
-        "### Recorded runtime behavior",
+        original,
         "",
-        "| Metric | Recorded value | Population |",
-        "| --- | ---: | --- |",
-    ]
-    configuration = august["live_configuration"]
-    roles = configuration["roles"]
-    routing = roles["orchestrator"]["prompt_version"]
-    lines.insert(
-        8,
-        f"- Recorded live prompt selections: Orchestrator routing {routing['routing']} / graph-index {routing['graph_index']}, Retriever {roles['retriever']['prompt_version']}, Researcher {roles['researcher']['prompt_version']}, Analyst {roles['analyst']['prompt_version']}, Mentor {roles['mentor']['prompt_version']}. Analyst retrieval: {configuration['analyst_retrieval_mode']}; Visualizer: {configuration['visualizer_retrieval_mode']}.",
-    )
-    lines.insert(
-        9,
-        f"- Recorded live models: Orchestrator {roles['orchestrator'].get('model_name', 'unknown')}; Retriever {roles['retriever'].get('model_name', 'unknown')}; Analyst {roles['analyst'].get('model_name', 'unknown')}; Mentor {roles['mentor'].get('model_name', 'unknown')}. Provider and remaining role details are in the unchanged provenance.",
-    )
-    population = august["runtime_task_behavior"]["run_count"]
-    for name, value in august["runtime_task_behavior"].items():
-        if (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and name != "run_count"
-        ):
-            lines.append(
-                f"| {name.replace('_', ' ')} | {value:.2%} | {population} total; eligible count not recorded |"
-            )
-    lines += ["", "### Retrieval, reliability, efficiency, and judge", ""]
-    retrieval = august["retrieval_quality"]
-    lines.append(
-        f"- Retrieval benchmark: {retrieval['case_count']} cases; recorded case pass rate {retrieval['case_pass_rate']:.2%}. Metric-specific eligibility counts are unavailable in the saved scorecard."
-    )
-    for name in (
-        "evidence_chunk_recall",
-        "concept_recall",
-        "relation_recall",
-        "context_precision_at_10",
-        "context_recall",
-    ):
-        value = retrieval.get(name)
-        lines.append(
-            f"- {name.replace('_', ' ')}: {value:.2%} (eligible count not recorded)."
-            if isinstance(value, (int, float))
-            else f"- {name.replace('_', ' ')}: N/A; not recorded."
-        )
-    lines.append(
-        f"- Reliability: {august['reliability']['repetition_count']} recorded observations; failure counts: {august['reliability']['failure_type_frequency']}."
-    )
-    for name in (
-        "logical_llm_calls",
-        "provider_attempts",
-        "retries",
-        "tavily_searches",
-        "latency_seconds",
-        "total_tokens",
-    ):
-        value = august["efficiency"].get(name, {})
-        if isinstance(value, dict) and value.get("mean") is not None:
-            lines.append(
-                f"- {name.replace('_', ' ')}: mean {value['mean']:.2f} over {value['count']} recorded observations."
-            )
-        else:
-            lines.append(f"- {name.replace('_', ' ')}: N/A; no recorded distribution.")
-    lines += [
-        "- Historical token counters lack modern field-level availability evidence and are not complete billing totals.",
-        "- Judge quality: N/A; saved dimensions contain errors or skipped prerequisites, with zero successful scores.",
-        "- Retrieval relevance-label coverage was incomplete. See the [unchanged August scorecard](../2026-08-22_f8d6f3b6f3e0/scorecard.md) and [provenance](../2026-08-22_f8d6f3b6f3e0/provenance.json) for recorded definitions and configurations.",
+        f"## Current evaluation — {report['observation_end']} UTC",
         "",
-        "## October evaluation",
-        "",
-        f"- Live system evaluation, October 30–31, 2026 UTC: {runtime['planned']} planned executions across {runtime['scenario_count']} scenarios; {runtime['completed']} completed, {runtime['passed']} passed, {runtime['failed']} failed and {runtime['interrupted']} interrupted/unscored.",
-        "- Interrupted observations have no scored record. No result here measures later revisions. Budget checks are report-only and do not determine deterministic pass/fail.",
+        f"{runtime['planned']} planned executions across {runtime['scenario_count']} scenarios; {runtime['completed']} completed, {runtime['passed']} passed, {runtime['failed']} failed and {runtime['interrupted']} interrupted/unscored.",
+        "Worker-step and Tavily-search bounds can gate deterministic success; logical calls, provider attempts, retries, token usage and latency bounds are report-only. Saved outcomes are unchanged.",
     ]
     lines.extend(f"- {line}" for line in runtime.get("details", []))
-    lines += ["", "### Metrics by original evaluator fingerprint", ""]
-    all_checks = sorted(
-        {name for group in october["groups"].values() for name in group["checks"]}
-    )
+    lines += ["", "### Coverage and runtime behavior", ""]
     for group in runtime["fingerprint_groups"]:
         fingerprint = group["fingerprint"]
-        observed = october["groups"][fingerprint]
+        observed = current["groups"][fingerprint]
         lines += [
-            f"#### `{fingerprint}`",
+            f"#### Evaluator `{fingerprint}`",
             "",
-            f"Scored {observed['scored']} of {group['observations']} planned observations; passed {observed['passed']} / {observed['scored']}. Other observations are interrupted and unscored.",
+            f"{observed['scored']} / {group['observations']} planned observations scored; {observed['passed']} / {observed['scored']} passed.",
             "",
-            "| Recorded check | Pass / eligible | Not observed |",
+            "| Runtime summary | Result | Eligible observations/checks |",
             "| --- | ---: | ---: |",
         ]
-        for name in all_checks:
-            counts = observed["checks"].get(name)
-            if counts is None:
-                lines.append(f"| {name} | N/A — no check recorded | 0 |")
-                continue
-            eligible = counts["eligible"]
+        for name, count in observed.get("rate_populations", {}).items():
+            rate = observed["recorded_rates"].get(name)
+            display = (
+                f"{rate:.1%}" if rate is not None else "N/A — no eligible observations"
+            )
+            lines.append(f"| {name.replace('_', ' ').title()} | {display} | {count} |")
+        lines += [
+            "",
+            "<details><summary>Recorded contract checks and gating</summary>",
+            "",
+            "| Workflow metric | Passed / eligible | Not observed | Gating metadata |",
+            "| --- | ---: | ---: | --- |",
+        ]
+        for name, counts in observed["checks"].items():
             value = (
-                f"{counts['passed']} / {eligible}"
-                if eligible
+                f"{counts['passed']} / {counts['eligible']}"
+                if counts["eligible"]
                 else "N/A — no observed eligible checks"
             )
-            lines.append(f"| {name} | {value} | {counts['not_observed']} |")
+            gating = observed.get("gating", {}).get(name, {})
+            gate_label = (
+                ", ".join(f"{key}: {count}" for key, count in gating.items())
+                or "Not recorded"
+            )
+            lines.append(
+                f"| {name.replace('.', ': ').replace('_', ' ')} | {value} | {counts['not_observed']} | {gate_label} |"
+            )
         lines += [
             "",
-            "| Efficiency metric | Mean | Available / scored |",
-            "| --- | ---: | ---: |",
+            "</details>",
+            "",
+            "##### Efficiency distributions",
+            "",
+            "| Metric | Available / scored | Mean | Median | P95 |",
+            "| --- | ---: | ---: | ---: | ---: |",
         ]
         for name, value in observed["efficiency"].items():
-            average = (
-                f"{value['mean']:.2f}"
-                if value["mean"] is not None
-                else "N/A — not captured in scored records"
-            )
+
+            def fmt(key, distribution=value):
+                number = distribution.get(key)
+                return f"{number:.2f}" if number is not None else "N/A — not captured"
+
             lines.append(
-                f"| {name.replace('_', ' ')} | {average} | {value['available']} / {observed['scored']} |"
+                f"| {name.replace('_', ' ')} | {value['available']} / {observed['scored']} | {fmt('mean')} | {fmt('median')} | {fmt('p95')} |"
             )
         lines += [
             "",
-            f"Recorded classified failure counts: {observed['failure_types'] or 'none'} (check failures are shown separately above).",
+            "##### Reliability",
+            "",
+            "| Metric | Result | Population |",
+            "| --- | --- | --- |",
         ]
         for name, count in observed.get("reliability", {}).items():
+            result = str(count["count"]) if count["observed"] else "N/A — not observed"
             lines.append(
-                f"- {name.replace('_', ' ')}: {count['count']} / {count['observed']} observed."
-                if count["observed"]
-                else f"- {name.replace('_', ' ')}: N/A — no observations."
+                f"| {name.replace('_', ' ')} | {result} | {count['observed']} observed |"
             )
+        lines.append(
+            f"| Classified failures | {observed['failure_types'] or 'None recorded'} | {observed['scored']} scored |"
+        )
+        reliability = observed.get("recorded_reliability", {})
+        for name in ("route_consistency", "evidence_set_jaccard_stability"):
+            value = reliability.get(name, {})
+            if value.get("mean") is not None:
+                result = f"{value['mean']:.3f}"
+                population = f"{len(value.get('by_scenario', {}))} repeated scenarios"
+            else:
+                result = f"N/A — {value.get('reason', 'not recorded')}"
+                population = "No eligible repeated scenarios"
+            lines.append(f"| {name.replace('_', ' ')} | {result} | {population} |")
         lines.append("")
-    judge = october["judge"]
     lines += [
+        "Evidence-set Jaccard uses the established convention that two empty evidence sets have similarity 1; this does not establish evidence quality.",
+        "",
+        "### Retrieval quality and diagnostics",
+        "",
+        "| Metric | Result | Population |",
+        "| --- | --- | --- |",
+        "| Evidence recall, precision and graph retrieval quality | N/A — no system retrieval benchmark was saved for these executions | Not measured |",
+        "",
+        "Workflow retrieval checks above do not measure evidence precision. The [retrieval optimization experiment](../../experiments/retrieval-comparison/report.md) has separate cohorts and results.",
+        "",
         "### Answer and graph quality",
         "",
-        f"**Unavailable.** {judge['eligible_inputs']} eligible inputs; {judge['logical_attempted']} HTTP 429 attempt; {judge['successful_scored']} successful scores; {judge['unstarted']} unstarted. Judge score and serving identity are unavailable.",
-        f"Judge evaluator fingerprint: `{judge['evaluator_fingerprint']}`; configured model `{judge.get('configured_judge_model', 'unknown')}` with {judge.get('configured_endpoint', 'unknown')} routing. No judge rerun was performed.",
+        "| Dimension | Score | Status | Coverage |",
+        "| --- | ---: | --- | --- |",
+    ]
+    for name, item in judge.get("dimensions", {}).items():
+        score = item.get("score")
+        display = "N/A" if score is None else str(score)
+        coverage = item.get("coverage", "Not recorded")
+        lines.append(
+            f"| {name.replace('_', ' ').title()} | {display} | {item.get('status', 'Unavailable')} | {coverage} |"
+        )
+    if not judge.get("dimensions"):
+        lines.append(
+            "| Dimension details | N/A | Unavailable | Not supplied in saved judge status |"
+        )
+    lines += [
         "",
-        "### Retrieval and limitations",
+        f"Eligible inputs: {judge['eligible_inputs']}; attempts: {judge['logical_attempted']}; successful scores: {judge['successful_scored']}; unstarted: {judge['unstarted']}; HTTP 429 errors: {judge.get('error_http_429', 0)}. Missing scores are not zero.",
+        f"Judge evaluator: `{judge['evaluator_fingerprint']}`; configured model: `{judge.get('configured_judge_model', 'unknown')}`; observed serving identity: {judge.get('observed_serving_identity') or 'unknown'}.",
         "",
-        "October system retrieval-benchmark quality: N/A — no separate system-benchmark scorecard was saved for these live runs. Retrieval status and tool checks above describe workflow contracts, not evidence precision.",
-        "October aggregate token usage: N/A — all 12 completed records lack complete token totals. Missing usage is not zero. The small sample, interrupted executions, unresolved graph focus, and unverified deployment/vector parity limit conclusions.",
-        "The separate [retrieval optimization experiment](../../experiments/retrieval-comparison/report.md) reports its own cohorts, denominators and timing; its scores are not system-evaluation results.",
+        "### Diagnostics and interpretation",
         "",
-        "## Provenance and derivation",
-        "",
-        "October metrics aggregate original saved case-result checks and recorded metrics, grouped by original evaluator fingerprint; the source hashes and derivation are in [provenance](./provenance.json). No historical observation was rescored.",
-        "August values are copied from its preserved published scorecard, without recomputation. Execution status, retrieval support and generated-answer quality remain separate.",
+        "Unavailable usage remains N/A; deterministic compliance does not establish evidence support or answer quality. See [provenance](./provenance.json) for original identities and source hashes. No historical observation was rescored.",
         "",
     ]
     return "\n".join(lines)
@@ -316,6 +355,7 @@ def publish_system_evaluation(
     from pathlib import Path
 
     from backend.evaluation.evaluation_reporting import (
+        _publication_entries,
         _refresh_publication_aliases,
         _write_json,
         _write_publication_index,
@@ -344,71 +384,76 @@ def publish_system_evaluation(
         )
         or sum(group["passed"] for group in groups.values()) != runtime["passed"]
     ):
-        raise ValueError("derived metrics do not match the recorded October population")
+        raise ValueError("derived metrics do not match the recorded runtime population")
     if august["fingerprint"] != original_provenance["fingerprint"]:
-        raise ValueError("August scorecard and provenance identities differ")
+        raise ValueError("reference scorecard and provenance identities differ")
+    counts = ("eligible_inputs", "logical_attempted", "successful_scored", "unstarted")
+    if any(type(judge.get(key)) is not int or judge[key] < 0 for key in counts):
+        raise ValueError("judge counts must be nonnegative integers")
     if (
-        judge.get("judge_score") is not None
-        or judge.get("successful_scored") != 0
-        or judge.get("logical_attempted") != judge.get("error_http_429")
+        judge["successful_scored"] > judge["logical_attempted"]
+        or judge["logical_attempted"]
+        + judge["unstarted"]
+        + judge.get("skipped", 0)
+        + judge.get("uncertain_dispatch", 0)
+        != judge["eligible_inputs"]
     ):
-        raise ValueError("system edition requires the saved unavailable judge status")
-    august_data = {
-        key: august[key]
-        for key in (
-            "fingerprint",
-            "retrieval_quality",
-            "runtime_task_behavior",
-            "reliability",
-            "efficiency",
-            "optional_semantic_quality",
-            "coverage",
-        )
-    }
-    august_data["mode_breakdown"] = august["diagnostics"]["runtime_mode_breakdown"]
-    live = next(
-        item
+        raise ValueError("inconsistent judge counts")
+    if not isinstance(judge.get("dimensions", {}), dict):
+        raise ValueError("judge dimensions must be a mapping")
+    dates = [
+        str(item.get("created_at", ""))[:10]
         for item in original_provenance["contributing_runs"]
-        if item["run_kind"] == "live"
-    )
-    config = live["configuration_snapshot"]["fingerprint_input"][
-        "application_configuration"
+        if item.get("created_at")
     ]
-    models = config["models"]
-    august_data["live_configuration"] = {
-        "roles": {
-            role: {
-                key: models[role].get(key)
-                for key in ("model_name", "provider", "prompt_version")
-                if key in models[role]
-            }
-            for role in ("orchestrator", "retriever", "researcher", "analyst", "mentor")
-        },
-        "analyst_retrieval_mode": config["search"]["analyst_retrieval_mode"],
-        "visualizer_retrieval_mode": config["search"]["visualizer_retrieval_mode"],
-    }
+    reference_date = max(dates) if dates else str(august["generated_at"])[:10]
     report = {
         "publication_kind": "system-evaluation",
         "observation_end": runtime_input["observation_end"],
-        "august": august_data,
-        "october": {"runtime": runtime, "groups": groups, "judge": judge},
+        "reference": {
+            "observation_end": reference_date,
+            "scorecard": august,
+            "mode_breakdown": august["diagnostics"]["runtime_mode_breakdown"],
+        },
+        "current": {"runtime": runtime, "groups": groups, "judge": judge},
     }
     hashes = {
         name: hashlib.sha256(path.read_bytes()).hexdigest()
         for name, path in zip(
             (
-                "august_scorecard",
-                "august_provenance",
-                "october_runtime",
-                "october_derived",
-                "october_judge",
+                "reference_scorecard",
+                "reference_provenance",
+                "runtime",
+                "derived",
+                "judge",
             ),
             paths,
             strict=True,
         )
     }
-    snapshot = "system-evaluation-october"
+    import re
+
+    source_id = runtime_input["publication_id"]
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", source_id):
+        raise ValueError("publication identity must be a safe filename")
+    revision = runtime_input.get("publication_revision", 2)
+    if type(revision) is not int or revision < 1:
+        raise ValueError("publication revision must be a positive integer")
+    digest = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()[
+        :12
+    ]
+    snapshot = f"system-evaluation-v2-{source_id}-{digest}"
     history_dir = Path(reports_root) / "history" / snapshot
+    for date, folder, previous in _publication_entries(Path(reports_root)):
+        if (
+            date == runtime_input["observation_end"][:10]
+            and previous.get("publication_kind") == "system-evaluation"
+            and previous.get("publication_revision", 0) == revision
+            and folder.name != snapshot
+        ):
+            raise ValueError(
+                "same-day system edition requires a distinct publication_revision"
+            )
     provenance_path = history_dir / "provenance.json"
     if provenance_path.exists():
         old = json.loads(provenance_path.read_text())
@@ -425,21 +470,22 @@ def publish_system_evaluation(
         (history_dir / "report.md").write_text(
             _render_system_report(report), encoding="utf-8"
         )
-        shutil.copyfile(paths[3], history_dir / "october-metrics.json")
+        shutil.copyfile(paths[3], history_dir / "runtime-metrics.json")
         _write_json(
             provenance_path,
             {
                 "publication_kind": "system-evaluation",
                 "publication_id": snapshot,
                 "observation_end": runtime_input["observation_end"],
-                "august_fingerprint": august["fingerprint"],
-                "october_fingerprints": runtime["fingerprints"],
+                "publication_revision": revision,
+                "reference_fingerprint": august["fingerprint"],
+                "runtime_fingerprints": runtime["fingerprints"],
                 "judge_fingerprint": judge["evaluator_fingerprint"],
                 "input_hashes": hashes,
-                "october_sources": derived["sources"],
+                "runtime_sources": derived["sources"],
                 "derivation": derived["method"],
                 "derivation_code_sha256": derived.get("derivation_code_sha256"),
-                "historical_source": "reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/scorecard.json",
+                "reference_source": str(paths[0]),
             },
         )
     _refresh_publication_aliases(Path(reports_root))

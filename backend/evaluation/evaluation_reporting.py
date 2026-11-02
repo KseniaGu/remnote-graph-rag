@@ -2551,6 +2551,7 @@ def _publication_entries(reports_root: Path) -> list[tuple[str, Path, dict[str, 
         key=lambda item: (
             item[0],
             item[2].get("publication_kind") == "system-evaluation",
+            item[2].get("publication_revision", 0),
             item[1].name,
         ),
     )

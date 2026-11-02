@@ -1,22 +1,23 @@
 {
   "publication_kind": "system-evaluation",
-  "publication_id": "system-evaluation-october",
+  "publication_id": "system-evaluation-v2-controlled-observations-1640fed21174",
   "observation_end": "2026-10-31",
-  "august_fingerprint": "f8d6f3b6f3e0348c75a194bf",
-  "october_fingerprints": [
+  "publication_revision": 2,
+  "reference_fingerprint": "f8d6f3b6f3e0348c75a194bf",
+  "runtime_fingerprints": [
     "1095d6342e69b04143ef971d",
     "2b1301ae85cf5a5a77713187",
     "aacdf873baacf605652888e1"
   ],
   "judge_fingerprint": "e3545f82672e7197c6e567f2",
   "input_hashes": {
-    "august_scorecard": "2635843ed018bc5263a3704880004cc6464057c84ca04174ab777229a4e362b1",
-    "august_provenance": "01ce557c230178202b32a0b5b90e3d0800e789bec955daf704533eef49e97f8f",
-    "october_runtime": "f76c7551bea8c6dc738bef26f9c3033247146a770c0f2b358ab385ff9323a30c",
-    "october_derived": "da1740cf24c9918eb552bc24ff9ccfd8855e78230aad54a9c6f0bc27c35bde20",
-    "october_judge": "c4f7024abf5b3d2b693fec83dbe0aeb3493a0b826f7fdbe180cfe33b39c022a6"
+    "reference_scorecard": "2635843ed018bc5263a3704880004cc6464057c84ca04174ab777229a4e362b1",
+    "reference_provenance": "01ce557c230178202b32a0b5b90e3d0800e789bec955daf704533eef49e97f8f",
+    "runtime": "f76c7551bea8c6dc738bef26f9c3033247146a770c0f2b358ab385ff9323a30c",
+    "derived": "129e18a8ac8398f58d4f526a4fa93a1dd353c5ff018e43d27e6f29666fa865a5",
+    "judge": "fed7bcc06d5bc4e733c07ef71bc11f402a28a576fb548e178735a7b710911251"
   },
-  "october_sources": [
+  "runtime_sources": [
     {
       "fingerprint": "2b1301ae85cf5a5a77713187",
       "scenario_id": "colbert_guidance_mode_continuation",
@@ -128,8 +129,8 @@
   ],
   "derivation": "Aggregated saved case-result checks and recorded metrics using evaluation_reporting; no rescoring. Eligible check counts exclude not-observed and not-applicable checks.",
   "derivation_code_sha256": {
-    "system_report": "a39afc37dff22ad35306102f97c257190af8dddbbb9ca703994440d42fa6f4d6",
-    "evaluation_reporting": "4548b1e54230a92cbff5b1508e3c0eb2bc5763fe25a673e57f621a1e67f0dd95"
+    "system_report": "d5b80a97a266eeced679d673ee474897346c8d7e584dc1662a0b9ed839fb3298",
+    "evaluation_reporting": "2468f787de7141a955aee4081c3d0f702c1c8b7a79994c921247065441fdaf16"
   },
-  "historical_source": "reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/scorecard.json"
+  "reference_source": "reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/scorecard.json"
 }

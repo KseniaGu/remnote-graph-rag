@@ -132,7 +132,7 @@ def test_system_publication_keeps_periods_separate_and_preserves_newer_alias(tmp
     aggregate = tmp_path / "derived.json"
     aggregate.write_text(json.dumps(derived))
     reports = tmp_path / "reports"
-    publish_system_evaluation(
+    publication = publish_system_evaluation(
         old / "scorecard.json",
         old / "provenance.json",
         october / "runtime.json",
@@ -142,12 +142,22 @@ def test_system_publication_keeps_periods_separate_and_preserves_newer_alias(tmp
     )
     output = json.loads((reports / "latest.json").read_text())
     text = (reports / "latest.md").read_text()
-    assert "August" in text and "October" in text
-    assert output["august"]["mode_breakdown"]["offline"]["sample_count"] == 12
-    assert output["august"]["mode_breakdown"]["live"]["sample_count"] == 15
-    assert output["october"]["runtime"]["planned"] == 15
-    assert output["october"]["judge"]["judge_score"] is None
-    assert len(output["october"]["groups"]) == 3
+    assert "2026-08-22" in text and "2026-10-31" in text
+    assert output["reference"]["mode_breakdown"]["offline"]["sample_count"] == 12
+    assert output["reference"]["mode_breakdown"]["live"]["sample_count"] == 15
+    assert output["current"]["runtime"]["planned"] == 15
+    assert output["current"]["judge"]["judge_score"] is None
+    assert len(output["current"]["groups"]) == 3
+    from backend.evaluation.evaluation_reporting import _render_scorecard
+
+    original = _render_scorecard(json.loads((old / "scorecard.json").read_text()))
+    original = "\n".join(
+        "#" + line if line.startswith("#") else line for line in original.splitlines()
+    )
+    assert original in text
+    assert "Campaign coverage" in text and "Metric definitions" in text
+    assert "Retrieval diagnostics" in text and "Median" in text and "P95" in text
+    assert "Worker-step and Tavily-search bounds can gate" in text
     before = (reports / "latest.json").read_bytes()
     publish_system_evaluation(
         old / "scorecard.json",
@@ -158,7 +168,7 @@ def test_system_publication_keeps_periods_separate_and_preserves_newer_alias(tmp
         reports_root=reports,
     )
     assert (reports / "latest.json").read_bytes() == before
-    saved_metrics = reports / "history/system-evaluation-october/october-metrics.json"
+    saved_metrics = publication["history_directory"] / "runtime-metrics.json"
     publish_system_evaluation(
         old / "scorecard.json",
         old / "provenance.json",
@@ -166,6 +176,78 @@ def test_system_publication_keeps_periods_separate_and_preserves_newer_alias(tmp
         saved_metrics,
         october / "judge.json",
         reports_root=reports,
+    )
+
+    future_runtime = json.loads((october / "runtime.json").read_text())
+    future_runtime["publication_id"] = "future-observations"
+    future_runtime["observation_end"] = "2026-11-15"
+    runtime_path = tmp_path / "future-runtime.json"
+    same_day = {**future_runtime, "observation_end": "2026-10-31"}
+    runtime_path.write_text(json.dumps(same_day))
+    import pytest
+
+    with pytest.raises(ValueError, match="publication_revision"):
+        publish_system_evaluation(
+            old / "scorecard.json",
+            old / "provenance.json",
+            runtime_path,
+            aggregate,
+            october / "judge.json",
+            reports_root=reports,
+        )
+    same_day["publication_revision"] = 3
+    runtime_path.write_text(json.dumps(same_day))
+    same_day_publication = publish_system_evaluation(
+        old / "scorecard.json",
+        old / "provenance.json",
+        runtime_path,
+        aggregate,
+        october / "judge.json",
+        reports_root=reports,
+    )
+    assert (
+        json.loads((reports / "latest_provenance.json").read_text())["publication_id"]
+        == same_day_publication["snapshot"]
+    )
+    runtime_path.write_text(json.dumps(future_runtime))
+    future_judge = json.loads((october / "judge.json").read_text())
+    future_judge.update(
+        {
+            "logical_attempted": 1,
+            "successful_scored": 1,
+            "error_http_429": 0,
+            "unstarted": 3,
+            "judge_score": None,
+            "dimensions": {
+                "graph_usefulness": {
+                    "score": 0.75,
+                    "status": "Scored",
+                    "coverage": "1 / 1",
+                }
+            },
+        }
+    )
+    judge_path = tmp_path / "future-judge.json"
+    judge_path.write_text(json.dumps(future_judge))
+    future = publish_system_evaluation(
+        old / "scorecard.json",
+        old / "provenance.json",
+        runtime_path,
+        aggregate,
+        judge_path,
+        reports_root=reports,
+    )
+    assert future["snapshot"] != publication["snapshot"]
+    assert (publication["history_directory"] / "report.json").read_bytes() == before
+    assert (
+        "| Graph Usefulness | 0.75 | Scored | 1 / 1 |"
+        in (reports / "latest.md").read_text()
+    )
+    assert (
+        json.loads((reports / "latest.json").read_text())["current"]["judge"][
+            "dimensions"
+        ]["graph_usefulness"]["score"]
+        == 0.75
     )
 
 
@@ -218,3 +300,36 @@ def test_older_scorecard_cannot_replace_latest_system_report(tmp_path):
         (snapshot / "report.json").write_text("{}")
     _refresh_publication_aliases(reports)
     assert (reports / "latest.md").read_text() == "system"
+
+
+def test_saved_gating_metadata_is_preserved():
+    row = {
+        "passed": False,
+        "checks": [
+            {
+                "dimension": "budget",
+                "name": "worker_steps",
+                "status": "fail",
+                "gating": True,
+            },
+            {
+                "dimension": "budget",
+                "name": "tavily_searches",
+                "status": "pass",
+                "gating": True,
+            },
+            {
+                "dimension": "budget",
+                "name": "latency_seconds",
+                "status": "fail",
+                "gating": False,
+            },
+        ],
+        "failure_types": [],
+        "metrics": {},
+    }
+    group = aggregate_scored_runs({"original": [row]})["original"]
+    assert group["gating"]["budget.worker_steps"] == {"true": 1}
+    assert group["gating"]["budget.tavily_searches"] == {"true": 1}
+    assert group["gating"]["budget.latency_seconds"] == {"false": 1}
+    assert group["passed"] == 0

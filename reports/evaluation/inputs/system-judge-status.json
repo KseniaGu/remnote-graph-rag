@@ -1,0 +1,64 @@
+{
+  "schema": "fixed-judge-pilot-status-v1",
+  "scope": "Sanitized partial-pilot operational status derived from the preserved failed invocation; not a generated scorecard or publication manifest.",
+  "eligible_inputs": 4,
+  "logical_attempted": 1,
+  "successful_scored": 0,
+  "error_http_429": 1,
+  "unstarted": 3,
+  "skipped": 0,
+  "uncertain_dispatch": 0,
+  "judge_attempts": 1,
+  "judge_attempts_unspent": 4,
+  "shared_retry_attempts": 0,
+  "judge_score": null,
+  "judge_token_observed_attempts": {
+    "input": 0,
+    "output": 0,
+    "total": 0
+  },
+  "judge_token_attempt_denominator": 1,
+  "judge_token_subtotals": null,
+  "observed_serving_identity": null,
+  "serving_identity_observed_attempts": 0,
+  "configured_judge_model": "xingchen-agi/xing4.0-29b-a4b:free",
+  "configured_endpoint": "Phala only, no fallback",
+  "cause": "HTTP 429 observed; response body and rate-limit headers were not retained, so origin and cooldown are unknown.",
+  "source_stop_freeze_sha256": "a5aaea3904a6966d45eb6548ad6d7782219d23cb1415a858d47ea21ccc041561",
+  "source_v3_freeze_sha256": "e8b2726d7c1f9d3d58ac13604da8457fd7e489dddbb51df161837a477c47bec2",
+  "evaluator_fingerprint": "e3545f82672e7197c6e567f2",
+  "limitations": "No scores or matched judge comparison; no inference from configured to observed serving identity.",
+  "dimensions": {
+    "graph_usefulness": {
+      "score": null,
+      "status": "Unavailable",
+      "coverage": "2 eligible; 1 HTTP 429 error; 1 unstarted"
+    },
+    "claim_faithfulness": {
+      "score": null,
+      "status": "Unavailable",
+      "coverage": "2 eligible; 0 attempted; 2 unstarted"
+    },
+    "analyst_usefulness": {
+      "score": null,
+      "status": "Unavailable",
+      "coverage": "Not assessed in this pilot"
+    },
+    "mentor_pedagogy": {
+      "score": null,
+      "status": "Unavailable",
+      "coverage": "Not assessed in this pilot"
+    },
+    "conversational_continuity": {
+      "score": null,
+      "status": "Unavailable",
+      "coverage": "Not assessed in this pilot"
+    }
+  },
+  "dimension_plan_sources": {
+    "original_status_sha256": "c4f7024abf5b3d2b693fec83dbe0aeb3493a0b826f7fdbe180cfe33b39c022a6",
+    "note": "The stopped pilot plan listed two graph-usefulness and two claim-faithfulness inputs; the first graph assessment encountered HTTP 429.",
+    "first_run_manifest_sha256": "7a789f75ff8a86fef402c16d36ccc9a6ad7480e968a86f207289a93266a83e0a",
+    "pilot_plan_sha256": "c6b111672003f9e5e9e8197e5b4629e0cb54d398f4154708baff0b0838564237"
+  }
+}
