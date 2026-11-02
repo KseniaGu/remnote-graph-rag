@@ -25,8 +25,8 @@ RUNTIME_RUN_KINDS = {"offline", "live"}
 HASHED_RELATIVE_PATHS = (
     "pyproject.toml",
     "uv.lock",
-    "evals/runtime/scenarios.json",
-    "evals/retrieval/benchmark_cases.jsonl",
+    "backend/evaluation/cases/runtime/scenarios.json",
+    "backend/evaluation/cases/retrieval/benchmark_cases.jsonl",
     "scripts/evaluate_runtime_workflow.py",
     "scripts/evaluate_retrieval_pipeline.py",
     "scripts/build_evaluation_report.py",
@@ -1261,7 +1261,9 @@ def _coverage_requirement(
 
 
 def _scenario_campaign_contract() -> dict[str, dict[str, int]]:
-    payload = _read_json(ROOT / "evals" / "runtime" / "scenarios.json")
+    payload = _read_json(
+        ROOT / "backend" / "evaluation" / "cases" / "runtime" / "scenarios.json"
+    )
     if not isinstance(payload, list):
         return {}
     return {
@@ -2539,9 +2541,19 @@ def _publication_entries(reports_root: Path) -> list[tuple[str, Path, dict[str, 
     entries = []
     for path in (reports_root / "history").glob("*/provenance.json"):
         provenance = _read_json(path)
-        if isinstance(provenance, dict):
+        if (
+            isinstance(provenance, dict)
+            and provenance.get("publication_kind") != "optimization-experiment"
+        ):
             entries.append((_observation_end(provenance), path.parent, provenance))
-    return sorted(entries, key=lambda item: (item[0], item[1].name))
+    return sorted(
+        entries,
+        key=lambda item: (
+            item[0],
+            item[2].get("publication_kind") == "system-evaluation",
+            item[1].name,
+        ),
+    )
 
 
 def _refresh_publication_aliases(reports_root: Path) -> None:
@@ -2551,11 +2563,14 @@ def _refresh_publication_aliases(reports_root: Path) -> None:
     _, folder, provenance = entries[-1]
     stem = (
         "report"
-        if provenance.get("publication_kind") == "saved-observations"
+        if provenance.get("publication_kind")
+        in {"saved-observations", "system-evaluation"}
         else "scorecard"
     )
     if stem == "report":
         markdown = (folder / "report.md").read_text(encoding="utf-8")
+        markdown = markdown.replace("](../../experiments/", "](experiments/")
+        markdown = markdown.replace("](../", "](history/")
         markdown = markdown.replace("](./", f"](history/{folder.name}/")
         (reports_root / "latest.md").write_text(markdown, encoding="utf-8")
     else:
@@ -2575,7 +2590,10 @@ def _write_publication_index(reports_root: Path) -> None:
     ]
     for observed, folder, provenance in reversed(_publication_entries(reports_root)):
         relative = f"history/{folder.name}"
-        saved = provenance.get("publication_kind") == "saved-observations"
+        saved = provenance.get("publication_kind") in {
+            "saved-observations",
+            "system-evaluation",
+        }
         stem = "report" if saved else "scorecard"
         identity = (
             provenance.get("publication_id")

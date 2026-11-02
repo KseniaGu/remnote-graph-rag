@@ -28,8 +28,8 @@ def write_identity_fixture(root: Path) -> None:
     files = {
         "pyproject.toml": "[project]\nname = 'fixture'\n",
         "uv.lock": "version = 1\n",
-        "evals/runtime/scenarios.json": "[]\n",
-        "evals/retrieval/benchmark_cases.jsonl": "{}\n",
+        "backend/evaluation/cases/runtime/scenarios.json": "[]\n",
+        "backend/evaluation/cases/retrieval/benchmark_cases.jsonl": "{}\n",
         "scripts/evaluate_runtime_workflow.py": "RUNTIME = 1\n",
         "scripts/evaluate_retrieval_pipeline.py": "RETRIEVAL = 1\n",
         "scripts/build_evaluation_report.py": "REPORT = 1\n",
@@ -432,8 +432,18 @@ class EvaluationReportingTests(unittest.TestCase):
             relevant_files = [
                 repository_root / "backend" / "app.py",
                 repository_root / "backend" / "llm" / "prompts" / "judge.txt",
-                repository_root / "evals" / "runtime" / "scenarios.json",
-                repository_root / "evals" / "retrieval" / "benchmark_cases.jsonl",
+                repository_root
+                / "backend"
+                / "evaluation"
+                / "cases"
+                / "runtime"
+                / "scenarios.json",
+                repository_root
+                / "backend"
+                / "evaluation"
+                / "cases"
+                / "retrieval"
+                / "benchmark_cases.jsonl",
                 repository_root / "pyproject.toml",
                 repository_root / "uv.lock",
                 repository_root / "storage" / "application_manifest.json",
@@ -530,7 +540,12 @@ class EvaluationReportingTests(unittest.TestCase):
             root = Path(tmp)
             scenarios = json.loads(
                 (
-                    evaluation_reporting.ROOT / "evals" / "runtime" / "scenarios.json"
+                    evaluation_reporting.ROOT
+                    / "backend"
+                    / "evaluation"
+                    / "cases"
+                    / "runtime"
+                    / "scenarios.json"
                 ).read_text(encoding="utf-8")
             )
 

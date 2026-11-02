@@ -72,20 +72,17 @@ and the operator's responsibility to verify external quota.
 
 ## Evaluation results
 
-The [complete latest evaluation report](reports/evaluation/latest.md) describes
-controlled observations from October 2026, not every later code revision:
+The [evaluation overview](reports/evaluation/README.md) and
+[detailed system report](reports/evaluation/latest.md) describe historical
+August and October 2026 observations, not every later code revision. August
+recorded 6 / 12 imported-trace passes and 10 / 15 live passes. October recorded
+10 / 12 completed live passes, two failures, and three interrupted executions
+out of 15 planned. These are deterministic contract results, not answer-quality
+scores. October judge quality is unavailable after one HTTP 429; three other
+eligible assessments were unstarted.
 
-- **Runtime compliance:** 10 of 12 completed observations passed their
-  deterministic contracts; two failed and three of 15 planned were interrupted.
-- **Retrieved evidence:** frozen Precision@10 averaged 33.57% for source-only
-  retrieval and 34.29% for graph-assisted retrieval (21 observations each).
-  These scores measure reviewed source support, not answer correctness.
-- **Generated-answer quality:** unmeasured. The single attempted judge request
-  returned HTTP 429; three other eligible assessments were unstarted.
-
-The tested routing/retrieval prompt versions, original evaluator identities,
-separate populations, missing usage and limitations are in the complete report.
-The sample does not establish a general graph advantage or production quality.
+The [separate optimization experiment](reports/evaluation/experiments/README.md)
+compares retrieval variants and does not supply system-evaluation scores.
 
 | Documentation | Purpose |
 | --- | --- |

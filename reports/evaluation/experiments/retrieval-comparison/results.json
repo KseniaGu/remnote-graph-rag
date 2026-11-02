@@ -1,0 +1,203 @@
+{
+  "schema": "retrieval-ablation-aggregate-v1",
+  "observation_dates_utc": [
+    "2026-10-28",
+    "2026-10-29"
+  ],
+  "scope": "Local real-model retrieval, fresh processes; no answer generation or current workflow measurement. Raw evidence and case text are private.",
+  "cohort_cases": {
+    "development": 9,
+    "frozen": 7
+  },
+  "arms": {
+    "A": "graph-free source retrieval with shared deterministic lexical/metadata scoring and diversification, model reranker disabled",
+    "B": "optimized graph-assisted, reranker disabled",
+    "C": "optimized graph-assisted, local reranker",
+    "D": "current legacy vector-context, existing settings"
+  },
+  "arm_cohort_metrics": {
+    "development:A": {
+      "precision_ready": 27,
+      "observations": 27,
+      "recall_ready": 21,
+      "precision_mean": 0.49444444444444446,
+      "recall_available_only_mean": 1.0
+    },
+    "development:B": {
+      "precision_ready": 27,
+      "observations": 27,
+      "recall_ready": 18,
+      "precision_mean": 0.48333333333333334,
+      "recall_available_only_mean": 1.0
+    },
+    "development:C": {
+      "precision_ready": 18,
+      "observations": 18,
+      "recall_ready": 14,
+      "precision_mean": 0.45,
+      "recall_available_only_mean": 1.0
+    },
+    "development:D": {
+      "precision_ready": 27,
+      "observations": 27,
+      "recall_ready": 15,
+      "precision_mean": 0.3666666666666667,
+      "recall_available_only_mean": 1.0
+    },
+    "frozen:A": {
+      "precision_ready": 21,
+      "observations": 21,
+      "recall_ready": 21,
+      "precision_mean": 0.33571428571428574,
+      "recall_available_only_mean": 0.8571428571428571
+    },
+    "frozen:B": {
+      "precision_ready": 21,
+      "observations": 21,
+      "recall_ready": 21,
+      "precision_mean": 0.34285714285714286,
+      "recall_available_only_mean": 0.8571428571428571
+    },
+    "frozen:C": {
+      "precision_ready": 14,
+      "observations": 14,
+      "recall_ready": 14,
+      "precision_mean": 0.3214285714285714,
+      "recall_available_only_mean": 0.7857142857142857
+    },
+    "frozen:D": {
+      "precision_ready": 21,
+      "observations": 21,
+      "recall_ready": 21,
+      "precision_mean": 0.2857142857142857,
+      "recall_available_only_mean": 1.0
+    }
+  },
+  "matched_comparisons": {
+    "development:B-A": {
+      "precision_pairs": 27,
+      "recall_pairs": 15,
+      "precision_mean_difference": -0.011111111111111096,
+      "recall_available_only_mean_difference": 0.0,
+      "paired_observations": 27,
+      "mean_difference_seconds": 1.721
+    },
+    "development:C-B": {
+      "precision_pairs": 18,
+      "recall_pairs": 10,
+      "precision_mean_difference": -0.03333333333333334,
+      "recall_available_only_mean_difference": 0.0,
+      "paired_observations": 18,
+      "mean_difference_seconds": 274.266
+    },
+    "development:D-B": {
+      "precision_pairs": 27,
+      "recall_pairs": 12,
+      "precision_mean_difference": -0.11666666666666668,
+      "recall_available_only_mean_difference": 0.0,
+      "paired_observations": 27,
+      "mean_difference_seconds": -1.116
+    },
+    "frozen:B-A": {
+      "precision_pairs": 21,
+      "recall_pairs": 21,
+      "precision_mean_difference": 0.007142857142857141,
+      "recall_available_only_mean_difference": 0.0,
+      "paired_observations": 21,
+      "mean_difference_seconds": 0.847
+    },
+    "frozen:C-B": {
+      "precision_pairs": 14,
+      "recall_pairs": 14,
+      "precision_mean_difference": -0.021428571428571443,
+      "recall_available_only_mean_difference": -0.07142857142857142,
+      "paired_observations": 14,
+      "mean_difference_seconds": 204.258
+    },
+    "frozen:D-B": {
+      "precision_pairs": 21,
+      "recall_pairs": 21,
+      "precision_mean_difference": -0.05714285714285715,
+      "recall_available_only_mean_difference": 0.14285714285714285,
+      "paired_observations": 21,
+      "mean_difference_seconds": -0.469
+    }
+  },
+  "coverage": {
+    "completed_measurements": 22,
+    "planned_measurements": 24,
+    "interrupted_measurements": 2,
+    "precision_observations": 176,
+    "recall_available": 145,
+    "recall_unavailable_development": 31,
+    "recall_unavailable_frozen": 0,
+    "matched_repetitions_independent_samples": false
+  },
+  "measurement": {
+    "timer": "CPU fresh-process retrieval-call elapsed seconds per case bundle; excludes startup, normalization, scoring",
+    "precision": "weighted relevance 1/0.5/0 over actual first ten unique sources divided by fixed 10; absent slots contribute zero",
+    "recall": "unchanged required answer points with at least one fully supported source in actual top ten; partial earns no full credit; unknown absent mappings make unsupported-in-list point unavailable",
+    "development_recall": "available observations only; missingness prevents complete-cohort comparisons",
+    "peak_memory": "not measured per case",
+    "token_metadata": "unavailable"
+  },
+  "provenance": {
+    "accepted_source_tree": "339884ef4f716dfc497033c5e3428acec3d3e50f",
+    "source_patch_sha256": "6dece11dd472b0bc48b5a51b44728fb0da241240675b76341707c4ffad856a60",
+    "snapshot_manifest_sha256": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7",
+    "embedding_model": "all-MiniLM-L6-v2",
+    "local_reranker_model": "Qwen3-Reranker-0.6B",
+    "source_candidate_k": 30,
+    "source_final_k": 6,
+    "context_max_characters": 7000,
+    "reranker_candidate_k": 10,
+    "reranker_input_max_characters": 1200,
+    "source_hashes_sha256": {
+      "accepted_scoring_summary": "89c4af956c946279c2d7298f97b9c78cd94b19d4ed3a50606965a2135681ee82",
+      "accepted_scoring_observations": "50dddce5daac2c70798dae49f9f1b8ddc270c7c2442312ddd917fbfd0307fdfb",
+      "operational_comparisons": "c23da92e032b93d6b71b9e9aa7fb88be812313ab622193451884b486e9526c90",
+      "run_inventory": "3612946908cb3c5b264b5031cae235b62e65a35798301de67d49d84a85363883",
+      "development_contract": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
+      "frozen_contract": "0238baa2c9a549dd0a252f5756cf5e16408792c42a5263ace8d7107183e52c8b",
+      "annotation_handoff": "3537fdccc281ece9e6c77b586f876264603ca9d038d57191a25271d4d164bd18",
+      "score_helper_source": "51074e4ab486bfbceed9a6c26785889bcfd3e489937d19f3c5f7c8b986a99d3b"
+    },
+    "labels": "98 new required pairs AI-assisted and user-endorsed, 77 prior reviewed development pairs, eight prior approved frozen pairs, plus one later point decision; not independent expert or judge ratings",
+    "provenance_limit": "Hashes match retained artifacts; they do not establish an independent pre-execution snapshot."
+  },
+  "limitations": [
+    "No generated-answer correctness, current task success, production traffic, or production latency measured.",
+    "No statistical significance or global superiority conclusion.",
+    "Frozen SVM topic has prior exposure and unproven disambiguation; no true-miss coverage.",
+    "D uses a different pipeline and budgets; it is not a matched pre-fix B0.",
+    "Early exit and environment details are partly unreconstructable; D validity/resource counters uninstrumented.",
+    "Per-case memory peaks and provider/judge tokens unavailable."
+  ],
+  "annotation_dates_utc": [
+    "2026-10-29",
+    "2026-10-30"
+  ],
+  "scoring_export_date_utc": "2026-10-30",
+  "anonymized_container_development_example": {
+    "measure": "Completed measured observations with a full in-list witness for the case’s required point",
+    "arms": {
+      "A": {
+        "covered": 0,
+        "observed": 3
+      },
+      "B": {
+        "covered": 0,
+        "observed": 3
+      },
+      "C": {
+        "covered": 0,
+        "observed": 2
+      },
+      "D": {
+        "covered": 3,
+        "observed": 3
+      }
+    },
+    "source": "Derived from the accepted scoring observations identified by the observations hash in provenance; no passage or question is included."
+  }
+}

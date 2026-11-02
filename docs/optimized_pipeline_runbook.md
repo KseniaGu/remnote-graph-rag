@@ -144,7 +144,7 @@ RUN_ROOT="data/production/full_optimized_pipeline_run"
 uv run --locked --group scripts python scripts/evaluate_retrieval_pipeline.py \
   --storage-dir "storage" \
   --raw-data-dir "data/raw/AI Research" \
-  --benchmark-file "evals/retrieval/benchmark_cases.jsonl" \
+  --benchmark-file "backend/evaluation/cases/retrieval/benchmark_cases.jsonl" \
   --output-dir "$RUN_ROOT/retrieval_eval/local_final_storage" \
   --mode both \
   --analyst-variant config \
@@ -167,7 +167,7 @@ RUN_ROOT="data/production/full_optimized_pipeline_run"
 uv run --locked --group scripts python scripts/evaluate_retrieval_pipeline.py \
   --storage-dir "storage" \
   --raw-data-dir "data/raw/AI Research" \
-  --benchmark-file "evals/retrieval/benchmark_cases.jsonl" \
+  --benchmark-file "backend/evaluation/cases/retrieval/benchmark_cases.jsonl" \
   --output-dir "$RUN_ROOT/retrieval_eval/local_final_storage_chunk_splitting_relation_updates" \
   --mode both
 ```
@@ -180,7 +180,7 @@ RUN_ROOT="data/production/full_optimized_pipeline_run"
 uv run --locked --group scripts python scripts/evaluate_retrieval_pipeline.py \
   --storage-dir "storage" \
   --raw-data-dir "data/raw/AI Research" \
-  --benchmark-file "evals/retrieval/benchmark_cases.jsonl" \
+  --benchmark-file "backend/evaluation/cases/retrieval/benchmark_cases.jsonl" \
   --output-dir "$RUN_ROOT/retrieval_eval/reference_validation" \
   --mode both \
   --validate-references-only
@@ -224,7 +224,7 @@ RUN_ROOT="data/production/full_optimized_pipeline_run"
 uv run --locked --group scripts python scripts/evaluate_retrieval_pipeline.py \
   --storage-dir "storage" \
   --raw-data-dir "data/raw/AI Research" \
-  --benchmark-file "evals/retrieval/benchmark_cases.jsonl" \
+  --benchmark-file "backend/evaluation/cases/retrieval/benchmark_cases.jsonl" \
   --output-dir "$RUN_ROOT/retrieval_eval/naive_bayes_vs_lr" \
   --case-id visualizer_naive_bayes_vs_logistic_regression \
   --mode visualizer

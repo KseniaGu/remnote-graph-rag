@@ -6,7 +6,7 @@ that difference reversed on development. The local reranker added substantial
 CPU retrieval time and did not improve the measured evidence metrics. The current
 legacy reference had lower frozen precision and higher required-point coverage.
 These results do not select a new default or evaluate generated answers. The
-[sanitized aggregate and provenance](../reports/evaluation/history/controlled-observations/retrieval.json)
+[sanitized aggregate and provenance](results.json)
 contains the underlying aggregate values; raw case text and evidence are private.
 
 ## Arms and observed evidence

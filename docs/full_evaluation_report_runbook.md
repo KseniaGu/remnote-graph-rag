@@ -17,8 +17,8 @@ The default production baseline is:
 - Analyst reranker: disabled for the baseline;
 - prepared runtime storage: `storage`;
 - local embedder: `models/all-MiniLM-L6-v2`;
-- runtime scenarios: `evals/runtime/scenarios.json`;
-- retrieval benchmark: `evals/retrieval/benchmark_cases.jsonl`.
+- runtime scenarios: `backend/evaluation/cases/runtime/scenarios.json`;
+- retrieval benchmark: `backend/evaluation/cases/retrieval/benchmark_cases.jsonl`.
 
 The evaluation does not ingest, parse, embed, index, or mutate storage.
 
@@ -245,7 +245,7 @@ This is local, deterministic, and does not load the model or index:
 ```bash
 uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --validate-references-only \
-  --benchmark-file evals/retrieval/benchmark_cases.jsonl \
+  --benchmark-file backend/evaluation/cases/retrieval/benchmark_cases.jsonl \
   --storage-dir storage
 ```
 
@@ -256,7 +256,7 @@ Use `--allow-invalid-benchmark-references` only for investigation. It is not
 appropriate for a canonical report.
 
 For the separate planned source-only, graph-assisted, reranked, and legacy
-comparison, see [retrieval ablation](retrieval_ablation.md). Keep its run roots
+comparison, see [retrieval ablation](../reports/evaluation/experiments/retrieval-comparison/report.md). Keep its run roots
 and labels separate from the canonical report. Preparing those commands does
 not itself authorize or run a retrieval campaign.
 
@@ -275,10 +275,10 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --analyst-reranker-mode disabled \
   --storage-dir storage \
   --embedder-model-path models/all-MiniLM-L6-v2 \
-  --benchmark-file evals/retrieval/benchmark_cases.jsonl \
+  --benchmark-file backend/evaluation/cases/retrieval/benchmark_cases.jsonl \
   --evaluation-root data/evaluation/relevance_work \
   --no-render-html \
-  --write-relevance-review evals/retrieval/context_relevance_review.md
+  --write-relevance-review backend/evaluation/cases/retrieval/context_relevance_review.md
 ```
 
 The generated worksheet resolves every returned legacy grounding chunk against
@@ -307,7 +307,7 @@ For each reviewed benchmark case:
 4. Map each answer point to one or more supporting evidence IDs.
 5. Confirm the generated prepared-storage manifest identity.
 6. Synchronize approved values into the authoritative
-   `evals/retrieval/benchmark_cases.jsonl`.
+   `backend/evaluation/cases/retrieval/benchmark_cases.jsonl`.
 7. Set `context_relevance.review_status` to `reviewed` only when the labels and
    mappings are complete.
 
@@ -338,7 +338,7 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --analyst-reranker-mode disabled \
   --storage-dir storage \
   --embedder-model-path models/all-MiniLM-L6-v2 \
-  --benchmark-file evals/retrieval/benchmark_cases.jsonl \
+  --benchmark-file backend/evaluation/cases/retrieval/benchmark_cases.jsonl \
   --no-render-html
 ```
 
@@ -398,7 +398,7 @@ Native evaluator:
 ```bash
 uv run --locked python scripts/evaluate_runtime_workflow.py offline \
   --trace-export exports/langsmith_traces_20260816T233652Z.json \
-  --scenarios evals/runtime/scenarios.json
+  --scenarios backend/evaluation/cases/runtime/scenarios.json
 ```
 
 Native evaluator plus optional AgentEvals strict trajectory cross-check:
@@ -406,7 +406,7 @@ Native evaluator plus optional AgentEvals strict trajectory cross-check:
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py offline \
   --trace-export exports/langsmith_traces_20260816T233652Z.json \
-  --scenarios evals/runtime/scenarios.json \
+  --scenarios backend/evaluation/cases/runtime/scenarios.json \
   --framework agentevals
 ```
 
@@ -442,8 +442,8 @@ confirmation. A failed, interrupted or skipped run is not a quality score.
 ## Publishing saved observations
 
 To reproduce the public October report without new measurements, use the
-[saved-publication command and its four sanitized inputs](runtime_evaluation.md#publish-saved-observations).
-Runtime, retrieval, and judge evidence keep separate populations and identities.
+[system-publication command and its saved inputs](runtime_evaluation.md#publish-saved-system-evaluation).
+August and October system observations keep separate populations and identities; retrieval optimization experiments are reported separately.
 The tool writes descriptive files under `reports/evaluation/history/`, generates
 the publication index, and selects `latest.*` by observation date. Republishing
 an older historical scorecard cannot replace a newer report. Never hand-edit
@@ -578,7 +578,7 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --analyst-variant optimized \
   --storage-dir storage \
   --embedder-model-path models/all-MiniLM-L6-v2 \
-  --benchmark-file evals/retrieval/benchmark_cases.jsonl \
+  --benchmark-file backend/evaluation/cases/retrieval/benchmark_cases.jsonl \
   --evaluation-root data/evaluation_comparisons/optimized_analyst \
   --no-render-html
 ```

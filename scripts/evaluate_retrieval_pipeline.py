@@ -1,7 +1,7 @@
 """Run local retrieval benchmarks and debugging for Graph RAG retrieval.
 
 By default this script scores reviewed benchmark cases from
-evals/retrieval/benchmark_cases.jsonl against local production storage. Pass
+backend/evaluation/cases/retrieval/benchmark_cases.jsonl against local production storage. Pass
 --debug-default-queries to run the older exploratory query set without scoring.
 """
 
@@ -58,7 +58,14 @@ DEFAULT_RUN_ROOT = (
 DEFAULT_STORAGE_DIR = ROOT_DIR / "storage"
 DEFAULT_RAW_DATA_DIR = ROOT_DIR / "data" / "raw" / "AI Research"
 DEFAULT_EMBEDDER_DIR = ROOT_DIR / "models" / "all-MiniLM-L6-v2"
-DEFAULT_BENCHMARK_FILE = ROOT_DIR / "evals" / "retrieval" / "benchmark_cases.jsonl"
+DEFAULT_BENCHMARK_FILE = (
+    ROOT_DIR
+    / "backend"
+    / "evaluation"
+    / "cases"
+    / "retrieval"
+    / "benchmark_cases.jsonl"
+)
 
 DEFAULT_ANALYST_QUERIES = [
     "Text Classification",

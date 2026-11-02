@@ -1,295 +1,1366 @@
 {
-  "publication_id": "controlled-observations",
+  "publication_kind": "system-evaluation",
   "observation_end": "2026-10-31",
-  "runtime": {
-    "observation_dates_utc": [
-      "2026-10-30",
-      "2026-10-31"
-    ],
-    "planned": 15,
-    "completed": 12,
-    "passed": 10,
-    "failed": 2,
-    "interrupted": 3,
-    "scenario_count": 13,
-    "fingerprints": [
-      "1095d6342e69b04143ef971d",
-      "2b1301ae85cf5a5a77713187",
-      "aacdf873baacf605652888e1"
-    ],
-    "fingerprint_groups": [
-      {
-        "fingerprint": "1095d6342e69b04143ef971d",
-        "observations": 7,
-        "completed": 7
-      },
-      {
-        "fingerprint": "2b1301ae85cf5a5a77713187",
-        "observations": 2,
-        "completed": 2
-      },
-      {
-        "fingerprint": "aacdf873baacf605652888e1",
-        "observations": 6,
-        "completed": 3,
-        "interrupted": 3
-      }
-    ],
-    "inventory_sha256": "7e63ed839833b45304c00d100ffd475517cc37e2f7c7c961d32aff5ef9d5df0f",
-    "scenario_contract_sha256": "b0dfd1af372437e8c52257c70613e76130efe9721907300252b81d1bc4619f31",
-    "prompt_tree_sha256": "f2f9faf450f38376fee1340064b8ce0a6f19bcaaa1afb519cae28ebdd51e1f4b",
-    "storage_manifest_sha256": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7",
-    "details": [
-      "Failures: Mentor continuation routing/worker-step contract and RetNet contextual web-topic contract. Three interrupted observations have no runtime record or score.",
-      "Configuration: Orchestrator routing v6 / graph-index v2, Retriever v7, Researcher v6, Analyst v6 and Mentor v4. Generative roles used the variable openrouter/free route; serving identities were not always observed.",
-      "Analyst used legacy vector context; Visualizer used optimized retrieval. Document, index and graph stores were local, vector storage Pinecone, and checkpoints MongoDB.",
-      "All 12 completed runtime records lack complete token totals. Runtime attempt reservations were 45 of 54; full effort used 79 of 92, including failures and retries."
-    ]
-  },
-  "retrieval_notes": [
-    "Measured October 28–29, 2026 UTC on local prepared storage; scoring exported October 30. A is source-only, B graph-assisted, C adds local reranking, and D is the legacy pipeline with different budgets.",
-    "Graph-assisted B minus A Precision@10: −1.11 percentage points on development (27 pairs) and +0.71 on frozen (21 pairs). C minus B: −3.33 (18 pairs) and −2.14 (14 pairs).",
-    "Fresh-process CPU retrieval-call timing C minus B: +274.266 seconds development (18 pairs), +204.258 seconds frozen (14 pairs); this is not production latency.",
-    "Twenty-two of 24 planned measurements completed. Precision uses weighted relevance over ten slots; Recall requires a fully supported source. Labels are AI-assisted/user-endorsed and not independent expert ratings."
-  ],
-  "limitations": [
-    "Generated-answer correctness and completeness were not measured. The one attempted judge request returned HTTP 429; its origin and cooldown are unknown. Three further eligible assessments were unstarted.",
-    "The configured judge model and endpoint do not establish observed serving identity. Token availability was 0 of 1 attempts for input, output and total; missing is not zero.",
-    "The sample is small; source support does not establish answerability. Graph focus remains unresolved, and deployment, cloud-vector and production parity were not established."
-  ],
-  "retrieval": {
-    "schema": "retrieval-ablation-aggregate-v1",
-    "observation_dates_utc": [
-      "2026-10-28",
-      "2026-10-29"
-    ],
-    "scope": "Local real-model retrieval, fresh processes; no answer generation or current workflow measurement. Raw evidence and case text are private.",
-    "cohort_cases": {
-      "development": 9,
-      "frozen": 7
-    },
-    "arms": {
-      "A": "graph-free source retrieval with shared deterministic lexical/metadata scoring and diversification, model reranker disabled",
-      "B": "optimized graph-assisted, reranker disabled",
-      "C": "optimized graph-assisted, local reranker",
-      "D": "current legacy vector-context, existing settings"
-    },
-    "arm_cohort_metrics": {
-      "development:A": {
-        "precision_ready": 27,
-        "observations": 27,
-        "recall_ready": 21,
-        "precision_mean": 0.49444444444444446,
-        "recall_available_only_mean": 1.0
-      },
-      "development:B": {
-        "precision_ready": 27,
-        "observations": 27,
-        "recall_ready": 18,
-        "precision_mean": 0.48333333333333334,
-        "recall_available_only_mean": 1.0
-      },
-      "development:C": {
-        "precision_ready": 18,
-        "observations": 18,
-        "recall_ready": 14,
-        "precision_mean": 0.45,
-        "recall_available_only_mean": 1.0
-      },
-      "development:D": {
-        "precision_ready": 27,
-        "observations": 27,
-        "recall_ready": 15,
-        "precision_mean": 0.3666666666666667,
-        "recall_available_only_mean": 1.0
-      },
-      "frozen:A": {
-        "precision_ready": 21,
-        "observations": 21,
-        "recall_ready": 21,
-        "precision_mean": 0.33571428571428574,
-        "recall_available_only_mean": 0.8571428571428571
-      },
-      "frozen:B": {
-        "precision_ready": 21,
-        "observations": 21,
-        "recall_ready": 21,
-        "precision_mean": 0.34285714285714286,
-        "recall_available_only_mean": 0.8571428571428571
-      },
-      "frozen:C": {
-        "precision_ready": 14,
-        "observations": 14,
-        "recall_ready": 14,
-        "precision_mean": 0.3214285714285714,
-        "recall_available_only_mean": 0.7857142857142857
-      },
-      "frozen:D": {
-        "precision_ready": 21,
-        "observations": 21,
-        "recall_ready": 21,
-        "precision_mean": 0.2857142857142857,
-        "recall_available_only_mean": 1.0
+  "august": {
+    "fingerprint": "f8d6f3b6f3e0348c75a194bf",
+    "retrieval_quality": {
+      "source_run_ids": [
+        "20260822T011922Z_retrieval_887cc3ed"
+      ],
+      "case_count": 12,
+      "case_pass_rate": 0.3333333333333333,
+      "evidence_chunk_recall": 0.5638888888888889,
+      "concept_recall": 0.5353174603174603,
+      "relation_recall": 0.3611111111111111,
+      "forbidden_evidence_count": 0.0,
+      "forbidden_evidence_rate": 0.0,
+      "retrieval_adequacy_rate": 1.0,
+      "retrieval_error_rate": 0.0,
+      "dangling_edge_count": 0.0,
+      "chunk_node_count": 0.0,
+      "context_precision_at_10": 0.36875,
+      "context_recall": 0.63125,
+      "diagnostics": {
+        "concept_id_recall": 0.5353174603174603,
+        "concept_label_recall": 0.576984126984127,
+        "relation_id_recall": 0.3611111111111111,
+        "relation_spec_recall": 0.3611111111111111
       }
     },
-    "matched_comparisons": {
-      "development:B-A": {
-        "precision_pairs": 27,
-        "recall_pairs": 15,
-        "precision_mean_difference": -0.011111111111111096,
-        "recall_available_only_mean_difference": 0.0,
-        "paired_observations": 27,
-        "mean_difference_seconds": 1.721
+    "runtime_task_behavior": {
+      "source_run_ids": [
+        "20260822T012029Z_offline_479d922a",
+        "20260822T012106Z_live_cd556520",
+        "20260822T012229Z_live_81ccde39",
+        "20260822T012408Z_live_de469949",
+        "20260822T012733Z_live_b83709dd",
+        "20260822T013029Z_live_674c635e"
+      ],
+      "run_count": 27,
+      "sample_counts": {
+        "offline": 12,
+        "live": 15
       },
-      "development:C-B": {
-        "precision_pairs": 18,
-        "recall_pairs": 10,
-        "precision_mean_difference": -0.03333333333333334,
-        "recall_available_only_mean_difference": 0.0,
-        "paired_observations": 18,
-        "mean_difference_seconds": 274.266
+      "task_success_rate": 0.5925925925925926,
+      "routing_correctness": 0.6666666666666666,
+      "required_agent_compliance": 0.6538461538461539,
+      "forbidden_agent_compliance": 0.8076923076923077,
+      "path_efficiency_ratio": {
+        "count": 23,
+        "mean": 0.8840579710144927,
+        "median": 1.0,
+        "p95": 1.0
       },
-      "development:D-B": {
-        "precision_pairs": 27,
-        "recall_pairs": 12,
-        "precision_mean_difference": -0.11666666666666668,
-        "recall_available_only_mean_difference": 0.0,
-        "paired_observations": 27,
-        "mean_difference_seconds": -1.116
+      "tool_selection_correctness": 0.8148148148148148,
+      "tool_argument_validity": 0.6666666666666666,
+      "one_tool_per_worker": 1.0,
+      "retrieval_status_correctness": 0.9333333333333333,
+      "local_to_web_fallback_correctness": 0.75,
+      "source_exhaustion_correctness": 0.8571428571428571,
+      "unnecessary_web_rate": 0.2,
+      "final_response_rate": 0.8518518518518519,
+      "modality_correctness": 0.8518518518518519,
+      "termination_rate": 0.9629629629629629,
+      "graph_contract_rate": 0.8333333333333334
+    },
+    "reliability": {
+      "source_run_ids": [
+        "20260822T012029Z_offline_479d922a",
+        "20260822T012106Z_live_cd556520",
+        "20260822T012229Z_live_81ccde39",
+        "20260822T012408Z_live_de469949",
+        "20260822T012733Z_live_b83709dd",
+        "20260822T013029Z_live_674c635e"
+      ],
+      "repetition_count": 27,
+      "pass_rate": 0.5925925925925926,
+      "pass_rate_wilson_95": [
+        0.4072638305536409,
+        0.7548548662714264
+      ],
+      "route_consistency": {
+        "mean": 0.890909090909091,
+        "by_scenario": {
+          "local_transformer_answer_success": 1.0,
+          "contextual_mamba_visualization": 0.5,
+          "explicit_mamba_visualization_success": 1.0,
+          "initial_attention_quiz_route": 1.0,
+          "mentor_stuck_continuation": 1.0,
+          "researcher_structured_output_truncation_reliability": 0.8,
+          "ambiguous_eagle_without_history": 1.0,
+          "contextual_medusa_web_query": 0.5,
+          "explicit_medusa_web_fallback_success": 1.0,
+          "transformer_encoder_graph_coverage": 1.0,
+          "colbert_guidance_mode_continuation": 1.0
+        }
       },
-      "frozen:B-A": {
-        "precision_pairs": 21,
-        "recall_pairs": 21,
-        "precision_mean_difference": 0.007142857142857141,
-        "recall_available_only_mean_difference": 0.0,
-        "paired_observations": 21,
-        "mean_difference_seconds": 0.847
+      "evidence_set_jaccard_stability": {
+        "mean": 0.7867647058823529,
+        "by_scenario": {
+          "local_transformer_answer_success": 0.3333333333333333,
+          "contextual_mamba_visualization": 0.0,
+          "explicit_mamba_visualization_success": 1.0,
+          "initial_attention_quiz_route": 1.0,
+          "mentor_stuck_continuation": 0.5294117647058824,
+          "researcher_structured_output_truncation_reliability": 1.0,
+          "ambiguous_eagle_without_history": 1.0,
+          "contextual_medusa_web_query": 1.0,
+          "explicit_medusa_web_fallback_success": 1.0,
+          "transformer_encoder_graph_coverage": 0.7916666666666666,
+          "colbert_guidance_mode_continuation": 1.0
+        }
       },
-      "frozen:C-B": {
-        "precision_pairs": 14,
-        "recall_pairs": 14,
-        "precision_mean_difference": -0.021428571428571443,
-        "recall_available_only_mean_difference": -0.07142857142857142,
-        "paired_observations": 14,
-        "mean_difference_seconds": 204.258
+      "looping_rate": 0.0,
+      "output_limit_hit_rate": 0.1111111111111111,
+      "failure_type_frequency": {
+        "invalid_retriever_output": 2,
+        "model_output_truncated": 3,
+        "structured_output_parse_error": 1,
+        "sources_exhausted": 3
+      }
+    },
+    "efficiency": {
+      "source_run_ids": [
+        "20260822T012029Z_offline_479d922a",
+        "20260822T012106Z_live_cd556520",
+        "20260822T012229Z_live_81ccde39",
+        "20260822T012408Z_live_de469949",
+        "20260822T012733Z_live_b83709dd",
+        "20260822T013029Z_live_674c635e"
+      ],
+      "worker_steps": {
+        "count": 27,
+        "mean": 2.074074074074074,
+        "median": 2.0,
+        "p95": 3.0
       },
-      "frozen:D-B": {
-        "precision_pairs": 21,
-        "recall_pairs": 21,
-        "precision_mean_difference": -0.05714285714285715,
-        "recall_available_only_mean_difference": 0.14285714285714285,
-        "paired_observations": 21,
-        "mean_difference_seconds": -0.469
+      "logical_llm_calls": {
+        "count": 27,
+        "mean": 3.4444444444444446,
+        "median": 4.0,
+        "p95": 5.0
+      },
+      "provider_attempts": {
+        "count": 27,
+        "mean": 3.4444444444444446,
+        "median": 4.0,
+        "p95": 5.0
+      },
+      "retries": {
+        "count": 27,
+        "mean": 0.0,
+        "median": 0.0,
+        "p95": 0.0
+      },
+      "tavily_searches": {
+        "count": 27,
+        "mean": 0.5555555555555556,
+        "median": 1.0,
+        "p95": 1.0
+      },
+      "input_tokens": {
+        "count": 27,
+        "mean": 4791.222222222223,
+        "median": 4311.0,
+        "p95": 9464.0
+      },
+      "output_tokens": {
+        "count": 27,
+        "mean": 1901.6296296296296,
+        "median": 2095.0,
+        "p95": 4160.0
+      },
+      "total_tokens": {
+        "count": 27,
+        "mean": 6692.851851851852,
+        "median": 6502.0,
+        "p95": 13474.0
+      },
+      "latency_seconds": {
+        "count": 27,
+        "mean": 39.65725613518548,
+        "median": 40.37300694300211,
+        "p95": 79.28535074499814
+      },
+      "retry_rate": 0.0,
+      "tokens_per_successful_run": 11294.1875,
+      "gating": false
+    },
+    "optional_semantic_quality": {
+      "source_run_ids": [
+        "20260822T013434Z_judge_0e58731e",
+        "20260822T013523Z_judge_7017fb24",
+        "20260822T013547Z_judge_1a421fad"
+      ],
+      "dimensions": {
+        "claim_faithfulness": {
+          "status": "N/A",
+          "reason": "all attempted scores unavailable because judge execution failed",
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 0,
+          "error_count": 1,
+          "provider_attempted_count": 1,
+          "parser_classification_counts": {
+            "schema_validation_failure": 1
+          },
+          "confirmed_truncation_count": 0
+        },
+        "analyst_usefulness": {
+          "status": "N/A",
+          "reason": "all attempted scores unavailable because judge execution failed",
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 0,
+          "error_count": 1,
+          "provider_attempted_count": 1,
+          "parser_classification_counts": {
+            "provider_failure": 1
+          },
+          "confirmed_truncation_count": 0
+        },
+        "mentor_pedagogy": {
+          "status": "N/A",
+          "reason": "semantic prerequisites were unavailable",
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 1,
+          "error_count": 0,
+          "provider_attempted_count": 0,
+          "parser_classification_counts": {
+            "not_attempted": 1
+          },
+          "confirmed_truncation_count": 0
+        },
+        "conversational_continuity": {
+          "status": "N/A",
+          "reason": "semantic prerequisites were unavailable",
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 1,
+          "error_count": 0,
+          "provider_attempted_count": 0,
+          "parser_classification_counts": {
+            "not_attempted": 1
+          },
+          "confirmed_truncation_count": 0
+        },
+        "graph_usefulness": {
+          "status": "N/A",
+          "reason": "all attempted scores unavailable because judge execution failed",
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 0,
+          "error_count": 1,
+          "provider_attempted_count": 1,
+          "parser_classification_counts": {
+            "provider_failure": 1
+          },
+          "confirmed_truncation_count": 0
+        }
+      },
+      "analyst_usefulness [ollama/qwen3.5:cloud; runtime-semantic-v1]": {
+        "dimension": "analyst_usefulness",
+        "judge_provider": "ollama",
+        "judge_model": "qwen3.5:cloud",
+        "rubric_version": "runtime-semantic-v1",
+        "result_count": 1,
+        "successful_result_count": 0,
+        "skipped_result_count": 0,
+        "error_count": 1,
+        "provider_call_attempt_count": 1,
+        "skipped_reasons": [],
+        "status": "N/A",
+        "error_reasons": [
+          "parser=provider_failure; error_type=KeyError; cause_types=none; raw output omitted"
+        ],
+        "confirmed_truncation_count": 0,
+        "pass_rate": null,
+        "sample_count": 0
+      },
+      "claim_faithfulness [ollama/qwen3.5:cloud; runtime-semantic-v1]": {
+        "dimension": "claim_faithfulness",
+        "judge_provider": "ollama",
+        "judge_model": "qwen3.5:cloud",
+        "rubric_version": "runtime-semantic-v1",
+        "result_count": 1,
+        "successful_result_count": 0,
+        "skipped_result_count": 0,
+        "error_count": 1,
+        "provider_call_attempt_count": 1,
+        "skipped_reasons": [],
+        "status": "N/A",
+        "error_reasons": [
+          "parser=schema_validation_failure; error_type=ValidationError; cause_types=none; raw output omitted"
+        ],
+        "confirmed_truncation_count": 0,
+        "supported_claims": 0,
+        "partial_claims": 0,
+        "unsupported_claims": 0,
+        "grounded_claim_rate": null,
+        "sample_count": 0
+      },
+      "conversational_continuity [ollama/qwen3.5:cloud; runtime-semantic-v1]": {
+        "dimension": "conversational_continuity",
+        "judge_provider": "ollama",
+        "judge_model": "qwen3.5:cloud",
+        "rubric_version": "runtime-semantic-v1",
+        "result_count": 1,
+        "successful_result_count": 0,
+        "skipped_result_count": 1,
+        "error_count": 0,
+        "provider_call_attempt_count": 0,
+        "skipped_reasons": [
+          "required final worker 'mentor' was not observed; actual final worker='analyst'; judge call was not attempted"
+        ],
+        "status": "N/A",
+        "error_reasons": [],
+        "confirmed_truncation_count": 0,
+        "pass_rate": null,
+        "sample_count": 0
+      },
+      "graph_usefulness [ollama/qwen3.5:cloud; runtime-semantic-v1]": {
+        "dimension": "graph_usefulness",
+        "judge_provider": "ollama",
+        "judge_model": "qwen3.5:cloud",
+        "rubric_version": "runtime-semantic-v1",
+        "result_count": 1,
+        "successful_result_count": 0,
+        "skipped_result_count": 0,
+        "error_count": 1,
+        "provider_call_attempt_count": 1,
+        "skipped_reasons": [],
+        "status": "N/A",
+        "error_reasons": [
+          "parser=provider_failure; error_type=KeyError; cause_types=none; raw output omitted"
+        ],
+        "confirmed_truncation_count": 0,
+        "pass_rate": null,
+        "sample_count": 0
+      },
+      "mentor_pedagogy [ollama/qwen3.5:cloud; runtime-semantic-v1]": {
+        "dimension": "mentor_pedagogy",
+        "judge_provider": "ollama",
+        "judge_model": "qwen3.5:cloud",
+        "rubric_version": "runtime-semantic-v1",
+        "result_count": 1,
+        "successful_result_count": 0,
+        "skipped_result_count": 1,
+        "error_count": 0,
+        "provider_call_attempt_count": 0,
+        "skipped_reasons": [
+          "required final worker 'mentor' was not observed; actual final worker='analyst'; judge call was not attempted"
+        ],
+        "status": "N/A",
+        "error_reasons": [],
+        "confirmed_truncation_count": 0,
+        "pass_rate": null,
+        "sample_count": 0
       }
     },
     "coverage": {
-      "completed_measurements": 22,
-      "planned_measurements": 24,
-      "interrupted_measurements": 2,
-      "precision_observations": 176,
-      "recall_available": 145,
-      "recall_unavailable_development": 31,
-      "recall_unavailable_frozen": 0,
-      "matched_repetitions_independent_samples": false
-    },
-    "measurement": {
-      "timer": "CPU fresh-process retrieval-call elapsed seconds per case bundle; excludes startup, normalization, scoring",
-      "precision": "weighted relevance 1/0.5/0 over actual first ten unique sources divided by fixed 10; absent slots contribute zero",
-      "recall": "unchanged required answer points with at least one fully supported source in actual top ten; partial earns no full credit; unknown absent mappings make unsupported-in-list point unavailable",
-      "development_recall": "available observations only; missingness prevents complete-cohort comparisons",
-      "peak_memory": "not measured per case",
-      "token_metadata": "unavailable"
-    },
-    "provenance": {
-      "accepted_source_tree": "339884ef4f716dfc497033c5e3428acec3d3e50f",
-      "source_patch_sha256": "6dece11dd472b0bc48b5a51b44728fb0da241240675b76341707c4ffad856a60",
-      "snapshot_manifest_sha256": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7",
-      "embedding_model": "all-MiniLM-L6-v2",
-      "local_reranker_model": "Qwen3-Reranker-0.6B",
-      "source_candidate_k": 30,
-      "source_final_k": 6,
-      "context_max_characters": 7000,
-      "reranker_candidate_k": 10,
-      "reranker_input_max_characters": 1200,
-      "source_hashes_sha256": {
-        "accepted_scoring_summary": "89c4af956c946279c2d7298f97b9c78cd94b19d4ed3a50606965a2135681ee82",
-        "accepted_scoring_observations": "50dddce5daac2c70798dae49f9f1b8ddc270c7c2442312ddd917fbfd0307fdfb",
-        "operational_comparisons": "c23da92e032b93d6b71b9e9aa7fb88be812313ab622193451884b486e9526c90",
-        "run_inventory": "3612946908cb3c5b264b5031cae235b62e65a35798301de67d49d84a85363883",
-        "development_contract": "e9b65d365571688e079225325bc6f8e354dee0c1c667483aa661e4da9f775f60",
-        "frozen_contract": "0238baa2c9a549dd0a252f5756cf5e16408792c42a5263ace8d7107183e52c8b",
-        "annotation_handoff": "3537fdccc281ece9e6c77b586f876264603ca9d038d57191a25271d4d164bd18",
-        "score_helper_source": "51074e4ab486bfbceed9a6c26785889bcfd3e489937d19f3c5f7c8b986a99d3b"
-      },
-      "labels": "98 new required pairs AI-assisted and user-endorsed, 77 prior reviewed development pairs, eight prior approved frozen pairs, plus one later point decision; not independent expert or judge ratings",
-      "provenance_limit": "Hashes match retained artifacts; they do not establish an independent pre-execution snapshot."
-    },
-    "limitations": [
-      "No generated-answer correctness, current task success, production traffic, or production latency measured.",
-      "No statistical significance or global superiority conclusion.",
-      "Frozen SVM topic has prior exposure and unproven disambiguation; no true-miss coverage.",
-      "D uses a different pipeline and budgets; it is not a matched pre-fix B0.",
-      "Early exit and environment details are partly unreconstructable; D validity/resource counters uninstrumented.",
-      "Per-case memory peaks and provider/judge tokens unavailable."
-    ],
-    "annotation_dates_utc": [
-      "2026-10-29",
-      "2026-10-30"
-    ],
-    "scoring_export_date_utc": "2026-10-30",
-    "anonymized_container_development_example": {
-      "measure": "Completed measured observations with a full in-list witness for the case’s required point",
-      "arms": {
-        "A": {
-          "covered": 0,
-          "observed": 3
+      "complete": false,
+      "missing_requirements": [
+        "retrieval_relevance_labels"
+      ],
+      "requirements": [
+        {
+          "id": "retrieval_baseline",
+          "complete": true,
+          "observed": true,
+          "expected": "mode=both; Analyst=legacy_vector_context; Visualizer=optimized"
         },
-        "B": {
-          "covered": 0,
-          "observed": 3
+        {
+          "id": "retrieval_relevance_labels",
+          "complete": false,
+          "observed": 9,
+          "expected": "reviewed Context Precision@10 and Context Recall for every Analyst case"
         },
-        "C": {
-          "covered": 0,
-          "observed": 2
+        {
+          "id": "offline_runtime",
+          "complete": true,
+          "observed": {
+            "local_transformer_answer_success": 1,
+            "contextual_mamba_visualization": 1,
+            "explicit_mamba_visualization_success": 1,
+            "initial_attention_quiz_route": 1,
+            "mentor_stuck_continuation": 1,
+            "researcher_structured_output_truncation_reliability": 2,
+            "ambiguous_eagle_without_history": 1,
+            "contextual_medusa_web_query": 1,
+            "explicit_medusa_web_fallback_success": 1,
+            "transformer_encoder_graph_coverage": 1,
+            "colbert_guidance_mode_continuation": 1
+          },
+          "expected": {
+            "local_transformer_answer_success": 1,
+            "contextual_mamba_visualization": 1,
+            "explicit_mamba_visualization_success": 1,
+            "initial_attention_quiz_route": 1,
+            "mentor_stuck_continuation": 1,
+            "researcher_structured_output_truncation_reliability": 2,
+            "ambiguous_eagle_without_history": 1,
+            "contextual_medusa_web_query": 1,
+            "explicit_medusa_web_fallback_success": 1,
+            "transformer_encoder_graph_coverage": 1,
+            "colbert_guidance_mode_continuation": 1
+          }
         },
-        "D": {
-          "covered": 3,
-          "observed": 3
+        {
+          "id": "reviewed_live_suite",
+          "complete": true,
+          "observed": {
+            "local_transformer_answer_success": 1,
+            "contextual_mamba_visualization": 1,
+            "explicit_mamba_visualization_success": 1,
+            "initial_attention_quiz_route": 1,
+            "mentor_stuck_continuation": 1,
+            "transformer_encoder_graph_coverage": 1,
+            "contextual_medusa_web_query": 1,
+            "colbert_guidance_mode_continuation": 1,
+            "out_of_scope_biological_cats": 1,
+            "ambiguous_eagle_without_history": 1,
+            "explicit_medusa_web_fallback_success": 1,
+            "in_scope_retnet_local_miss_fallback": 1,
+            "researcher_structured_output_truncation_reliability": 3
+          },
+          "expected": {
+            "local_transformer_answer_success": 1,
+            "contextual_mamba_visualization": 1,
+            "explicit_mamba_visualization_success": 1,
+            "initial_attention_quiz_route": 1,
+            "mentor_stuck_continuation": 1,
+            "researcher_structured_output_truncation_reliability": 3,
+            "ambiguous_eagle_without_history": 1,
+            "contextual_medusa_web_query": 1,
+            "explicit_medusa_web_fallback_success": 1,
+            "transformer_encoder_graph_coverage": 1,
+            "colbert_guidance_mode_continuation": 1,
+            "out_of_scope_biological_cats": 1,
+            "in_scope_retnet_local_miss_fallback": 1
+          }
+        },
+        {
+          "id": "semantic_dimensions",
+          "complete": true,
+          "observed": {
+            "claim_faithfulness": {
+              "result_count": 1,
+              "successful_count": 0,
+              "skipped_count": 0,
+              "error_count": 1,
+              "provider_attempted_count": 1,
+              "accounted": true
+            },
+            "analyst_usefulness": {
+              "result_count": 1,
+              "successful_count": 0,
+              "skipped_count": 0,
+              "error_count": 1,
+              "provider_attempted_count": 1,
+              "accounted": true
+            },
+            "mentor_pedagogy": {
+              "result_count": 1,
+              "successful_count": 0,
+              "skipped_count": 1,
+              "error_count": 0,
+              "provider_attempted_count": 0,
+              "accounted": true
+            },
+            "conversational_continuity": {
+              "result_count": 1,
+              "successful_count": 0,
+              "skipped_count": 1,
+              "error_count": 0,
+              "provider_attempted_count": 0,
+              "accounted": true
+            },
+            "graph_usefulness": {
+              "result_count": 1,
+              "successful_count": 0,
+              "skipped_count": 0,
+              "error_count": 1,
+              "provider_attempted_count": 1,
+              "accounted": true
+            }
+          },
+          "expected": [
+            "claim_faithfulness",
+            "analyst_usefulness",
+            "mentor_pedagogy",
+            "conversational_continuity",
+            "graph_usefulness"
+          ]
+        },
+        {
+          "id": "agentevals_when_requested",
+          "complete": true,
+          "observed": 12,
+          "expected": "results required only when --framework agentevals was requested"
+        },
+        {
+          "id": "invocation_and_configuration_provenance",
+          "complete": true,
+          "observed": 10,
+          "expected": "every contributing run has invocation and configuration snapshots"
+        }
+      ],
+      "semantic_dimension_coverage": {
+        "claim_faithfulness": {
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 0,
+          "error_count": 1,
+          "provider_attempted_count": 1,
+          "accounted": true
+        },
+        "analyst_usefulness": {
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 0,
+          "error_count": 1,
+          "provider_attempted_count": 1,
+          "accounted": true
+        },
+        "mentor_pedagogy": {
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 1,
+          "error_count": 0,
+          "provider_attempted_count": 0,
+          "accounted": true
+        },
+        "conversational_continuity": {
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 1,
+          "error_count": 0,
+          "provider_attempted_count": 0,
+          "accounted": true
+        },
+        "graph_usefulness": {
+          "result_count": 1,
+          "successful_count": 0,
+          "skipped_count": 0,
+          "error_count": 1,
+          "provider_attempted_count": 1,
+          "accounted": true
         }
       },
-      "source": "Derived from the accepted scoring observations identified by the observations hash in provenance; no passage or question is included."
+      "offline_sample_count": 12,
+      "live_sample_count": 15,
+      "agentevals_requested": true,
+      "agentevals_result_count": 12
+    },
+    "mode_breakdown": {
+      "offline": {
+        "sample_count": 12,
+        "passed_count": 6,
+        "failed_count": 6,
+        "failure_type_frequency": {
+          "invalid_retriever_output": 2,
+          "model_output_truncated": 3,
+          "structured_output_parse_error": 1,
+          "sources_exhausted": 2
+        }
+      },
+      "live": {
+        "sample_count": 15,
+        "passed_count": 10,
+        "failed_count": 5,
+        "failure_type_frequency": {
+          "sources_exhausted": 1
+        }
+      }
+    },
+    "live_configuration": {
+      "roles": {
+        "orchestrator": {
+          "model_name": "nemotron-3-super:cloud",
+          "provider": "ollama",
+          "prompt_version": {
+            "graph_index": "v2",
+            "routing": "v5"
+          }
+        },
+        "retriever": {
+          "model_name": "nemotron-3-super:cloud",
+          "provider": "ollama",
+          "prompt_version": "v6"
+        },
+        "researcher": {
+          "prompt_version": "v5"
+        },
+        "analyst": {
+          "model_name": "qwen3.5:cloud",
+          "provider": "ollama",
+          "prompt_version": "v6"
+        },
+        "mentor": {
+          "model_name": "nemotron-3-super:cloud",
+          "provider": "ollama",
+          "prompt_version": "v4"
+        }
+      },
+      "analyst_retrieval_mode": "legacy_vector_context",
+      "visualizer_retrieval_mode": "optimized"
     }
   },
-  "judge": {
-    "schema": "fixed-judge-pilot-status-v1",
-    "scope": "Sanitized partial-pilot operational status derived from the preserved failed invocation; not a generated scorecard or publication manifest.",
-    "eligible_inputs": 4,
-    "logical_attempted": 1,
-    "successful_scored": 0,
-    "error_http_429": 1,
-    "unstarted": 3,
-    "skipped": 0,
-    "uncertain_dispatch": 0,
-    "judge_attempts": 1,
-    "judge_attempts_unspent": 4,
-    "shared_retry_attempts": 0,
-    "judge_score": null,
-    "judge_token_observed_attempts": {
-      "input": 0,
-      "output": 0,
-      "total": 0
+  "october": {
+    "runtime": {
+      "observation_dates_utc": [
+        "2026-10-30",
+        "2026-10-31"
+      ],
+      "planned": 15,
+      "completed": 12,
+      "passed": 10,
+      "failed": 2,
+      "interrupted": 3,
+      "scenario_count": 13,
+      "fingerprints": [
+        "1095d6342e69b04143ef971d",
+        "2b1301ae85cf5a5a77713187",
+        "aacdf873baacf605652888e1"
+      ],
+      "fingerprint_groups": [
+        {
+          "fingerprint": "1095d6342e69b04143ef971d",
+          "observations": 7,
+          "completed": 7
+        },
+        {
+          "fingerprint": "2b1301ae85cf5a5a77713187",
+          "observations": 2,
+          "completed": 2
+        },
+        {
+          "fingerprint": "aacdf873baacf605652888e1",
+          "observations": 6,
+          "completed": 3,
+          "interrupted": 3
+        }
+      ],
+      "inventory_sha256": "7e63ed839833b45304c00d100ffd475517cc37e2f7c7c961d32aff5ef9d5df0f",
+      "scenario_contract_sha256": "b0dfd1af372437e8c52257c70613e76130efe9721907300252b81d1bc4619f31",
+      "prompt_tree_sha256": "f2f9faf450f38376fee1340064b8ce0a6f19bcaaa1afb519cae28ebdd51e1f4b",
+      "storage_manifest_sha256": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7",
+      "details": [
+        "Failures: Mentor continuation routing/worker-step contract and RetNet contextual web-topic contract. Three interrupted observations have no runtime record or score.",
+        "Configuration: Orchestrator routing v6 / graph-index v2, Retriever v7, Researcher v6, Analyst v6 and Mentor v4. Generative roles used the variable openrouter/free route; serving identities were not always observed.",
+        "Analyst used legacy vector context; Visualizer used optimized retrieval. Document, index and graph stores were local, vector storage Pinecone, and checkpoints MongoDB.",
+        "All 12 completed runtime records lack complete token totals. Runtime attempt reservations were 45 of 54; full effort used 79 of 92, including failures and retries."
+      ]
     },
-    "judge_token_attempt_denominator": 1,
-    "judge_token_subtotals": null,
-    "observed_serving_identity": null,
-    "serving_identity_observed_attempts": 0,
-    "configured_judge_model": "xingchen-agi/xing4.0-29b-a4b:free",
-    "configured_endpoint": "Phala only, no fallback",
-    "cause": "HTTP 429 observed; response body and rate-limit headers were not retained, so origin and cooldown are unknown.",
-    "source_stop_freeze_sha256": "a5aaea3904a6966d45eb6548ad6d7782219d23cb1415a858d47ea21ccc041561",
-    "source_v3_freeze_sha256": "e8b2726d7c1f9d3d58ac13604da8457fd7e489dddbb51df161837a477c47bec2",
-    "evaluator_fingerprint": "e3545f82672e7197c6e567f2",
-    "limitations": "No scores or matched judge comparison; no inference from configured to observed serving identity."
-  },
-  "source_report": true
+    "groups": {
+      "2b1301ae85cf5a5a77713187": {
+        "scored": 2,
+        "reliability": {
+          "loop_detected": {
+            "observed": 2,
+            "count": 0
+          },
+          "output_limit_hit": {
+            "observed": 2,
+            "count": 0
+          }
+        },
+        "passed": 2,
+        "checks": {
+          "answer.final_response_present": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "budget.latency_seconds": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "budget.logical_llm_calls": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "budget.provider_attempts": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "budget.retries": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "budget.tavily_searches": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "budget.total_tokens": {
+            "passed": 0,
+            "eligible": 0,
+            "not_observed": 2
+          },
+          "budget.worker_steps": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "fallback.sources_exhausted": {
+            "passed": 1,
+            "eligible": 1,
+            "not_observed": 0
+          },
+          "modality.requested_modality": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "reliability.forbidden_failures": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "routing.basic_loop_detector": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "routing.forbidden_agents": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "routing.required_agents": {
+            "passed": 1,
+            "eligible": 1,
+            "not_observed": 0
+          },
+          "routing.worker_sequence": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "scope.request_scope": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "termination.terminated": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "tools.forbidden_tools": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "tools.one_tool_per_worker": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          }
+        },
+        "recorded_rates": {
+          "source_run_ids": [],
+          "run_count": 2,
+          "sample_counts": {
+            "offline": 0,
+            "live": 2
+          },
+          "task_success_rate": 1.0,
+          "routing_correctness": 1.0,
+          "required_agent_compliance": 1.0,
+          "forbidden_agent_compliance": 1.0,
+          "path_efficiency_ratio": {
+            "count": 2,
+            "mean": 1.0,
+            "median": 1.0,
+            "p95": 1.0
+          },
+          "tool_selection_correctness": 1.0,
+          "tool_argument_validity": null,
+          "one_tool_per_worker": 1.0,
+          "retrieval_status_correctness": null,
+          "local_to_web_fallback_correctness": null,
+          "source_exhaustion_correctness": 1.0,
+          "unnecessary_web_rate": 0.0,
+          "final_response_rate": 1.0,
+          "modality_correctness": 1.0,
+          "termination_rate": 1.0,
+          "graph_contract_rate": null
+        },
+        "failure_types": {},
+        "efficiency": {
+          "worker_steps": {
+            "available": 2,
+            "mean": 0.5,
+            "median": 0.5,
+            "p95": 1.0
+          },
+          "logical_llm_calls": {
+            "available": 2,
+            "mean": 1.5,
+            "median": 1.5,
+            "p95": 2.0
+          },
+          "provider_attempts": {
+            "available": 2,
+            "mean": 1.5,
+            "median": 1.5,
+            "p95": 2.0
+          },
+          "retries": {
+            "available": 2,
+            "mean": 0.0,
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "tavily_searches": {
+            "available": 2,
+            "mean": 0.0,
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "latency_seconds": {
+            "available": 2,
+            "mean": 6.172059437498319,
+            "median": 6.172059437498319,
+            "p95": 8.558367874997202
+          },
+          "input_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          },
+          "output_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          },
+          "total_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          }
+        }
+      },
+      "1095d6342e69b04143ef971d": {
+        "scored": 7,
+        "reliability": {
+          "loop_detected": {
+            "observed": 7,
+            "count": 0
+          },
+          "output_limit_hit": {
+            "observed": 7,
+            "count": 0
+          }
+        },
+        "passed": 6,
+        "checks": {
+          "answer.final_response_present": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "budget.latency_seconds": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "budget.logical_llm_calls": {
+            "passed": 6,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "budget.provider_attempts": {
+            "passed": 5,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "budget.retries": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "budget.tavily_searches": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "budget.total_tokens": {
+            "passed": 0,
+            "eligible": 0,
+            "not_observed": 7
+          },
+          "budget.worker_steps": {
+            "passed": 6,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "fallback.sources_exhausted": {
+            "passed": 5,
+            "eligible": 5,
+            "not_observed": 0
+          },
+          "graph.artifact_present": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "graph.edge_count_max": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "graph.edge_count_min": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "graph.no_dangling_edges": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "graph.node_count_max": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "graph.node_count_min": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "graph.required_nodes": {
+            "passed": 1,
+            "eligible": 1,
+            "not_observed": 0
+          },
+          "modality.requested_modality": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "reliability.forbidden_failures": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "retrieval.retrieval_outcome": {
+            "passed": 4,
+            "eligible": 4,
+            "not_observed": 0
+          },
+          "retrieval.retrieval_status": {
+            "passed": 5,
+            "eligible": 5,
+            "not_observed": 0
+          },
+          "routing.basic_loop_detector": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "routing.forbidden_agents": {
+            "passed": 6,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "routing.required_agents": {
+            "passed": 6,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "routing.worker_sequence": {
+            "passed": 6,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "scope.request_scope": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "termination.terminated": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "tools.deep_web_research.topic": {
+            "passed": 1,
+            "eligible": 1,
+            "not_observed": 0
+          },
+          "tools.forbidden_tools": {
+            "passed": 6,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "tools.get_subgraphs_to_visualize.queries": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "tools.one_tool_per_worker": {
+            "passed": 7,
+            "eligible": 7,
+            "not_observed": 0
+          },
+          "tools.required_tools": {
+            "passed": 5,
+            "eligible": 5,
+            "not_observed": 0
+          }
+        },
+        "recorded_rates": {
+          "source_run_ids": [],
+          "run_count": 7,
+          "sample_counts": {
+            "offline": 0,
+            "live": 7
+          },
+          "task_success_rate": 0.8571428571428571,
+          "routing_correctness": 0.8571428571428571,
+          "required_agent_compliance": 0.8571428571428571,
+          "forbidden_agent_compliance": 0.8571428571428571,
+          "path_efficiency_ratio": {
+            "count": 7,
+            "mean": 0.9285714285714286,
+            "median": 1.0,
+            "p95": 1.0
+          },
+          "tool_selection_correctness": 0.8571428571428571,
+          "tool_argument_validity": 1.0,
+          "one_tool_per_worker": 1.0,
+          "retrieval_status_correctness": 1.0,
+          "local_to_web_fallback_correctness": 1.0,
+          "source_exhaustion_correctness": 1.0,
+          "unnecessary_web_rate": 0.0,
+          "final_response_rate": 1.0,
+          "modality_correctness": 1.0,
+          "termination_rate": 1.0,
+          "graph_contract_rate": 1.0
+        },
+        "failure_types": {},
+        "efficiency": {
+          "worker_steps": {
+            "available": 7,
+            "mean": 2.0,
+            "median": 2.0,
+            "p95": 3.0
+          },
+          "logical_llm_calls": {
+            "available": 7,
+            "mean": 2.7142857142857144,
+            "median": 2.0,
+            "p95": 5.0
+          },
+          "provider_attempts": {
+            "available": 7,
+            "mean": 2.857142857142857,
+            "median": 2.0,
+            "p95": 5.0
+          },
+          "retries": {
+            "available": 7,
+            "mean": 0.14285714285714285,
+            "median": 0.0,
+            "p95": 1.0
+          },
+          "tavily_searches": {
+            "available": 7,
+            "mean": 0.14285714285714285,
+            "median": 0.0,
+            "p95": 1.0
+          },
+          "latency_seconds": {
+            "available": 7,
+            "mean": 30.79147684371414,
+            "median": 19.092342517998986,
+            "p95": 72.50487966700166
+          },
+          "input_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          },
+          "output_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          },
+          "total_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          }
+        }
+      },
+      "aacdf873baacf605652888e1": {
+        "scored": 3,
+        "reliability": {
+          "loop_detected": {
+            "observed": 3,
+            "count": 0
+          },
+          "output_limit_hit": {
+            "observed": 3,
+            "count": 0
+          }
+        },
+        "passed": 2,
+        "checks": {
+          "answer.final_response_present": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "budget.latency_seconds": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "budget.logical_llm_calls": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "budget.provider_attempts": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "budget.retries": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "budget.tavily_searches": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "budget.total_tokens": {
+            "passed": 0,
+            "eligible": 0,
+            "not_observed": 3
+          },
+          "budget.worker_steps": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "fallback.sources_exhausted": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "modality.requested_modality": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "reliability.forbidden_failures": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "retrieval.retrieval_status": {
+            "passed": 1,
+            "eligible": 1,
+            "not_observed": 0
+          },
+          "routing.basic_loop_detector": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "routing.forbidden_agents": {
+            "passed": 2,
+            "eligible": 2,
+            "not_observed": 0
+          },
+          "routing.required_agents": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "routing.worker_sequence": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "scope.request_scope": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "termination.terminated": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "tools.deep_web_research.topic": {
+            "passed": 2,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "tools.forbidden_tools": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "tools.one_tool_per_worker": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "tools.required_tools": {
+            "passed": 3,
+            "eligible": 3,
+            "not_observed": 0
+          },
+          "tools.search_knowledge_base.queries": {
+            "passed": 1,
+            "eligible": 1,
+            "not_observed": 0
+          },
+          "tools.search_knowledge_base.required_topics": {
+            "passed": 1,
+            "eligible": 1,
+            "not_observed": 0
+          }
+        },
+        "recorded_rates": {
+          "source_run_ids": [],
+          "run_count": 3,
+          "sample_counts": {
+            "offline": 0,
+            "live": 3
+          },
+          "task_success_rate": 0.6666666666666666,
+          "routing_correctness": 1.0,
+          "required_agent_compliance": 1.0,
+          "forbidden_agent_compliance": 1.0,
+          "path_efficiency_ratio": {
+            "count": 3,
+            "mean": 1.0,
+            "median": 1.0,
+            "p95": 1.0
+          },
+          "tool_selection_correctness": 1.0,
+          "tool_argument_validity": 0.6666666666666666,
+          "one_tool_per_worker": 1.0,
+          "retrieval_status_correctness": 1.0,
+          "local_to_web_fallback_correctness": 1.0,
+          "source_exhaustion_correctness": 1.0,
+          "unnecessary_web_rate": null,
+          "final_response_rate": 1.0,
+          "modality_correctness": 1.0,
+          "termination_rate": 1.0,
+          "graph_contract_rate": null
+        },
+        "failure_types": {},
+        "efficiency": {
+          "worker_steps": {
+            "available": 3,
+            "mean": 2.3333333333333335,
+            "median": 2.0,
+            "p95": 3.0
+          },
+          "logical_llm_calls": {
+            "available": 3,
+            "mean": 4.333333333333333,
+            "median": 4.0,
+            "p95": 5.0
+          },
+          "provider_attempts": {
+            "available": 3,
+            "mean": 4.666666666666667,
+            "median": 4.0,
+            "p95": 6.0
+          },
+          "retries": {
+            "available": 3,
+            "mean": 0.3333333333333333,
+            "median": 0.0,
+            "p95": 1.0
+          },
+          "tavily_searches": {
+            "available": 3,
+            "mean": 1.0,
+            "median": 1.0,
+            "p95": 1.0
+          },
+          "latency_seconds": {
+            "available": 3,
+            "mean": 69.76429356666631,
+            "median": 73.35638816199935,
+            "p95": 97.65926741500152
+          },
+          "input_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          },
+          "output_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          },
+          "total_tokens": {
+            "available": 0,
+            "mean": null,
+            "median": null,
+            "p95": null
+          }
+        }
+      }
+    },
+    "judge": {
+      "schema": "fixed-judge-pilot-status-v1",
+      "scope": "Sanitized partial-pilot operational status derived from the preserved failed invocation; not a generated scorecard or publication manifest.",
+      "eligible_inputs": 4,
+      "logical_attempted": 1,
+      "successful_scored": 0,
+      "error_http_429": 1,
+      "unstarted": 3,
+      "skipped": 0,
+      "uncertain_dispatch": 0,
+      "judge_attempts": 1,
+      "judge_attempts_unspent": 4,
+      "shared_retry_attempts": 0,
+      "judge_score": null,
+      "judge_token_observed_attempts": {
+        "input": 0,
+        "output": 0,
+        "total": 0
+      },
+      "judge_token_attempt_denominator": 1,
+      "judge_token_subtotals": null,
+      "observed_serving_identity": null,
+      "serving_identity_observed_attempts": 0,
+      "configured_judge_model": "xingchen-agi/xing4.0-29b-a4b:free",
+      "configured_endpoint": "Phala only, no fallback",
+      "cause": "HTTP 429 observed; response body and rate-limit headers were not retained, so origin and cooldown are unknown.",
+      "source_stop_freeze_sha256": "a5aaea3904a6966d45eb6548ad6d7782219d23cb1415a858d47ea21ccc041561",
+      "source_v3_freeze_sha256": "e8b2726d7c1f9d3d58ac13604da8457fd7e489dddbb51df161837a477c47bec2",
+      "evaluator_fingerprint": "e3545f82672e7197c6e567f2",
+      "limitations": "No scores or matched judge comparison; no inference from configured to observed serving identity."
+    }
+  }
 }
