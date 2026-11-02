@@ -92,7 +92,7 @@ class FakeLLM:
         self.bound_tools = tools
         return self
 
-    def with_structured_output(self, schema) -> "FakeLLM":
+    def with_structured_output(self, schema, **kwargs) -> "FakeLLM":
         self.structured_schema = schema
         return self
 
@@ -181,7 +181,11 @@ def test_out_of_scope_decision_overrides_model_route() -> None:
 
     result = asyncio.run(workflow.orchestrator_node(state))
 
-    assert result == {"next_step": "__end__", "request_scope": "out_of_scope"}
+    assert result == {
+        "next_step": "__end__",
+        "request_scope": "out_of_scope",
+        "routing_validated": True,
+    }
     workflow.call_model.assert_awaited_once()
 
 
@@ -305,6 +309,7 @@ def test_adequate_local_graph_trajectory_reaches_analyst() -> None:
                         "name": "search_knowledge_base",
                         "args": {
                             "queries": ["RetNet"],
+                            "topic_policy": "named",
                             "required_topics": [["RetNet"]],
                         },
                         "id": "retrieve-1",
@@ -354,7 +359,11 @@ def test_topic_mismatch_graph_trajectory_uses_web_and_five_logical_calls() -> No
                 tool_calls=[
                     {
                         "name": "search_knowledge_base",
-                        "args": {"queries": ["RetNet"]},
+                        "args": {
+                            "queries": ["RetNet"],
+                            "topic_policy": "named",
+                            "required_topics": [["RetNet"]],
+                        },
                         "id": "retrieve-1",
                         "type": "tool_call",
                     }
@@ -431,7 +440,11 @@ def test_web_no_relevant_info_graph_trajectory_never_invokes_analyst() -> None:
                 tool_calls=[
                     {
                         "name": "search_knowledge_base",
-                        "args": {"queries": ["EAGLT"]},
+                        "args": {
+                            "queries": ["EAGLT"],
+                            "topic_policy": "named",
+                            "required_topics": [["EAGLT"]],
+                        },
                         "id": "retrieve-1",
                         "type": "tool_call",
                     }
@@ -508,7 +521,10 @@ def test_kb_search_tool_can_use_optimized_analyst_pipeline() -> None:
     ):
         tool = workflow._build_kb_search_tool()
 
-    assert tool.invoke({"queries": ["BERT"]}) == "optimized analyst: BERT"
+    assert (
+        tool.invoke({"queries": ["BERT"], "topic_policy": "broad"})
+        == "optimized analyst: BERT"
+    )
     assert indexer.get_retriever_calls == []
 
 
@@ -523,7 +539,7 @@ def test_kb_search_tool_can_use_legacy_vector_context_retriever() -> None:
     workflow = make_workflow(indexer)
 
     tool = workflow._build_kb_search_tool()
-    output = tool.invoke({"queries": ["BERT"]})
+    output = tool.invoke({"queries": ["BERT"], "topic_policy": "broad"})
 
     assert "legacy source text" in output
     assert indexer.get_retriever_calls == [settings.retriever_params]

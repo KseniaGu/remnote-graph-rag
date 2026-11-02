@@ -1,0 +1,40 @@
+{
+  "publication_id": "controlled-observations",
+  "observation_end": "2026-10-31",
+  "runtime": {
+    "observation_dates_utc": ["2026-10-30", "2026-10-31"],
+    "planned": 15,
+    "completed": 12,
+    "passed": 10,
+    "failed": 2,
+    "interrupted": 3,
+    "scenario_count": 13,
+    "fingerprints": ["1095d6342e69b04143ef971d", "2b1301ae85cf5a5a77713187", "aacdf873baacf605652888e1"],
+    "fingerprint_groups": [
+      {"fingerprint": "1095d6342e69b04143ef971d", "observations": 7, "completed": 7},
+      {"fingerprint": "2b1301ae85cf5a5a77713187", "observations": 2, "completed": 2},
+      {"fingerprint": "aacdf873baacf605652888e1", "observations": 6, "completed": 3, "interrupted": 3}
+    ],
+    "inventory_sha256": "7e63ed839833b45304c00d100ffd475517cc37e2f7c7c961d32aff5ef9d5df0f",
+    "scenario_contract_sha256": "b0dfd1af372437e8c52257c70613e76130efe9721907300252b81d1bc4619f31",
+    "prompt_tree_sha256": "f2f9faf450f38376fee1340064b8ce0a6f19bcaaa1afb519cae28ebdd51e1f4b",
+    "storage_manifest_sha256": "48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7",
+    "details": [
+      "Failures: Mentor continuation routing/worker-step contract and RetNet contextual web-topic contract. Three interrupted observations have no runtime record or score.",
+      "Configuration: Orchestrator routing v6 / graph-index v2, Retriever v7, Researcher v6, Analyst v6 and Mentor v4. Generative roles used the variable openrouter/free route; serving identities were not always observed.",
+      "Analyst used legacy vector context; Visualizer used optimized retrieval. Document, index and graph stores were local, vector storage Pinecone, and checkpoints MongoDB.",
+      "All 12 completed runtime records lack complete token totals. Runtime attempt reservations were 45 of 54; full effort used 79 of 92, including failures and retries."
+    ]
+  },
+  "retrieval_notes": [
+    "Measured October 28–29, 2026 UTC on local prepared storage; scoring exported October 30. A is source-only, B graph-assisted, C adds local reranking, and D is the legacy pipeline with different budgets.",
+    "Graph-assisted B minus A Precision@10: −1.11 percentage points on development (27 pairs) and +0.71 on frozen (21 pairs). C minus B: −3.33 (18 pairs) and −2.14 (14 pairs).",
+    "Fresh-process CPU retrieval-call timing C minus B: +274.266 seconds development (18 pairs), +204.258 seconds frozen (14 pairs); this is not production latency.",
+    "Twenty-two of 24 planned measurements completed. Precision uses weighted relevance over ten slots; Recall requires a fully supported source. Labels are AI-assisted/user-endorsed and not independent expert ratings."
+  ],
+  "limitations": [
+    "Generated-answer correctness and completeness were not measured. The one attempted judge request returned HTTP 429; its origin and cooldown are unknown. Three further eligible assessments were unstarted.",
+    "The configured judge model and endpoint do not establish observed serving identity. Token availability was 0 of 1 attempts for input, output and total; missing is not zero.",
+    "The sample is small; source support does not establish answerability. Graph focus remains unresolved, and deployment, cloud-vector and production parity were not established."
+  ]
+}

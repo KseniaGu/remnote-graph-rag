@@ -112,6 +112,14 @@ class ReflexLearnerWorkflow:
                 langchain_messages.append(AIMessage(content=msg["content"]))
         return langchain_messages
 
+    @staticmethod
+    def _current_turn_messages(messages: list) -> list:
+        """Select messages after the latest user input, or a node's message delta."""
+        for index in range(len(messages) - 1, -1, -1):
+            if getattr(messages[index], "type", None) == "human":
+                return messages[index + 1 :]
+        return messages
+
     async def process_message(
         self,
         user_message: str,
@@ -148,6 +156,7 @@ class ReflexLearnerWorkflow:
             "messages": messages,
             "session_summary": session_summary,
             "request_scope": "unclassified",
+            "routing_validated": False,
             "retrieval_status": "not_run",
             "retriever_empty": False,
             "sources_exhausted": False,
@@ -178,7 +187,7 @@ class ReflexLearnerWorkflow:
 
                 # Extract and yield agent responses
                 result_messages = result.get("messages", [])
-                for msg in result_messages:
+                for msg in self._current_turn_messages(result_messages):
                     if (
                         hasattr(msg, "content")
                         and hasattr(msg, "type")
@@ -254,6 +263,7 @@ class ReflexLearnerWorkflow:
             "messages": messages,
             "session_summary": session_summary,
             "request_scope": "unclassified",
+            "routing_validated": False,
             "retrieval_status": "not_run",
             "retriever_empty": False,
             "sources_exhausted": False,
@@ -295,7 +305,7 @@ class ReflexLearnerWorkflow:
 
                 result_messages = final_state.get("messages", [])
                 if isinstance(result_messages, list):
-                    for msg in result_messages:
+                    for msg in self._current_turn_messages(result_messages):
                         if (
                             hasattr(msg, "content")
                             and hasattr(msg, "type")
@@ -375,6 +385,7 @@ class ReflexLearnerWorkflow:
             "messages": messages,
             "session_summary": session_summary,
             "request_scope": "unclassified",
+            "routing_validated": False,
             "retrieval_status": "not_run",
             "retriever_empty": False,
             "sources_exhausted": False,
@@ -463,7 +474,7 @@ class ReflexLearnerWorkflow:
             else:
                 result_messages = final_state.get("messages", [])
                 if isinstance(result_messages, list):
-                    for msg in result_messages:
+                    for msg in self._current_turn_messages(result_messages):
                         if (
                             hasattr(msg, "content")
                             and hasattr(msg, "type")

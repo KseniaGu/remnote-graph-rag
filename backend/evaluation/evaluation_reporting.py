@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 import statistics
 import subprocess
@@ -24,8 +25,8 @@ RUNTIME_RUN_KINDS = {"offline", "live"}
 HASHED_RELATIVE_PATHS = (
     "pyproject.toml",
     "uv.lock",
-    "evals/runtime/scenarios.json",
-    "evals/retrieval/benchmark_cases.jsonl",
+    "backend/evaluation/cases/runtime/scenarios.json",
+    "backend/evaluation/cases/retrieval/benchmark_cases.jsonl",
     "scripts/evaluate_runtime_workflow.py",
     "scripts/evaluate_retrieval_pipeline.py",
     "scripts/build_evaluation_report.py",
@@ -101,8 +102,8 @@ SCORECARD_METRIC_DEFINITIONS = {
         "provider_attempts": "Distribution of actual provider attempts, including retries.",
         "retries/retry_rate": "Retry counts and total retries divided by total provider attempts.",
         "tavily_searches": "Distribution of Tavily tool calls per run.",
-        "input/output/total_tokens": "Provider-reported token distributions; unavailable observations are omitted, not zero-filled.",
-        "tokens_per_successful_run": "Total tokens across evaluated runs divided by functionally successful runs; N/A when none succeed.",
+        "input/output/total_tokens": "event_unique_v1 complete-run token distributions with field-specific attempt and run coverage; partial observed subtotals are separate.",
+        "tokens_per_successful_run": "Complete runtime token total divided by successful runs, only when every eligible run has complete token coverage; otherwise N/A.",
         "latency_seconds": "End-to-end time-to-resolution distribution with mean, median, and p95.",
         "gating": "False means efficiency limits are reported but do not initially fail functional task success.",
     },
@@ -367,18 +368,31 @@ def publish_evaluation_report(
     history_dir.mkdir(parents=True, exist_ok=True)
     reports_root.mkdir(parents=True, exist_ok=True)
 
-    shutil.copyfile(source_dir / "scorecard.md", history_dir / "scorecard.md")
-    shutil.copyfile(source_dir / "scorecard.json", history_dir / "scorecard.json")
-    shutil.copyfile(source_dir / "scorecard.md", reports_root / "latest.md")
-    shutil.copyfile(source_dir / "scorecard.json", reports_root / "latest.json")
-
-    provenance = _publication_provenance(
-        evaluation_root,
-        scorecard,
-        snapshot_name=snapshot_name,
-    )
-    _write_json(history_dir / "provenance.json", provenance)
-    _write_json(reports_root / "latest_provenance.json", provenance)
+    existing_json = history_dir / "scorecard.json"
+    if existing_json.exists():
+        previous = _read_json(existing_json)
+        if {k: v for k, v in previous.items() if k != "generated_at"} != {
+            k: v for k, v in scorecard.items() if k != "generated_at"
+        }:
+            snapshot_name += (
+                "_"
+                + _hash_json(
+                    {k: v for k, v in scorecard.items() if k != "generated_at"}
+                )[:12]
+            )
+            history_dir = reports_root / "history" / snapshot_name
+            history_dir.mkdir(parents=True, exist_ok=True)
+    if not (history_dir / "provenance.json").exists():
+        shutil.copyfile(source_dir / "scorecard.md", history_dir / "scorecard.md")
+        shutil.copyfile(source_dir / "scorecard.json", history_dir / "scorecard.json")
+        provenance = _publication_provenance(
+            evaluation_root, scorecard, snapshot_name=snapshot_name
+        )
+        provenance["observation_end"] = (
+            max(created_dates).date().isoformat() if created_dates else snapshot_date
+        )
+        _write_json(history_dir / "provenance.json", provenance)
+    _refresh_publication_aliases(reports_root)
     _write_publication_index(reports_root)
     return {
         "fingerprint": selected_fingerprint,
@@ -412,43 +426,68 @@ def _build_scorecard(
     selected: list[dict[str, Any]],
 ) -> dict[str, Any]:
     retrieval_rows: list[dict[str, Any]] = []
+    retrieval_arms = {
+        (
+            (item.get("invocation") or {}).get("analyst_variant", "config"),
+            (item.get("invocation") or {}).get("analyst_reranker_mode", "config"),
+        )
+        for item in selected
+        if item.get("run_kind") == "retrieval"
+    }
+    mixed_retrieval_arms = len(retrieval_arms) > 1
     runtime_rows: list[dict[str, Any]] = []
     runtime_records: list[dict[str, Any]] = []
     judge_rows: list[dict[str, Any]] = []
     framework_rows: list[dict[str, Any]] = []
+    incomplete_runtime_artifacts = 0
+    incomplete_judge_artifacts = 0
 
     for manifest in selected:
         run_dir = Path(str(manifest["_run_dir"]))
         kind = manifest.get("run_kind")
         run_id = str(manifest.get("run_id"))
         if kind == "retrieval":
-            retrieval_rows.extend(
-                _tag_source_run(
-                    _read_jsonl(run_dir / "case_results.jsonl"), run_id, "retrieval"
+            if not mixed_retrieval_arms:
+                retrieval_rows.extend(
+                    _tag_source_run(
+                        _read_jsonl(run_dir / "case_results.jsonl"), run_id, "retrieval"
+                    )
                 )
-            )
         elif kind in RUNTIME_RUN_KINDS:
-            runtime_rows.extend(
-                _tag_source_run(
-                    _read_jsonl(run_dir / "case_results.jsonl"), run_id, str(kind)
-                )
-            )
-            runtime_records.extend(
-                _tag_source_run(
-                    _read_jsonl(run_dir / "runtime_records.jsonl"), run_id, str(kind)
-                )
-            )
+            case_results = _read_jsonl(run_dir / "case_results.jsonl")
+            records = _read_jsonl(run_dir / "runtime_records.jsonl")
+            if not case_results or not records:
+                incomplete_runtime_artifacts += 1
+            runtime_rows.extend(_tag_source_run(case_results, run_id, str(kind)))
+            runtime_records.extend(_tag_source_run(records, run_id, str(kind)))
             framework = _read_json(run_dir / "framework_results.json")
             if isinstance(framework, list):
                 framework_rows.extend(_tag_source_run(framework, run_id, str(kind)))
         elif kind == "judge":
-            judge_rows.extend(
-                _tag_source_run(
-                    _read_jsonl(run_dir / "judge_results.jsonl"), run_id, "judge"
-                )
-            )
+            results = _read_jsonl(run_dir / "judge_results.jsonl")
+            if not results:
+                incomplete_judge_artifacts += 1
+            judge_rows.extend(_tag_source_run(results, run_id, "judge"))
 
-    semantic_quality = _semantic_metrics(judge_rows)
+    fallback_retrieval_cases = sum(
+        (row.get("observability") or {}).get("effective_reranker_mode") == "fallback"
+        for row in retrieval_rows
+    )
+    invalid_comparison_cases = sum(
+        (row.get("observability") or {}).get("comparison_measurement_valid") is False
+        for row in retrieval_rows
+    )
+    unobserved_runtime = incomplete_runtime_artifacts + sum(
+        item.get("run_kind") in RUNTIME_RUN_KINDS and item.get("status") != "completed"
+        for item in history
+    )
+    unobserved_judge = incomplete_judge_artifacts + sum(
+        item.get("run_kind") == "judge" and item.get("status") != "completed"
+        for item in history
+    )
+    semantic_quality = _semantic_metrics(
+        judge_rows, unobserved_manifests=unobserved_judge
+    )
     coverage = _coverage_metrics(
         selected, retrieval_rows, runtime_records, judge_rows, framework_rows
     )
@@ -460,10 +499,26 @@ def _build_scorecard(
         "selected_run_count": len(selected),
         "contributing_run_ids": [str(item.get("run_id")) for item in selected],
         "metric_definitions": SCORECARD_METRIC_DEFINITIONS,
-        "retrieval_quality": _retrieval_metrics(retrieval_rows),
+        "retrieval_quality": (
+            {
+                "status": "N/A",
+                "reason": "mixed retrieval comparison arms; use separate evaluation roots",
+            }
+            if mixed_retrieval_arms
+            else {
+                "status": "N/A",
+                "reason": "invalid retrieval comparison measurement; inspect per-case reasons",
+                "fallback_case_count": fallback_retrieval_cases,
+                "invalid_comparison_case_count": invalid_comparison_cases,
+            }
+            if fallback_retrieval_cases or invalid_comparison_cases
+            else _retrieval_metrics(retrieval_rows)
+        ),
         "runtime_task_behavior": _runtime_task_metrics(runtime_rows),
         "reliability": _reliability_metrics(runtime_rows, runtime_records),
-        "efficiency": _efficiency_metrics(runtime_rows, runtime_records),
+        "efficiency": _efficiency_metrics(
+            runtime_rows, runtime_records, unobserved_manifests=unobserved_runtime
+        ),
         "optional_semantic_quality": semantic_quality,
         "coverage": coverage,
         "diagnostics": {
@@ -495,21 +550,30 @@ def _retrieval_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {"status": "N/A", "reason": "no retrieval run for this fingerprint"}
     scores = [row.get("scores", {}) for row in rows]
+    decided = [row["passed"] for row in rows if type(row.get("passed")) is bool]
+    forbidden = _numeric(scores, "forbidden_evidence_count")
+
+    def complete_sum(name: str) -> float | None:
+        values = _numeric(scores, name)
+        return sum(values) if len(values) == len(scores) else None
+
     return {
         "source_run_ids": _source_run_ids(rows),
         "case_count": len(rows),
-        "case_pass_rate": _mean([bool(row.get("passed")) for row in rows]),
+        "case_pass_rate": _mean(decided) if decided else None,
+        "case_pass_rate_eligible_count": len(decided),
+        "incomplete_case_count": len(rows) - len(decided),
         "evidence_chunk_recall": _metric_mean(scores, "evidence_chunk_recall"),
         "concept_recall": _metric_mean(scores, "concept_recall"),
         "relation_recall": _metric_mean(scores, "relation_recall"),
-        "forbidden_evidence_count": _metric_sum(scores, "forbidden_evidence_count"),
-        "forbidden_evidence_rate": _mean(
-            [float(score.get("forbidden_evidence_count", 0)) > 0 for score in scores]
-        ),
+        "forbidden_evidence_count": complete_sum("forbidden_evidence_count"),
+        "forbidden_evidence_rate": _mean([value > 0 for value in forbidden])
+        if len(forbidden) == len(scores)
+        else None,
         "retrieval_adequacy_rate": _metric_mean(scores, "retrieval_adequate"),
         "retrieval_error_rate": _metric_mean(scores, "retrieval_error_count"),
-        "dangling_edge_count": _metric_sum(scores, "dangling_edge_count"),
-        "chunk_node_count": _metric_sum(scores, "chunk_node_count"),
+        "dangling_edge_count": complete_sum("dangling_edge_count"),
+        "chunk_node_count": complete_sum("chunk_node_count"),
         "context_precision_at_10": _optional_metric_mean(
             scores,
             "context_precision_at_10",
@@ -640,20 +704,371 @@ def _reliability_metrics(
     }
 
 
+_TOKEN_FIELDS = ("input_tokens", "output_tokens", "total_tokens")
+_EVENT_COMPARISON_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "reported_total_tokens",
+    "token_sources",
+    "node",
+    "provider",
+    "model",
+    "status",
+    "configured_provider",
+    "configured_model",
+    "stop_reason",
+    "configured_output_token_limit",
+)
+
+
+def _captured_event_ids(record: dict[str, Any], *, judge: bool) -> list[str]:
+    if judge:
+        attempts = [*record.get("prior_attempts", []), record]
+        return [
+            value
+            for item in attempts
+            if isinstance(item, dict)
+            and isinstance((value := item.get("observed_request_id")), str)
+            and value
+        ]
+    providers = record.get("providers")
+    if not isinstance(providers, list):
+        return []
+    return [
+        value
+        for item in providers
+        if isinstance(item, dict)
+        and isinstance((value := item.get("run_id")), str)
+        and value
+    ]
+
+
+def _token_usage_summary(
+    records: list[dict[str, Any]],
+    *,
+    unobserved_manifests: int = 0,
+    pairing_incomplete: bool = False,
+    judge: bool = False,
+    excluded_event_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Summarize event-unique usage without promoting old zeros to observations."""
+    record_ids = [_captured_event_ids(record, judge=judge) for record in records]
+    occurrences = Counter(event_id for ids in record_ids for event_id in set(ids))
+    duplicate_ids = {
+        event_id for event_id, count in occurrences.items() if count > 1
+    } | (excluded_event_ids or set())
+    summaries: dict[str, Any] = {}
+    coverage: dict[str, Any] = {}
+    for field in _TOKEN_FIELDS:
+        complete_values: list[float] = []
+        observed_attempts = 0
+        known_attempted = 0
+        unknown_attempt_runs = 0
+        partial_subtotal = 0
+        partial_subtotal_runs = 0
+        identity_excluded_records = 0
+        denominator_uncertain = False
+        reconciled_events: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        reconciled_records = 0
+        duplicate_attempt_ids: set[str] = set()
+        reported_attempts_sum = 0
+        for record, ids in zip(records, record_ids, strict=True):
+            usage = record.get("usage")
+            if not isinstance(usage, dict):
+                usage = {}
+            cov = usage.get("token_coverage")
+            entry = cov.get(field) if isinstance(cov, dict) else None
+            if usage.get("usage_method") != "event_unique_v1" or not isinstance(
+                entry, dict
+            ):
+                # Old live turn counters can show a known positive lower bound,
+                # but their default zero and full attempt coverage are unknown.
+                legacy_attempts = usage.get("provider_attempts")
+                if (
+                    record.get("source_mode") == "controlled_live"
+                    and type(legacy_attempts) is int
+                    and legacy_attempts > 0
+                ):
+                    known_attempted += legacy_attempts
+                unknown_attempt_runs += 1
+                continue
+            observed = entry.get("observed")
+            attempted = entry.get("attempted")
+            subtotal = entry.get("subtotal")
+            provider_attempts = usage.get("provider_attempts")
+            providers = record.get("providers")
+            missing_id = (
+                judge and record.get("provider_call_attempted") is True and not ids
+            ) or (
+                not judge and isinstance(providers, list) and len(ids) != len(providers)
+            )
+            duplicate = bool(set(ids) & duplicate_ids)
+            mismatch = type(attempted) is int and attempted != provider_attempts
+            denominator_uncertain = denominator_uncertain or duplicate or mismatch
+            identity_invalid = (
+                missing_id
+                or duplicate
+                or mismatch
+                or (type(observed) is int and observed > len(set(ids)))
+            )
+            if identity_invalid:
+                identity_excluded_records += 1
+                if (
+                    not judge
+                    and duplicate
+                    and not missing_id
+                    and not mismatch
+                    and isinstance(providers, list)
+                    and not (type(observed) is int and observed > len(set(ids)))
+                ):
+                    reconciled_records += 1
+                    for provider in providers:
+                        if isinstance(provider, dict) and provider.get("run_id"):
+                            reconciled_events[provider["run_id"]].append(provider)
+                elif (
+                    judge
+                    and duplicate
+                    and not missing_id
+                    and not mismatch
+                    and attempted == 1
+                    and provider_attempts == 1
+                    and record.get("provider_call_attempted") is True
+                ):
+                    # Judge results retain a request ID and per-field coverage,
+                    # not response content. Reconcile only consistent evidence.
+                    event = {
+                        "run_id": ids[0],
+                        "configured_provider": record.get("judge_provider"),
+                        "configured_model": record.get("judge_model"),
+                        "provider": record.get("observed_provider"),
+                        "model": record.get("observed_model"),
+                        "status": record.get("status"),
+                        "stop_reason": record.get("stop_reason"),
+                        "token_sources": cov,
+                    }
+                    for token_field in _TOKEN_FIELDS:
+                        field_entry = cov.get(token_field, {})
+                        if not isinstance(field_entry, dict):
+                            continue
+                        field_value = field_entry.get("subtotal")
+                        if (
+                            field_entry.get("observed") == 1
+                            and field_entry.get("attempted") == 1
+                            and type(field_value) is int
+                            and field_value >= 0
+                        ):
+                            event[token_field] = field_value
+                    reconciled_events[ids[0]].append(event)
+                    reconciled_records += 1
+            if type(observed) is int and observed >= 0 and not identity_invalid:
+                observed_attempts += observed
+            if type(provider_attempts) is int and provider_attempts >= 0:
+                reported_attempts_sum += provider_attempts
+                if duplicate:
+                    duplicate_attempt_ids.update(ids)
+                else:
+                    known_attempted += provider_attempts
+            else:
+                unknown_attempt_runs += 1
+            value = usage.get(field)
+            if (
+                entry.get("complete") is True
+                and type(value) is int
+                and value >= 0
+                and type(observed) is int
+                and type(attempted) is int
+                and observed == attempted
+                and attempted > 0
+                and subtotal == value
+                and not identity_invalid
+            ):
+                complete_values.append(float(value))
+            elif type(subtotal) is int and subtotal >= 0 and not identity_invalid:
+                partial_subtotal += subtotal
+                partial_subtotal_runs += 1
+        recovered_count = 0
+        for event_id, events in reconciled_events.items():
+            # A collision with an unpaired record cannot be reconciled within
+            # this summary; its unique neighbors still contribute once.
+            if event_id in duplicate_ids and len(events) < 2:
+                continue
+            signatures = {
+                json.dumps(
+                    {name: event.get(name) for name in _EVENT_COMPARISON_FIELDS},
+                    sort_keys=True,
+                )
+                for event in events
+            }
+            value = events[0].get(field)
+            if len(signatures) == 1 and type(value) is int and value >= 0:
+                partial_subtotal += value
+                recovered_count += 1
+        if recovered_count:
+            observed_attempts += recovered_count
+            partial_subtotal_runs += reconciled_records
+        known_attempted += len(duplicate_attempt_ids)
+        summaries[field] = _values_summary(complete_values)
+        coverage[field] = {
+            "observed_attempts": observed_attempts,
+            "attempted": (
+                known_attempted
+                if not unknown_attempt_runs
+                and not unobserved_manifests
+                and not pairing_incomplete
+                and not denominator_uncertain
+                else None
+            ),
+            "known_attempted": known_attempted,
+            "reported_attempts_sum": reported_attempts_sum,
+            "unknown_attempt_runs": unknown_attempt_runs,
+            "complete_runs": len(complete_values),
+            "eligible_runs": (
+                len(records)
+                if not unobserved_manifests
+                and not pairing_incomplete
+                and not denominator_uncertain
+                else None
+            ),
+            "known_eligible_runs": len(records),
+            "unobserved_manifests": unobserved_manifests,
+            "pairing_incomplete": pairing_incomplete,
+            "identity_incomplete": bool(identity_excluded_records),
+            "identity_excluded_records": identity_excluded_records,
+            "identity_reconciled_events": recovered_count,
+            "partial_observed_subtotal": partial_subtotal
+            if partial_subtotal_runs
+            else None,
+            "partial_subtotal_runs": partial_subtotal_runs,
+        }
+    return {**summaries, "token_coverage": coverage}
+
+
 def _efficiency_metrics(
-    rows: list[dict[str, Any]], records: list[dict[str, Any]]
+    rows: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    *,
+    unobserved_manifests: int = 0,
 ) -> dict[str, Any]:
     if not rows:
-        return {"status": "N/A", "reason": "no runtime run for this fingerprint"}
+        return {
+            "status": "N/A",
+            "reason": "no scored runtime record for this fingerprint",
+            "tokens_per_successful_run": None,
+            "unpaired_usage": _token_usage_summary(records),
+            "unpaired_row_count": 0,
+            "unpaired_record_count": len(records),
+            "unpaired_usage_note": "Unpaired records are observed-only and may duplicate other records.",
+            **_token_usage_summary(
+                [],
+                unobserved_manifests=unobserved_manifests,
+                pairing_incomplete=bool(records),
+            ),
+        }
     metrics = [row.get("metrics", {}) for row in rows]
     successful_count = sum(bool(row.get("passed")) for row in rows)
-    all_tokens = sum(_numeric(metrics, "total_tokens"))
-    attempts = sum(_numeric(metrics, "provider_attempts"))
-    retries = sum(_numeric(metrics, "retries"))
+    attempts = sum(
+        item["provider_attempts"]
+        for item in metrics
+        if type(item.get("provider_attempts")) is int and item["provider_attempts"] >= 0
+    )
+    retries = sum(
+        item["retries"]
+        for item in metrics
+        if type(item.get("retries")) is int and item["retries"] >= 0
+    )
+    retry_known = all(
+        type(item.get("provider_attempts")) is int
+        and item["provider_attempts"] >= 0
+        and type(item.get("retries")) is int
+        and item["retries"] >= 0
+        for item in metrics
+    )
+    identity_fields = ("_source_run_id", "run_id", "scenario_id", "repetition")
+
+    def identity(item: dict[str, Any]) -> tuple[Any, ...] | None:
+        if any(item.get(key) is None for key in identity_fields):
+            return None
+        value = tuple(item[key] for key in identity_fields)
+        try:
+            hash(value)
+        except TypeError:
+            return None
+        return value
+
+    row_ids = [identity(item) for item in rows]
+    record_ids = [identity(item) for item in records]
+    row_counts = Counter(value for value in row_ids if value is not None)
+    record_counts = Counter(value for value in record_ids if value is not None)
+    paired_ids = {
+        value
+        for value, count in row_counts.items()
+        if count == 1 and record_counts.get(value) == 1
+    }
+    paired_records = [
+        item
+        for item, value in zip(records, record_ids, strict=True)
+        if value in paired_ids
+    ]
+    unpaired_records = [
+        item
+        for item, value in zip(records, record_ids, strict=True)
+        if value not in paired_ids
+    ]
+    unpaired_rows = len(rows) - len(paired_ids)
+    pairing_unknown = bool(unpaired_rows or unpaired_records)
+    rows_by_id = {
+        value: item
+        for item, value in zip(rows, row_ids, strict=True)
+        if value in paired_ids
+    }
+    records_by_id = {
+        value: item
+        for item, value in zip(records, record_ids, strict=True)
+        if value in paired_ids
+    }
+    retry_counter_mismatch_runs = 0
+    retry_counter_unknown_runs = 0
+    for value in paired_ids:
+        row_metrics = rows_by_id[value].get("metrics", {})
+        usage = records_by_id[value].get("usage", {})
+        if not isinstance(row_metrics, dict) or not isinstance(usage, dict):
+            retry_counter_unknown_runs += 1
+            continue
+        pairs = [
+            (row_metrics.get(name), usage.get(name))
+            for name in ("provider_attempts", "retries")
+        ]
+        if any(
+            type(a) is not int or a < 0 or type(b) is not int or b < 0 for a, b in pairs
+        ):
+            retry_counter_unknown_runs += 1
+        elif any(a != b for a, b in pairs):
+            retry_counter_mismatch_runs += 1
+    event_occurrences = Counter(
+        event_id
+        for item in records
+        for event_id in set(_captured_event_ids(item, judge=False))
+    )
+    duplicated_event_ids = {
+        event_id for event_id, count in event_occurrences.items() if count > 1
+    }
+    tokens = _token_usage_summary(
+        paired_records,
+        unobserved_manifests=unobserved_manifests,
+        pairing_incomplete=pairing_unknown,
+        excluded_event_ids=duplicated_event_ids,
+    )
+    total_coverage = tokens["token_coverage"]["total_tokens"]
+    all_complete = (
+        len(records) == len(rows)
+        and not unobserved_manifests
+        and not pairing_unknown
+        and total_coverage["complete_runs"] == len(rows)
+    )
+    total_mean = tokens["total_tokens"]["mean"]
     return (
-        {
-            "source_run_ids": _source_run_ids(rows),
-        }
+        {"source_run_ids": _source_run_ids(rows)}
         | {
             name: _values_summary(_numeric(metrics, name))
             for name in (
@@ -662,16 +1077,34 @@ def _efficiency_metrics(
                 "provider_attempts",
                 "retries",
                 "tavily_searches",
-                "input_tokens",
-                "output_tokens",
-                "total_tokens",
                 "latency_seconds",
             )
         }
+        | tokens
         | {
-            "retry_rate": retries / attempts if attempts else None,
+            "unpaired_usage": _token_usage_summary(
+                unpaired_records, excluded_event_ids=duplicated_event_ids
+            ),
+            "unpaired_row_count": unpaired_rows,
+            "unpaired_record_count": len(unpaired_records),
+            "unpaired_usage_note": "Unpaired records are observed-only and may duplicate other records.",
+            "usage_method": "event_unique_v1",
+            "retry_rate": retries / attempts
+            if attempts
+            and retry_known
+            and not pairing_unknown
+            and not unobserved_manifests
+            and not retry_counter_mismatch_runs
+            and not retry_counter_unknown_runs
+            else None,
+            "retry_observed_attempts": attempts,
+            "retry_observed_retries": retries,
+            "retry_counter_mismatch_runs": retry_counter_mismatch_runs,
+            "retry_counter_unknown_runs": retry_counter_unknown_runs,
             "tokens_per_successful_run": (
-                all_tokens / successful_count if successful_count else None
+                total_mean * len(records) / successful_count
+                if all_complete and total_mean is not None and successful_count
+                else None
             ),
             "gating": False,
         }
@@ -742,7 +1175,10 @@ def _coverage_metrics(
             "skipped_count": sum(item.get("status") == "skipped" for item in items),
             "error_count": sum(item.get("status") == "error" for item in items),
             "provider_attempted_count": sum(
-                bool(item.get("provider_call_attempted")) for item in items
+                item.get("usage", {}).get("provider_attempts")
+                if type(item.get("usage", {}).get("provider_attempts")) is int
+                else int(bool(item.get("provider_call_attempted")))
+                for item in items
             ),
             "accounted": bool(items),
         }
@@ -825,7 +1261,9 @@ def _coverage_requirement(
 
 
 def _scenario_campaign_contract() -> dict[str, dict[str, int]]:
-    payload = _read_json(ROOT / "evals" / "runtime" / "scenarios.json")
+    payload = _read_json(
+        ROOT / "backend" / "evaluation" / "cases" / "runtime" / "scenarios.json"
+    )
     if not isinstance(payload, list):
         return {}
     return {
@@ -909,7 +1347,9 @@ def _public_judge_reason(item: dict[str, Any]) -> str:
     return _safe_error(str(item.get("reason") or ""))
 
 
-def _semantic_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _semantic_metrics(
+    rows: list[dict[str, Any]], *, unobserved_manifests: int = 0
+) -> dict[str, Any]:
     by_identity: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(
         list
     )
@@ -924,6 +1364,19 @@ def _semantic_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     output: dict[str, Any] = {
         "source_run_ids": _source_run_ids(rows),
         "dimensions": {},
+        "judge_usage": {
+            "eligible_runs": (
+                sum(row.get("status") != "skipped" for row in rows)
+                if not unobserved_manifests
+                else None
+            ),
+            "skipped_count": sum(row.get("status") == "skipped" for row in rows),
+            **_token_usage_summary(
+                [row for row in rows if row.get("status") != "skipped"],
+                unobserved_manifests=unobserved_manifests,
+                judge=True,
+            ),
+        },
     }
     for identity, items in sorted(by_identity.items()):
         dimension, provider, model, rubric = identity
@@ -937,7 +1390,10 @@ def _semantic_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "skipped_result_count": len(skipped),
             "error_count": len(errors),
             "provider_call_attempt_count": sum(
-                bool(item.get("provider_call_attempted")) for item in items
+                item.get("usage", {}).get("provider_attempts")
+                if type(item.get("usage", {}).get("provider_attempts")) is int
+                else int(bool(item.get("provider_call_attempted")))
+                for item in items
             ),
             "skipped_reasons": sorted({_public_judge_reason(item) for item in skipped}),
             "status": "available" if successful else "N/A",
@@ -1005,7 +1461,10 @@ def _semantic_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "skipped_count": len(skipped),
             "error_count": len(errors),
             "provider_attempted_count": sum(
-                bool(item.get("provider_call_attempted")) for item in items
+                item.get("usage", {}).get("provider_attempts")
+                if type(item.get("usage", {}).get("provider_attempts")) is int
+                else int(bool(item.get("provider_call_attempted")))
+                for item in items
             ),
             "parser_classification_counts": dict(
                 Counter(
@@ -1133,20 +1592,6 @@ def _render_metric_table(
     ]
     if rows:
         _append_table(lines, ("Metric", "Result"), rows)
-
-
-def _render_mapping(
-    lines: list[str], title: str, mapping: dict[str, Any], value_name: str
-) -> None:
-    lines.extend(["", f"### {title}", ""])
-    _append_table(
-        lines,
-        ("Case", "Result"),
-        [
-            (f"`{_markdown_text(name)}`", _metric_value(value_name, observed))
-            for name, observed in mapping.items()
-        ],
-    )
 
 
 def _render_failure_types(lines: list[str], failures: dict[str, Any]) -> None:
@@ -1318,10 +1763,13 @@ def _render_semantic_quality(lines: list[str], value: dict[str, Any]) -> None:
             for dimension, item in value.get("dimensions", {}).items()
         ],
     )
+    if isinstance(value.get("judge_usage"), dict):
+        _render_structured_details(lines, "Judge token coverage", value["judge_usage"])
     identities = [
         item
         for key, item in value.items()
-        if key not in {"dimensions", "source_run_ids"} and isinstance(item, dict)
+        if key not in {"dimensions", "source_run_ids", "judge_usage"}
+        and isinstance(item, dict)
     ]
     if identities:
         lines.extend(["", "### Judge execution identities", ""])
@@ -1418,6 +1866,10 @@ def _render_efficiency(lines: list[str], value: dict[str, Any]) -> None:
     _render_source_runs(lines, value.get("source_run_ids", []))
     _render_metric_table(lines, value, excluded={"source_run_ids"})
     _render_distributions(lines, value)
+    if isinstance(value.get("token_coverage"), dict):
+        _render_structured_details(
+            lines, "Runtime token coverage", value["token_coverage"]
+        )
 
 
 def _render_structured_details(
@@ -1566,6 +2018,8 @@ def _render_scorecard(scorecard: dict[str, Any]) -> str:
         value = scorecard[key]
         if isinstance(value, dict) and value.get("status") == "N/A":
             lines.append(f"N/A — {value.get('reason', 'not available')}.")
+            if key == "efficiency" and "token_coverage" in value:
+                renderer(lines, value)
         else:
             renderer(lines, value)
 
@@ -1810,40 +2264,347 @@ def _publication_provenance(
     }
 
 
-def _write_publication_index(reports_root: Path) -> None:
-    rows = []
-    for path in sorted((reports_root / "history").glob("*/provenance.json")):
-        provenance = _read_json(path)
-        if not isinstance(provenance, dict):
-            continue
-        snapshot = path.parent.name
-        rows.append(
-            (
-                str(provenance.get("published_at") or ""),
-                snapshot,
-                str(provenance.get("fingerprint") or ""),
-                int(provenance.get("contributing_run_count") or 0),
+def _render_saved_evaluation(report: dict[str, Any], prefix: str) -> str:
+    runtime, retrieval, judge = report["runtime"], report["retrieval"], report["judge"]
+    coverage = retrieval["coverage"]
+    lines = [
+        "# Controlled evaluation findings",
+        "",
+        f"Observations through **{report['observation_end']} UTC**. These historical results do not measure subsequent revisions or production traffic.",
+        "",
+        "## Deterministic runtime compliance",
+        "",
+        f"- Completed: {runtime['completed']} / {runtime['planned']} planned observations across {runtime['scenario_count']} scenarios.",
+        f"- Passed: {runtime['passed']} / {runtime['completed']} completed; failed: {runtime['failed']}; interrupted and unscored: {runtime['interrupted']}.",
+        "- A contract pass measures the recorded route and tool behavior; it is not an answer-correctness score.",
+        f"- Original runtime evaluator fingerprints: {', '.join('`' + str(value) + '`' for value in runtime['fingerprints'])}.",
+    ]
+    lines.extend(f"- {line}" for line in runtime.get("details", []))
+    if runtime.get("fingerprint_groups"):
+        lines += [
+            "",
+            "| Runtime evaluator fingerprint | Observations | Completed | Interrupted |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+        for group in runtime["fingerprint_groups"]:
+            lines.append(
+                f"| `{group['fingerprint']}` | {group['observations']} | {group['completed']} | {group.get('interrupted', 0)} |"
             )
+    lines += [
+        "",
+        "## Retrieved-evidence quality",
+        "",
+        f"- Precision@10 available for {coverage['precision_observations']} observations; required-point Recall available for {coverage['recall_available']}. These are availability counts, not quality scores.",
+    ]
+    source = retrieval.get("provenance", {})
+    if source.get("accepted_source_tree"):
+        lines.append(
+            f"- Retrieval source tree: `{source['accepted_source_tree']}`; storage manifest SHA256: `{source.get('snapshot_manifest_sha256', 'unknown')}`."
         )
+        lines.append(
+            f"- Embedding model: {source.get('embedding_model', 'unknown')}; local reranker: {source.get('local_reranker_model', 'unknown')}."
+        )
+    if retrieval.get("cohort_cases"):
+        lines.append(
+            f"- Cases: {retrieval['cohort_cases'].get('development')} development and {retrieval['cohort_cases'].get('frozen')} frozen. Repetitions are not independent samples."
+        )
+    if retrieval.get("arm_cohort_metrics"):
+        lines += [
+            "",
+            "| Cohort / arm | Precision@10 | Precision scored / observed | Recall (available only) | Recall scored / observed |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+        for key, value in retrieval["arm_cohort_metrics"].items():
+            lines.append(
+                f"| {key} | {value['precision_mean']:.2%} | {value['precision_ready']} / {value['observations']} | {value['recall_available_only_mean']:.2%} | {value['recall_ready']} / {value['observations']} |"
+            )
+    if coverage.get("recall_unavailable_development") is not None:
+        lines.append(
+            f"\nDevelopment Recall is unavailable for {coverage['recall_unavailable_development']} observations; unavailable values are not zero."
+        )
+    lines.append("")
+    lines.extend(f"- {line}" for line in report.get("retrieval_notes", []))
+    lines += [
+        "",
+        "## Generated-answer quality",
+        "",
+        f"- Eligible judge inputs: {judge['eligible_inputs']}; attempted: {judge['logical_attempted']}; successfully scored: {judge['successful_scored']}; unstarted: {judge['unstarted']}.",
+        f"- HTTP 429 errors: {judge['error_http_429']}. Judge quality score: {'N/A' if judge['judge_score'] is None else judge['judge_score']}.",
+        f"- Judge evaluator fingerprint: `{judge['evaluator_fingerprint']}`. Configured and observed serving identities are distinct; unavailable usage is not zero.",
+    ]
+    if judge.get("configured_judge_model"):
+        lines.append(
+            f"- Configured model: `{judge['configured_judge_model']}`; configured route: {judge.get('configured_endpoint', 'unknown')}. Observed serving identity: {judge.get('observed_serving_identity') or 'unknown'}."
+        )
+    lines.extend(f"- {line}" for line in report.get("limitations", []))
+    lines += [
+        "",
+        "## Evidence and provenance",
+        "",
+        f"- [Runtime summary]({prefix}/runtime.json)",
+        f"- [Retrieval aggregate]({prefix}/retrieval.json)",
+        f"- [Judge status]({prefix}/judge.json)",
+    ]
+    if report.get("source_report"):
+        lines.append(f"- [Detailed saved findings]({prefix}/source-report.md)")
+    lines += [
+        "",
+        "The original runtime, retrieval, and judge populations and configurations are separate. No combined fingerprint or pooled quality score is implied.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def publish_saved_evaluation(
+    runtime_path: Path,
+    retrieval_path: Path,
+    judge_path: Path,
+    *,
+    reports_root: Path = DEFAULT_REPORTS_ROOT,
+    source_report_path: Path | None = None,
+) -> dict[str, Any]:
+    """Publish reviewed aggregate observations without rescoring their source data."""
+    runtime_input = _read_json(runtime_path)
+    retrieval = _read_json(retrieval_path)
+    judge = _read_json(judge_path)
+    try:
+        publication_id = runtime_input["publication_id"]
+        observed = runtime_input["observation_end"]
+        if not isinstance(publication_id, str) or not re.fullmatch(
+            r"[a-z0-9]+(?:-[a-z0-9]+)*", publication_id
+        ):
+            raise ValueError("invalid publication identity")
+        datetime.fromisoformat(observed)
+        runtime = runtime_input["runtime"]
+        counts = [
+            runtime[key]
+            for key in (
+                "planned",
+                "completed",
+                "passed",
+                "failed",
+                "interrupted",
+                "scenario_count",
+            )
+        ]
+        counts += [
+            judge[key]
+            for key in (
+                "eligible_inputs",
+                "logical_attempted",
+                "successful_scored",
+                "error_http_429",
+                "unstarted",
+            )
+        ]
+        counts += [
+            retrieval["coverage"][key]
+            for key in ("precision_observations", "recall_available")
+        ]
+        if any(type(value) is not int or value < 0 for value in counts):
+            raise ValueError("saved observation counts must be nonnegative integers")
+        if judge["error_http_429"] > judge["logical_attempted"]:
+            raise ValueError("judge errors exceed attempted inputs")
+        if (
+            runtime["passed"] + runtime["failed"] != runtime["completed"]
+            or runtime["completed"] + runtime["interrupted"] != runtime["planned"]
+        ):
+            raise ValueError("inconsistent runtime counts")
+        if (
+            judge["logical_attempted"]
+            + judge["unstarted"]
+            + judge.get("skipped", 0)
+            + judge.get("uncertain_dispatch", 0)
+            != judge["eligible_inputs"]
+            or judge["successful_scored"] + judge["error_http_429"]
+            > judge["logical_attempted"]
+        ):
+            raise ValueError("inconsistent judge counts")
+        if (
+            not isinstance(runtime["fingerprints"], list)
+            or not runtime["fingerprints"]
+            or not all(
+                isinstance(value, str) and value for value in runtime["fingerprints"]
+            )
+            or not isinstance(judge["evaluator_fingerprint"], str)
+            or not judge["evaluator_fingerprint"]
+        ):
+            raise ValueError("missing evaluation identity")
+        groups = runtime.get("fingerprint_groups", [])
+        if groups and (
+            sum(group["observations"] for group in groups) != runtime["planned"]
+            or sum(group["completed"] for group in groups) != runtime["completed"]
+            or [group["fingerprint"] for group in groups] != runtime["fingerprints"]
+        ):
+            raise ValueError("runtime fingerprint groups do not match the population")
+        if (
+            retrieval["coverage"]["recall_available"]
+            > retrieval["coverage"]["precision_observations"]
+        ):
+            raise ValueError("inconsistent retrieval coverage")
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError("invalid saved evaluation inputs") from exc
+    report = {
+        **runtime_input,
+        "retrieval": retrieval,
+        "judge": judge,
+        "source_report": source_report_path is not None,
+    }
+    markdown = _render_saved_evaluation(report, ".")
+    identity = {
+        "runtime_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
+        "retrieval_sha256": hashlib.sha256(retrieval_path.read_bytes()).hexdigest(),
+        "judge_sha256": hashlib.sha256(judge_path.read_bytes()).hexdigest(),
+        "source_report_sha256": hashlib.sha256(
+            source_report_path.read_bytes()
+        ).hexdigest()
+        if source_report_path
+        else None,
+    }
+    history_dir = reports_root / "history" / publication_id
+    history_dir.mkdir(parents=True, exist_ok=True)
+    existing = history_dir / "provenance.json"
+    if existing.exists() and _read_json(existing).get("input_hashes") != identity:
+        raise ValueError("saved publication identity already has different inputs")
+    if existing.exists() and _read_json(history_dir / "report.json") != report:
+        raise ValueError("saved publication report differs from its inputs")
+    if not existing.exists():
+        for name, source in (
+            ("runtime.json", runtime_path),
+            ("retrieval.json", retrieval_path),
+            ("judge.json", judge_path),
+        ):
+            destination = history_dir / name
+            if source.resolve() != destination.resolve():
+                shutil.copyfile(source, destination)
+        if source_report_path is not None:
+            destination = history_dir / "source-report.md"
+            if source_report_path.resolve() != destination.resolve():
+                shutil.copyfile(source_report_path, destination)
+        _write_json(history_dir / "report.json", report)
+        (history_dir / "report.md").write_text(markdown, encoding="utf-8")
+        provenance = {
+            "publication_kind": "saved-observations",
+            "publication_id": publication_id,
+            "observation_end": observed,
+            "runtime_fingerprints": runtime["fingerprints"],
+            "runtime_provenance": {
+                key: runtime[key]
+                for key in (
+                    "fingerprint_groups",
+                    "inventory_sha256",
+                    "scenario_contract_sha256",
+                    "prompt_tree_sha256",
+                    "storage_manifest_sha256",
+                    "observation_dates_utc",
+                )
+                if key in runtime
+            },
+            "retrieval_provenance": retrieval["provenance"],
+            "judge_evaluator_fingerprint": judge["evaluator_fingerprint"],
+            "judge_provenance": {
+                key: judge[key]
+                for key in (
+                    "configured_judge_model",
+                    "configured_endpoint",
+                    "observed_serving_identity",
+                    "source_stop_freeze_sha256",
+                    "source_v3_freeze_sha256",
+                )
+                if key in judge
+            },
+            "input_hashes": identity,
+            "excluded_content": ["raw traces", "private evidence", "credentials"],
+        }
+        _write_json(existing, provenance)
+    _refresh_publication_aliases(reports_root)
+    _write_publication_index(reports_root)
+    return {
+        "snapshot": publication_id,
+        "history_directory": history_dir,
+        "latest_markdown": reports_root / "latest.md",
+    }
+
+
+def _observation_end(provenance: dict[str, Any]) -> str:
+    if provenance.get("observation_end"):
+        return str(provenance["observation_end"])[:10]
+    dates = [
+        str(item.get("created_at", ""))[:10]
+        for item in provenance.get("contributing_runs", [])
+        if isinstance(item, dict)
+    ]
+    return max(dates, default=str(provenance.get("published_at", ""))[:10])
+
+
+def _publication_entries(reports_root: Path) -> list[tuple[str, Path, dict[str, Any]]]:
+    entries = []
+    for path in (reports_root / "history").glob("*/provenance.json"):
+        provenance = _read_json(path)
+        if (
+            isinstance(provenance, dict)
+            and provenance.get("publication_kind") != "optimization-experiment"
+        ):
+            entries.append((_observation_end(provenance), path.parent, provenance))
+    return sorted(
+        entries,
+        key=lambda item: (
+            item[0],
+            item[2].get("publication_kind") == "system-evaluation",
+            item[2].get("publication_revision", 0),
+            item[1].name,
+        ),
+    )
+
+
+def _refresh_publication_aliases(reports_root: Path) -> None:
+    entries = _publication_entries(reports_root)
+    if not entries:
+        return
+    _, folder, provenance = entries[-1]
+    stem = (
+        "report"
+        if provenance.get("publication_kind")
+        in {"saved-observations", "system-evaluation"}
+        else "scorecard"
+    )
+    if stem == "report":
+        markdown = (folder / "report.md").read_text(encoding="utf-8")
+        markdown = markdown.replace("](../../experiments/", "](experiments/")
+        markdown = markdown.replace("](../", "](history/")
+        markdown = markdown.replace("](./", f"](history/{folder.name}/")
+        (reports_root / "latest.md").write_text(markdown, encoding="utf-8")
+    else:
+        shutil.copyfile(folder / f"{stem}.md", reports_root / "latest.md")
+    shutil.copyfile(folder / f"{stem}.json", reports_root / "latest.json")
+    shutil.copyfile(folder / "provenance.json", reports_root / "latest_provenance.json")
+
+
+def _write_publication_index(reports_root: Path) -> None:
     lines = [
         "# Published evaluation reports",
         "",
-        "Each row is one configuration fingerprint. Republishing the same "
-        "fingerprint updates its stable history snapshot and the latest aliases.",
+        "Reports are ordered by observation date. Distinct evaluation identities remain separate.",
         "",
-        "| Published | Fingerprint | Runs | Scorecard | Provenance |",
-        "| --- | --- | ---: | --- | --- |",
+        "| Observed through | Identity | Report | Provenance |",
+        "| --- | --- | --- | --- |",
     ]
-    for published_at, snapshot, fingerprint, run_count in sorted(rows, reverse=True):
-        relative = f"history/{snapshot}"
-        lines.append(
-            f"| {published_at} | `{fingerprint}` | {run_count} | "
-            f"[Markdown]({relative}/scorecard.md) / "
-            f"[JSON]({relative}/scorecard.json) | "
-            f"[JSON]({relative}/provenance.json) |"
+    for observed, folder, provenance in reversed(_publication_entries(reports_root)):
+        relative = f"history/{folder.name}"
+        saved = provenance.get("publication_kind") in {
+            "saved-observations",
+            "system-evaluation",
+        }
+        stem = "report" if saved else "scorecard"
+        identity = (
+            provenance.get("publication_id")
+            if saved
+            else provenance.get("fingerprint", "")
         )
-    lines.append("")
-    (reports_root / "index.md").write_text("\n".join(lines), encoding="utf-8")
+        lines.append(
+            f"| {observed} | `{identity}` | [Markdown]({relative}/{stem}.md) / [JSON]({relative}/{stem}.json) | [JSON]({relative}/provenance.json) |"
+        )
+    (reports_root / "index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _display_path(path: Path) -> str:

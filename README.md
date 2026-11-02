@@ -20,8 +20,8 @@ The backend uses **Python, LangGraph, and LlamaIndex**; the web interface uses
 **Reflex and Plotly**. Storage adapters support local files, Redis, Pinecone,
 MongoDB, Neo4j, and Memgraph; deployment uses Google Cloud Run.
 
-Ollama is the intended primary LLM backend. The public demo currently uses
-OpenRouter `openrouter/free` automatic routing to keep operating costs low.
+The default LLM pipeline uses OpenRouter `openrouter/free` automatic routing;
+the pipeline selector retains `ollama` as a compatibility alias.
 
 ```mermaid
 flowchart LR
@@ -38,10 +38,12 @@ Preparation runs ahead of serving; application startup loads prepared storage.
 Analyst retrieval defaults to `legacy_vector_context`; Visualizer retrieval uses
 `optimized`. The default stores combine local files, Redis, Pinecone, and MongoDB.
 See the [architecture and configuration](docs/project_overview.md) for decisions,
-active prompts, optional backends, and limitations.
+active prompts, optional backends, and limitations. Knowledge searches use
+explicit named-topic or in-scope broad policies; broad mode does not guarantee
+that every retrieved result is relevant.
 
 <details>
-<summary>More application screenshots</summary>
+<summary><strong>More application screenshots — click to expand</strong></summary>
 
 ![Knowledge graph visualization](app/assets/visualization.png)
 ![Web research response](app/assets/research.png)
@@ -63,16 +65,27 @@ credentials, private corpus, downloaded models, or services. See
 [setup, usage, and offline gates](docs/project_overview.md#setup-and-offline-checks)
 for the complete commands and integration boundary.
 
-The published evaluation is **historical and incomplete**; it does not measure
-current answer quality or establish an improvement from graph retrieval. Updated
-configuration capture changes future evaluation fingerprints; see the
-[evaluation provenance contract](docs/runtime_evaluation.md#immutable-history-and-fingerprints).
+Live and judge evaluation require explicit provider confirmation, a fresh quota
+observation, and a durable local request guard. See the
+[request guard](docs/runtime_evaluation.md#evaluation-request-guard) for limits
+and the operator's responsibility to verify external quota.
 
-| Documentation | What to assess |
+## Evaluation results
+
+The [evaluation overview](reports/evaluation/README.md) and
+[detailed system report](reports/evaluation/latest.md) describe historical
+August and October 2026 observations, not every later code revision. August
+recorded 6 / 12 imported-trace passes and 10 / 15 live passes. October recorded
+10 / 12 completed live passes, two failures, and three interrupted executions
+out of 15 planned. These are deterministic contract results, not answer-quality
+scores. October judge quality is unavailable after one HTTP 429; three other
+eligible assessments were unstarted.
+
+The [separate optimization experiment](reports/evaluation/experiments/README.md)
+compares retrieval variants and does not supply system-evaluation scores.
+
+| Documentation | Purpose |
 | --- | --- |
-| [Project overview](docs/project_overview.md) | Architecture, model/storage defaults, setup, testing, design boundaries |
+| [Project overview](docs/project_overview.md) | Architecture, configuration and offline checks |
 | [Data pipeline runbook](docs/optimized_pipeline_runbook.md) | Preparing storage and starting the app |
-| [Evaluation guide](docs/runtime_evaluation.md) | Contracts, metric definitions, provenance, and limitations |
-| [Published evidence](reports/evaluation/README.md) | Historical scorecards and their missing coverage |
-| [Full report runbook](docs/full_evaluation_report_runbook.md) | Asset/service-dependent evaluation and explicit publication |
-| [Approved improvement plan](docs/portfolio_improvement_plan.md) / [execution report](docs/portfolio_execution_report.md) | Scope and local implementation verification |
+| [Evaluation evidence](reports/evaluation/README.md) | Latest results, history, methodology and publication instructions |

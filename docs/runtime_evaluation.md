@@ -1,6 +1,6 @@
 # Graph RAG evaluation
 
-Updated: 2026-10-23
+Updated: 2026-10-26
 
 ## Purpose and boundary
 
@@ -30,21 +30,61 @@ machine-readable representation.
 | `backend/evaluation/retrieval_benchmark.py` | Reviewed prepared-storage contracts, evidence/graph scoring, optional context-relevance labels, and review rendering. |
 | `backend/evaluation/runtime_evaluation.py` | Canonical runtime observations, trace normalization, deterministic checks, reliability metrics, and optional semantic judges. |
 | `backend/evaluation/runtime_live.py` | Controlled headless invocation of the production LangGraph workflow. |
+| `backend/evaluation/request_guard.py` | Evaluation-only locked reservation ledger and quota limits. |
 | `backend/evaluation/evaluation_reporting.py` | Immutable run registration, fingerprints, aggregation, scorecard rendering, and sanitized publication. |
 | `scripts/evaluate_retrieval_pipeline.py` | Retrieval executor and relevance-review command. |
 | `scripts/evaluate_runtime_workflow.py` | Offline, live, optional AgentEvals, and optional judge modes. |
 | `scripts/build_evaluation_report.py` | Rebuild reports from evaluation history and optionally publish a commit-friendly snapshot. |
 
 The authoritative contracts are
-[`evals/retrieval/benchmark_cases.jsonl`](../evals/retrieval/benchmark_cases.jsonl)
-and [`evals/runtime/scenarios.json`](../evals/runtime/scenarios.json).
+[`backend/evaluation/cases/retrieval/benchmark_cases.jsonl`](../backend/evaluation/cases/retrieval/benchmark_cases.jsonl)
+and [`backend/evaluation/cases/runtime/scenarios.json`](../backend/evaluation/cases/runtime/scenarios.json).
 Their Markdown companions are review views, not executable input.
+
+## Runtime routing and knowledge-search boundaries
+
+The active Retriever prompt is `v7` for the default and vLLM pipelines. Knowledge
+search requires `topic_policy`: `named` requires nonempty topic alias groups;
+`broad` uses no groups and requires a validated in-scope route. Invalid routing
+or search arguments are operational errors, not empty retrieval or an automatic
+web-search fallback. A valid broad declaration does not guarantee relevance.
+These changes affect future fingerprints; preserved historical contracts, observations,
+and scorecards retain their original identities and results.
+
+Successful controlled-live runs reconstruct the application fallback for an
+out-of-scope completed graph. New controlled-live records identify response
+origin in `provenance.response_origin`: `application_fallback_reconstruction`
+for a reconstructed fallback, `graph_message` for a current-turn graph answer,
+and `unavailable` when no text response was captured. Graph-only imported traces
+cannot establish a later application response without that event; historical
+records are unchanged and may lack this field. Score routing and refusal delivery
+separately; response presence alone does not measure refusal relevance or clarity.
+
+## Evaluation request guard
+
+Live and judge commands require an explicit `--provider-quota` JSON file and a
+positive `--max-provider-attempts`. The JSON contains only `observed_at` (ISO
+8601 with timezone), `provider` (`openrouter`), `model`, `remaining_requests`,
+`demo_reserve`, and `daily_batch_limit`. Numeric values are nonnegative integers.
+The observation must be from the current UTC day and at most 15 minutes old at
+entry and at every reservation. The operator must independently verify provider
+quota and ensure the observation reflects external spending.
+
+The guard uses `data/evaluation/request_guard/ledger.json` under the Git-common
+checkout. Its locked, durable reservations count live, judge and retries across
+worktrees; interrupted attempts stay spent. Each day's ceiling can only tighten,
+including when a new observation is supplied. The prior campaign ledger is
+separate and is neither read nor migrated. A local ledger cannot count other
+applications or prevent use of another checkout. Do not infer external quota or
+billing guarantees from it. HTTP 429 stops collection. Production quotas and
+per-turn retry limits remain in force. For Tavily, pass both `--allow-tavily`
+and a positive `--max-web-attempts`.
 
 ## Regenerate the runtime scenario review
 
 Run this standard-library recipe from the repository root after editing
-`evals/runtime/scenarios.json`. It regenerates the
-[readable review](../evals/runtime/scenarios_review.md) without invoking models,
+`backend/evaluation/cases/runtime/scenarios.json`. It regenerates the
+[readable review](../backend/evaluation/cases/runtime/scenarios_review.md) without invoking models,
 services, or evaluation executors. The JSON contract remains authoritative.
 
 ```bash
@@ -53,14 +93,14 @@ import hashlib
 import json
 from pathlib import Path
 
-source = Path('evals/runtime/scenarios.json')
+source = Path('backend/evaluation/cases/runtime/scenarios.json')
 scenarios = json.loads(source.read_text())
 lines = [
     '# Runtime scenario review',
     '',
     'Generated from [scenarios.json](scenarios.json); edit the machine contract,',
     'then regenerate this review. This view is not executable input or measured results.',
-    'Use the [regeneration recipe](../../docs/runtime_evaluation.md#regenerate-the-runtime-scenario-review).',
+    'Use the [regeneration recipe](../../../../docs/runtime_evaluation.md#regenerate-the-runtime-scenario-review).',
     '',
     f'- Contract SHA256: `{hashlib.sha256(source.read_bytes()).hexdigest()}`',
     f'- Scenarios: {len(scenarios)}',
@@ -79,7 +119,7 @@ for scenario in scenarios:
         '```',
         '',
     ])
-Path('evals/runtime/scenarios_review.md').write_text('\n'.join(lines))
+Path('backend/evaluation/cases/runtime/scenarios_review.md').write_text('\n'.join(lines))
 PY
 ```
 
@@ -89,6 +129,10 @@ For an end-to-end sequence that produces every report block, including human
 context-relevance annotation, use
 [full_evaluation_report_runbook.md](full_evaluation_report_runbook.md). The
 commands below describe individual evaluator modes.
+
+The [retrieval comparison guide](../reports/evaluation/experiments/retrieval-comparison/report.md) defines the offline
+source-only, graph-assisted, reranked, and legacy arms, their measurement
+boundaries, and the review required before drawing paired comparisons.
 
 ### Output-directory behavior
 
@@ -146,54 +190,40 @@ appears only in Diagnostics. It does not score tools, retrieval, grounding,
 answers, tokens, or latency. Run either native-only offline mode or the
 AgentEvals form for one export, not both, to avoid duplicate observations.
 
-Controlled live positive control:
+Provider-consuming commands require a reviewed fresh quota file and explicit
+confirmation. For example:
 
 ```bash
 uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id out_of_scope_biological_cats \
-  --confirm-provider-calls
-```
+  --provider-quota "$EVALUATION_QUOTA" --max-provider-attempts 6 \
+  --case-id out_of_scope_biological_cats --confirm-provider-calls
 
-Controlled Tavily fallback regression:
-
-```bash
-uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id in_scope_retnet_local_miss_fallback \
-  --confirm-provider-calls \
-  --allow-tavily
-```
-
-Three independent Researcher truncation-reliability repetitions:
-
-```bash
-uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id researcher_structured_output_truncation_reliability \
-  --repetitions 3 \
-  --confirm-provider-calls \
-  --allow-tavily
-```
-
-These are independent runs. A failed repetition followed by a successful
-repetition is not an evaluator retry.
-
-Optional claim-faithfulness judge over the newest current-fingerprint run that
-contains the selected case:
-
-```bash
 uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
-  --source-run latest \
-  --case-id local_transformer_answer_success \
-  --dimension claim_faithfulness \
-  --confirm-provider-calls
+  --provider-quota "$EVALUATION_QUOTA" --max-provider-attempts 1 \
+  --judge-provider openrouter --judge-model "$JUDGE_MODEL" \
+  --source-run latest --case-id local_transformer_answer_success \
+  --dimension claim_faithfulness --confirm-provider-calls
 ```
+
+The quota model must match the selected runtime or judge model. For web cases,
+add `--allow-tavily --max-web-attempts N`. `--repetition N` selects one
+positive repetition; `--repetitions N` selects independent repetitions.
+`--capture-diagnostics` intentionally saves private callback details under the
+run's `diagnostics/` directory. The default evaluation root is ignored; custom
+`--output-dir` or `--evaluation-root` paths may not be ignored and must be kept
+private. Publication does not copy raw diagnostics. Judge results are also
+written incrementally to a private `partial_judge_results.jsonl`, so an HTTP 429
+or later failure does not erase earlier results. Use a new output directory for
+a separately authorized invocation.
 
 The legacy `--records path/to/runtime_records.jsonl` input remains available.
 
-Judge mode uses active Analyst model settings, not a separate judge role. Current
-repository defaults are OpenRouter `openrouter/free` automatic routing;
-environment overrides remain effective. The evaluator forces temperature 0,
+Judge mode requires explicit `--judge-provider openrouter` and `--judge-model`;
+it does not inherit the active Analyst model identity. Select and authorize judge
+configuration separately from runtime roles, even when both use `openrouter/free`.
+The quota metadata must match that provider/model. The evaluator forces temperature 0,
 uses a 4,096-token output limit for bounded claim faithfulness and 512 tokens
-for each Boolean dimension, uses result rubric `runtime-semantic-v1`, and
+for each Boolean dimension, uses result rubric `runtime-semantic-v2`, and
 performs no evaluator retry.
 Claim output is capped at 32 atomic claims, five evidence IDs per claim, and
 bounded claim/reason strings. Boolean dimensions use OpenEvals; claim
@@ -206,8 +236,9 @@ under the current evaluation root and fingerprint, and one source run must
 contain every selected case. The
 error `no completed runtime run contains every selected case` means no source
 satisfies all those conditions. Common causes are scratch output, a fingerprint
-change, or cases saved in separate runs. Rerun the selected case into immutable
-history, or specify an exact run ID/records file.
+change, or cases saved in separate runs. Specify the exact compatible run ID or
+records file. New source collection requires explicit authorization and remaining
+budget; do not automatically rerun a baseline observation.
 
 Generate a top-10 relevance review sheet from an actual Analyst retrieval run.
 The sheet resolves legacy relation grounding IDs against the same loaded
@@ -226,7 +257,7 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --analyst-variant legacy_vector_context \
   --analyst-reranker-mode disabled \
   --no-render-html \
-  --write-relevance-review evals/retrieval/context_relevance_review.md
+  --write-relevance-review backend/evaluation/cases/retrieval/context_relevance_review.md
 ```
 
 Rebuild reports without running retrieval or the workflow:
@@ -268,6 +299,48 @@ publication is not a full campaign: the override only permits publication while
 the missing requirements remain visible. The CLI accepts an exact fingerprint
 without either policy flag, but documented publication always pairs the exact
 fingerprint with one flag so intent is explicit.
+
+## Publish saved system evaluation
+
+Rebuild the consolidated system edition from the sanitized saved inputs without
+running an evaluation or rescoring historical observations:
+
+```bash
+uv run --locked python scripts/build_evaluation_report.py --publish \
+  --system-reference-scorecard reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/scorecard.json \
+  --system-reference-provenance reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/provenance.json \
+  --system-runtime reports/evaluation/history/controlled-observations/runtime.json \
+  --system-metrics reports/evaluation/inputs/runtime-metrics.json \
+  --system-judge reports/evaluation/inputs/system-judge-status.json
+```
+
+The publisher derives an immutable edition identity from the runtime publication ID
+and input hashes. A later edition on the same observation date can set a larger
+positive `publication_revision` in its runtime input to select it as latest.
+Per-dimension judge scores and statuses come from the supplied judge input; no
+overall quality score is inferred. The preserved scorecard presentation was
+checked against `main` commit `76659bd6c02de3d52815e48b5e9d0faa401e7a21`. The August scorecard and prior October snapshot remain unchanged. The edition
+contains separately identified August imported-trace/live results and October
+evaluator groups; it does not combine their scores or imply improvement.
+October metrics were derived from 12 already-scored completed live runs. Their
+manifest, case-result and runtime-record SHA256 identities, grouped by original
+fingerprint, are in the derived input and edition provenance. No case was rescored.
+To rederive the sanitized metrics from the original private run directories, pass
+all 12 completed directories using repeated `--scored-run-dir` options:
+
+```bash
+uv run --locked python scripts/build_evaluation_report.py --derive-saved-runtime \
+  --scored-run-dir "$SCORED_RUN_DIRECTORY" \
+  --derived-output /tmp/derived-runtime.json
+```
+
+The example illustrates one argument; reproduce this edition with all 12 run
+directories and verify the resulting hashes against the published provenance.
+Raw records and trace content remain private. The separate
+[retrieval optimization experiment](../reports/evaluation/experiments/README.md)
+keeps its own populations, scores and provenance and cannot replace the latest
+system report. The publication index is generated by the CLI, and older
+publications do not overwrite newer latest aliases.
 
 ## Immutable history and fingerprints
 
@@ -316,14 +389,15 @@ ones; historical runs and published reports are not regenerated or rewritten.
 For the same deterministic retrieval or offline invocation, only the newest
 completed run contributes to current metrics. Older and failed runs remain in
 `history.json`. Live repetitions accumulate. Judge rows aggregate only under
-the same dimension, provider, model, and rubric identity. Root `latest.*`
-always copies one fingerprint's scorecard.
+the same dimension, provider, model, and rubric identity. Working
+`data/evaluation/latest.*` selects one fingerprint; published `reports/evaluation/latest.*`
+selects the newest observation and can present a separately identified saved bundle.
 
 Archived evaluation output and legacy scratch directories are excluded from current history.
 The report builder scans only `data/evaluation/runs/*/manifest.json`.
 
 The tracked publication layer is `reports/evaluation`. It contains only the
-selected scorecard, a generated index, and sanitized provenance. Raw traces,
+selected reports, a generated index, and sanitized provenance. Raw traces,
 runtime records, evidence text, and tool outputs remain in ignored working
 history. See the full runbook for the detailed distinction between runs,
 fingerprints, working `latest` aliases, and published snapshots.
@@ -395,6 +469,52 @@ Path efficiency is the shortest allowed completed worker path divided by
 observed worker steps, capped at 1. Incomplete or short-circuited runs are
 `N/A`.
 
+## Token usage availability
+
+New evaluation captures use `event_unique_v1`: each distinct captured model-event
+or request ID is counted once across roles, including Orchestrator, both
+Researcher stages, and retries. Distinct IDs are not merged because their role,
+model, or token values match. Events without an identity and conflicting
+duplicate values are excluded from the affected observed subtotal; a missing
+identity or any conflict also makes run coverage incomplete. Input, output, and
+total availability are tracked independently; a reported zero is observed,
+while absent, invalid, or unavailable metadata stays unavailable. A total may
+be derived from input plus output only when both are known. The captured
+provider-reported total and its source remain distinguishable when available.
+
+The evaluation-only OpenRouter JSON response hook records the original usage
+fields by unique response ID before adapter conversion. `wire_response` identifies
+that evidence; missing or invalid fields remain unavailable, and a total derived
+from two known components is not reported as a provider total. Unmatched or repeated
+response IDs cannot establish wire coverage. Streaming bodies are never buffered
+for accounting; without independently captured wire fields, adapter-normalized
+OpenRouter usage and identity-unknown trace counters remain unavailable because
+the adapter may have filled or coerced values. A uniquely identified JSON response rejected by the
+SDK before a model-end callback can retain its observed wire usage as a separate
+response observation; reservation counts remain independent.
+
+The evaluation keeps reported turn/root telemetry separate from event-derived
+usage; a partial nonzero subtotal does not replace fuller captured event data.
+For each field, report the observed/attempted request coverage, observed
+subtotal, and complete/eligible-run counts. Complete-run averages include
+known-zero runs and exclude partial or unavailable runs. Incomplete observed
+subtotals remain separately identified, and unknown denominators stay unknown.
+Missing token totals cannot pass a token budget as zero or establish a complete
+per-success cost. The tokens-per-success ratio is available only when all
+eligible runs have complete totals, their identities match their score rows,
+and no failed, uncertain or incomplete run artifact is missing. Missing
+manifests leave aggregate attempt and eligible-run totals unknown; known counts
+and unobserved manifests are reported separately. Failed and uncertain
+reservations remain spent regardless of token availability. Runtime and judge
+usage are separate; skipped judge jobs make no request, and a missing historical
+response or usage remains unavailable.
+
+Legacy records without availability metadata retain `legacy_unknown` coverage:
+old default zeros are not evidence of actual zero usage. New captures identify
+their method as `event_unique_v1`; neither method establishes provider billing
+or recovers metadata that was not captured. Historical runs, analyses and
+scorecards are immutable and are not silently rewritten under this rule.
+
 ## Context relevance
 
 Context metrics apply only to ranked Analyst source evidence. Human reviewers
@@ -439,6 +559,7 @@ Precision.
 
 ## Optional semantic judges
 
+
 Semantic judges are non-gating and require explicit provider confirmation.
 
 - `claim_faithfulness`: structured supported/partial/unsupported factual claims
@@ -448,6 +569,14 @@ Semantic judges are non-gating and require explicit provider confirmation.
 - `mentor_pedagogy`
 - `conversational_continuity`
 - `graph_usefulness`
+
+The corrected non-claim prompt relies on the OpenEvals `score`/`reasoning`
+schema rather than embedding a second conflicting schema. New judgments use
+`runtime-semantic-v2` and distinct job identities; older results remain historical.
+The evaluator reserves each provider attempt at the HTTP request boundary.
+It records available status, model, provider and request ID without publishing
+raw response content. Setup failures do not spend a provider call. Ordinary
+judge runs do not retry automatically; HTTP 429 stops the batch.
 
 The four non-faithfulness dimensions use separate Boolean OpenEvals rubrics.
 The default structured-output transport is `function_calling`, which matches
@@ -524,8 +653,7 @@ evaluation, and one aggregate quality score remain out of scope.
 The [published scorecards](../reports/evaluation/README.md) are historical and
 incomplete. They are not measurements of the current OpenRouter runtime or a
 paired graph-versus-vector improvement. Semantic judge errors and unavailable
-scores must remain visible. No fresh evaluation campaign is part of the M1
-offline engineering checks.
+scores must remain visible. No new measurements are implied by publishing these saved observations.
 
 Use [the setup and offline gates](project_overview.md#setup-and-offline-checks)
 for a locked clean-checkout test run without `.env`, credentials, private
@@ -544,9 +672,9 @@ serving provider; the adapter-injected `model_provider="openrouter"` label alone
 does not. Supported legacy `model_provider` values remain accepted for other
 adapters. Stop diagnostics accept `done_reason`, `finish_reason`, and
 `stop_reason`; token observations accept canonical usage metadata and
-OpenAI-style prompt/completion counts. Aggregate token-coverage analysis remains
-future work. Output caps, reasoning requests, and request timeouts describe
-configured behavior, not proof that every routed model has
-identical capabilities. The default `LLM_PIPELINE=ollama` selector remains a
+OpenAI-style prompt/completion counts. Availability and coverage are described in
+[Token usage availability](#token-usage-availability). Output caps, reasoning
+requests, and request timeouts describe configured behavior, not proof that every
+routed model has identical capabilities. The default `LLM_PIPELINE=ollama` selector remains a
 compatibility alias; active runtime roles use OpenRouter. Offline
 post-processing and optional Ollama reranking have their own settings.

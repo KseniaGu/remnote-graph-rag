@@ -28,8 +28,8 @@ def write_identity_fixture(root: Path) -> None:
     files = {
         "pyproject.toml": "[project]\nname = 'fixture'\n",
         "uv.lock": "version = 1\n",
-        "evals/runtime/scenarios.json": "[]\n",
-        "evals/retrieval/benchmark_cases.jsonl": "{}\n",
+        "backend/evaluation/cases/runtime/scenarios.json": "[]\n",
+        "backend/evaluation/cases/retrieval/benchmark_cases.jsonl": "{}\n",
         "scripts/evaluate_runtime_workflow.py": "RUNTIME = 1\n",
         "scripts/evaluate_retrieval_pipeline.py": "RETRIEVAL = 1\n",
         "scripts/build_evaluation_report.py": "REPORT = 1\n",
@@ -288,6 +288,9 @@ class EvaluationReportingTests(unittest.TestCase):
                 run_dir / "actual_evidence.jsonl",
                 [{"case_id": "case", "excerpt": "private fixture evidence"}],
             )
+            diagnostics = run_dir / "diagnostics"
+            diagnostics.mkdir()
+            (diagnostics / "events.jsonl").write_text("private diagnostic marker")
             manifest = register_completed_run(
                 run_dir,
                 run_kind="retrieval",
@@ -314,6 +317,13 @@ class EvaluationReportingTests(unittest.TestCase):
                 (reports_root / "latest_provenance.json").read_text(encoding="utf-8")
             )
             history_directories = list((reports_root / "history").iterdir())
+            published_text = "".join(
+                path.read_text() for path in reports_root.rglob("*") if path.is_file()
+            )
+            self.assertNotIn("private diagnostic marker", published_text)
+            self.assertFalse(
+                any(path.name == "diagnostics" for path in reports_root.rglob("*"))
+            )
 
         self.assertEqual(manifest["evaluation_fingerprint"], latest["fingerprint"])
         self.assertEqual(first["snapshot"], second["snapshot"])
@@ -422,8 +432,18 @@ class EvaluationReportingTests(unittest.TestCase):
             relevant_files = [
                 repository_root / "backend" / "app.py",
                 repository_root / "backend" / "llm" / "prompts" / "judge.txt",
-                repository_root / "evals" / "runtime" / "scenarios.json",
-                repository_root / "evals" / "retrieval" / "benchmark_cases.jsonl",
+                repository_root
+                / "backend"
+                / "evaluation"
+                / "cases"
+                / "runtime"
+                / "scenarios.json",
+                repository_root
+                / "backend"
+                / "evaluation"
+                / "cases"
+                / "retrieval"
+                / "benchmark_cases.jsonl",
                 repository_root / "pyproject.toml",
                 repository_root / "uv.lock",
                 repository_root / "storage" / "application_manifest.json",
@@ -520,7 +540,12 @@ class EvaluationReportingTests(unittest.TestCase):
             root = Path(tmp)
             scenarios = json.loads(
                 (
-                    evaluation_reporting.ROOT / "evals" / "runtime" / "scenarios.json"
+                    evaluation_reporting.ROOT
+                    / "backend"
+                    / "evaluation"
+                    / "cases"
+                    / "runtime"
+                    / "scenarios.json"
                 ).read_text(encoding="utf-8")
             )
 

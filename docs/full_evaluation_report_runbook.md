@@ -17,10 +17,22 @@ The default production baseline is:
 - Analyst reranker: disabled for the baseline;
 - prepared runtime storage: `storage`;
 - local embedder: `models/all-MiniLM-L6-v2`;
-- runtime scenarios: `evals/runtime/scenarios.json`;
-- retrieval benchmark: `evals/retrieval/benchmark_cases.jsonl`.
+- runtime scenarios: `backend/evaluation/cases/runtime/scenarios.json`;
+- retrieval benchmark: `backend/evaluation/cases/retrieval/benchmark_cases.jsonl`.
 
 The evaluation does not ingest, parse, embed, index, or mutate storage.
+
+The active Retriever `v7` requires explicit `named` or `broad` knowledge-search
+policy. Named searches require alias groups; broad searches require a validated
+in-scope route and have no alias groups. This boundary is structural and does
+not guarantee semantic relevance. A successful controlled-live out-of-scope
+completion reconstructs the application fallback; a graph-only imported trace
+does not prove the later application event. New controlled-live records use
+`provenance.response_origin` values `application_fallback_reconstruction`,
+`graph_message`, or `unavailable` to identify the captured response source.
+Historical records can lack this field; preserve their original fingerprints and
+scores. Keep routing, refusal delivery, relevance, and clarity separate when
+interpreting results.
 
 ## What a full report contains
 
@@ -40,6 +52,27 @@ groups so a routing improvement cannot hide a grounding or latency regression.
 No single command can create every block. Retrieval and runtime execution remain
 separate because they exercise different contracts; the report builder combines
 their compatible results.
+
+## Token accounting and coverage
+
+Use the versioned [token usage availability method](runtime_evaluation.md#token-usage-availability)
+when interpreting efficiency data. New captures count distinct event/request
+identities once and retain input, output, and total availability independently.
+The report separates observed subtotals and field-specific observed/attempted
+coverage from complete-run averages and their eligible-run denominators. Known
+zero is included in a complete average; partial and unavailable runs are not.
+Turn/root telemetry and runtime/judge usage remain separately attributed.
+OpenRouter JSON wire usage is captured before adapter normalization where a
+unique response ID is available. Streaming or normalized-only responses without
+wire provenance remain unavailable; accounting does not buffer streams or infer
+provider-reported totals from adapter-filled values.
+
+An unavailable total does not become zero, a passing token budget, or a complete
+cost-per-success calculation. Failed or uncertain reservations remain spent;
+skips incur no judge request. Legacy zeros without availability evidence stay
+unknown. A derived historical analysis must retain source hashes and limits;
+never edit original runs, historical scorecards, or publication indexes to fill
+missing fields. Token observations are not verified billing totals.
 
 ## Storage model: runs, fingerprints, and published reports
 
@@ -135,37 +168,75 @@ fingerprint. It is convenient locally but is ignored by Git.
 scorecard, machine-readable JSON, and sanitized provenance—not raw traces,
 retrieved excerpts, runtime records, or tool outputs. The Markdown scorecard groups
 nested metrics and collapses verbose diagnostic detail for review; use the JSON
-scorecard when exact keys or complete structured values are required. Publishing the
-same fingerprint updates its stable history snapshot and the `latest` aliases.
+scorecard when exact keys or complete structured values are required. Published
+history is immutable; a changed scorecard receives a distinct snapshot. Latest
+aliases select the newest observation, including saved composite reports.
 
 Publish only after all intended commands for a campaign finish. Generated
 evaluation/publication artifacts, `.DS_Store`, caches, bytecode, and temporary
 outputs do not affect later fingerprints. Relevant content changes still do.
 
-## Complexity 0 — prepare and freeze the campaign
+### Explicit local index for evaluation
 
-Before running measurements:
-
-1. Complete intended code, prompt, scenario, benchmark, and documentation edits.
-2. Confirm the prepared `storage` directory is the intended production snapshot.
-3. Record the current revision and working-tree state.
-4. Avoid editing tracked files until the campaign is complete.
-5. Install locked normal dependencies:
+Production `StorageSettings.index_storage` still defaults to Redis. Deployment
+copies of `docstore.json` and `property_graph_store.json` establish local document
+and graph data; they do not select local index storage. For the separately
+approved evaluation configuration, the existing BaseSettings JSON override is:
 
 ```bash
-uv sync --locked
+export INDEX_STORAGE='{"storage_type":"local","storage_path":"/absolute/preserved/storage"}'
+export DOCUMENT_STORAGE='{"storage_type":"local","storage_path":"/absolute/preserved/storage"}'
+export PROPERTY_GRAPH_STORAGE='{"storage_type":"local","storage_path":"/absolute/preserved/storage"}'
+export LOCAL_STORAGE_DIR=/absolute/preserved/storage
 ```
 
-Optional AgentEvals and judge dependencies are installed only when those stages
-will be used:
+Replace the path with the actual preserved directory containing
+`index_store.json`; `storage_path` belongs inside the `INDEX_STORAGE` JSON.
+The preparation owner verified actual `StorageSettings()` selection and local
+`KnowledgeGraphStorage.get_index_storage()` loading as `SimpleIndexStore` with
+`IndexLPG`, under kernel network denial, without models or database connections.
+This verifies local index loading only, not a complete live workflow.
 
-```bash
-uv sync --locked --group evaluation
-```
+For relocated preparation, bind `LOCAL_STORAGE_DIR` to that same directory and
+record the effective `PathSettings` inputs: `RAW_DATA_DIR`, `PARSED_PDFS_DIR`,
+`PARSED_IMAGES_DIR`, `PARSED_TEXTS_DIR`, and `PROMPTS_DIR`. They must point to the
+preserved raw/parsed assets and selected source prompt tree, not stale original
+checkout locations. `EMBEDDER_MODEL_PATH` selects the preserved
+`models/all-MiniLM-L6-v2`; `RERANKER_MODEL_PATH` selects preserved
+`models/Qwen3-Reranker-0.6B`. The preparation owner's private
+`planned_collection_environment.json` records the exact verified paths; preserve
+these values with the collection conditions. Do not copy a credential environment
+file into the snapshot.
 
-Environment overrides are allowed, but they become part of run provenance and
-may change the fingerprint. Never place API keys in commands or committed
-reports.
+The explicit configuration uses local document/index/graph storage, Pinecone
+vectors and MongoDB checkpoints. It removes Redis as a prerequisite for that
+evaluation configuration; production remains unchanged. Preserve original
+production settings and the effective evaluation override separately in
+provenance, including actual document, graph, index and `PathSettings` paths.
+Do not use `init_from_local` or vector overwrite to seed remote stores during
+evaluation. Pinecone/MongoDB and remaining live prerequisites still apply.
+OpenRouter remains the current runtime provider; this storage choice neither
+substitutes Ollama nor authorizes collection.
+
+Record downloaded document/graph file comparisons and exact hashes privately;
+filesystem timestamps are not cloud object versions.
+
+Local all-store retrieval, the configured headless hybrid workflow, and the
+deployed demo are different measurement conditions. File-level document/graph
+parity, when verified, does not establish Pinecone vector/namespace parity,
+deployed credential identity, or cloud deployment equivalence. Preserve selected
+remote index/namespace and data identities, mark unavailable parity explicitly,
+and compare returned evidence with the preserved corpus only within authorized
+collection. Without cloud/deployed-key verification, observations cannot establish
+exact demo quality, production-traffic reliability/latency, or a fully frozen
+remote-storage comparison.
+
+Keep retrieval repeatability diagnostics bounded and private: record source,
+settings, hash seeds, ordered evidence IDs/scores, missing labels, and per-case
+metric availability. Different available-case denominators must remain visible;
+seed-dependent pass/rank variation is a comparison limitation, not evidence of
+restoration improvement or isolated cause. No ranking changes, full benchmark
+reruns, or extra collection follow automatically from these diagnostics.
 
 ## Complexity 1 — validate retrieval references
 
@@ -174,7 +245,7 @@ This is local, deterministic, and does not load the model or index:
 ```bash
 uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --validate-references-only \
-  --benchmark-file evals/retrieval/benchmark_cases.jsonl \
+  --benchmark-file backend/evaluation/cases/retrieval/benchmark_cases.jsonl \
   --storage-dir storage
 ```
 
@@ -183,6 +254,11 @@ It does not register a scored run or populate a scorecard block.
 
 Use `--allow-invalid-benchmark-references` only for investigation. It is not
 appropriate for a canonical report.
+
+For the separate planned source-only, graph-assisted, reranked, and legacy
+comparison, see [retrieval ablation](../reports/evaluation/experiments/retrieval-comparison/report.md). Keep its run roots
+and labels separate from the canonical report. Preparing those commands does
+not itself authorize or run a retrieval campaign.
 
 ## Complexity 2 — create and review context relevance labels
 
@@ -199,10 +275,10 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --analyst-reranker-mode disabled \
   --storage-dir storage \
   --embedder-model-path models/all-MiniLM-L6-v2 \
-  --benchmark-file evals/retrieval/benchmark_cases.jsonl \
+  --benchmark-file backend/evaluation/cases/retrieval/benchmark_cases.jsonl \
   --evaluation-root data/evaluation/relevance_work \
   --no-render-html \
-  --write-relevance-review evals/retrieval/context_relevance_review.md
+  --write-relevance-review backend/evaluation/cases/retrieval/context_relevance_review.md
 ```
 
 The generated worksheet resolves every returned legacy grounding chunk against
@@ -231,7 +307,7 @@ For each reviewed benchmark case:
 4. Map each answer point to one or more supporting evidence IDs.
 5. Confirm the generated prepared-storage manifest identity.
 6. Synchronize approved values into the authoritative
-   `evals/retrieval/benchmark_cases.jsonl`.
+   `backend/evaluation/cases/retrieval/benchmark_cases.jsonl`.
 7. Set `context_relevance.review_status` to `reviewed` only when the labels and
    mappings are complete.
 
@@ -262,7 +338,7 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --analyst-reranker-mode disabled \
   --storage-dir storage \
   --embedder-model-path models/all-MiniLM-L6-v2 \
-  --benchmark-file evals/retrieval/benchmark_cases.jsonl \
+  --benchmark-file backend/evaluation/cases/retrieval/benchmark_cases.jsonl \
   --no-render-html
 ```
 
@@ -322,7 +398,7 @@ Native evaluator:
 ```bash
 uv run --locked python scripts/evaluate_runtime_workflow.py offline \
   --trace-export exports/langsmith_traces_20260816T233652Z.json \
-  --scenarios evals/runtime/scenarios.json
+  --scenarios backend/evaluation/cases/runtime/scenarios.json
 ```
 
 Native evaluator plus optional AgentEvals strict trajectory cross-check:
@@ -330,7 +406,7 @@ Native evaluator plus optional AgentEvals strict trajectory cross-check:
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py offline \
   --trace-export exports/langsmith_traces_20260816T233652Z.json \
-  --scenarios evals/runtime/scenarios.json \
+  --scenarios backend/evaluation/cases/runtime/scenarios.json \
   --framework agentevals
 ```
 
@@ -354,283 +430,24 @@ uv run --locked python scripts/export_langsmith_logs.py \
 Exporting accesses hosted LangSmith and requires its configured credentials. It
 does not execute the learner workflow.
 
-## Complexity 4 — run controlled live scenarios
+## Controlled live and judge evaluation
 
-Live mode invokes the real compiled workflow with configured models and prepared
-storage. It requires explicit provider confirmation and at least one `--case-id`.
-There is deliberately no implicit “run everything” mode, which prevents an
-accidental burst of model and Tavily calls.
+Follow the [evaluation request guard](runtime_evaluation.md#evaluation-request-guard)
+and [live/judge examples](runtime_evaluation.md#commands). The operator supplies
+a fresh quota observation and explicit attempt ceilings. Keep raw outputs and
+optional diagnostics in ignored private directories; custom output paths are not
+automatically ignored. Live and judge runs are optional and require provider
+confirmation. A failed, interrupted or skipped run is not a quality score.
 
-The following batches cover the reviewed suite while respecting the normal
-three-execution limit.
+## Publishing saved observations
 
-Local answer and graph behavior:
-
-```bash
-uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id local_transformer_answer_success \
-  --case-id contextual_mamba_visualization \
-  --case-id explicit_mamba_visualization_success \
-  --confirm-provider-calls
-```
-
-Mentor and graph coverage:
-
-```bash
-uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id initial_attention_quiz_route \
-  --case-id mentor_stuck_continuation \
-  --case-id transformer_encoder_graph_coverage \
-  --confirm-provider-calls
-```
-
-Continuity and out-of-scope control:
-
-```bash
-uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id contextual_medusa_web_query \
-  --case-id colbert_guidance_mode_continuation \
-  --case-id out_of_scope_biological_cats \
-  --confirm-provider-calls \
-  --allow-tavily
-```
-
-Web fallback regressions:
-
-```bash
-uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id ambiguous_eagle_without_history \
-  --case-id explicit_medusa_web_fallback_success \
-  --case-id in_scope_retnet_local_miss_fallback \
-  --confirm-provider-calls \
-  --allow-tavily
-```
-
-Researcher truncation reliability, as three independent executions:
-
-```bash
-uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id researcher_structured_output_truncation_reliability \
-  --repetitions 3 \
-  --confirm-provider-calls \
-  --allow-tavily
-```
-
-`--allow-tavily` acknowledges cases expected to require web research; it is not
-a tool sandbox. `--allow-expanded-live-suite` permits more than three total
-case/repetition executions after quota review. `--framework agentevals` adds the
-same optional non-gating trajectory cross-check to live runs.
-
-Live results populate Runtime task behavior, Reliability, Efficiency, and
-Diagnostics. Repetitions add Wilson intervals, route consistency, evidence-set
-Jaccard stability, and truncation/failure frequencies.
-
-## Complexity 5 — run optional semantic judges
-
-Judge mode reads a completed runtime record and does not execute the learner
-workflow or Tavily again. It does call the configured Analyst model, is
-non-gating, and requires `--confirm-provider-calls`.
-
-Current configuration:
-
-- provider and model: the active Analyst settings from
-  `backend/configs/models.py` and environment;
-- repository default: OpenRouter `openrouter/free` automatic routing;
-- temperature: forced to 0;
-- maximum output: 4,096 tokens for claim faithfulness and 512 for Boolean dimensions;
-- claim output: at most 32 atomic claims, five evidence IDs per claim, and bounded strings;
-- structured-output transport: `function_calling`;
-- evaluator retries: 0;
-- normal limit: three case/dimension jobs per command;
-- result rubric version: `runtime-semantic-v1`.
-
-The command prints the effective provider and model before calling it. Boolean
-dimensions use OpenEvals; claim faithfulness uses the repository's structured
-claim-to-bounded-evidence assessment. `--structured-output-method json_schema`
-and `--structured-output-method json_mode` are diagnostic alternatives; use
-them only for a deliberate rerun because each judge job can call the provider.
-JSON mode receives an explicit required-schema instruction.
-
-Analyst grounding and usefulness:
-
-```bash
-uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
-  --source-run latest \
-  --case-id local_transformer_answer_success \
-  --dimension claim_faithfulness \
-  --dimension analyst_usefulness \
-  --confirm-provider-calls
-```
-
-Mentor quality:
-
-```bash
-uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
-  --source-run latest \
-  --case-id mentor_stuck_continuation \
-  --dimension mentor_pedagogy \
-  --dimension conversational_continuity \
-  --confirm-provider-calls
-```
-
-Graph usefulness:
-
-```bash
-uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
-  --source-run latest \
-  --case-id explicit_mamba_visualization_success \
-  --dimension graph_usefulness \
-  --confirm-provider-calls
-```
-
-`--source-run latest` means the newest completed offline/live run in the current
-fingerprint containing every selected case. If no single run contains the
-selected case, or tracked files/configuration changed since it ran, the command
-reports “No completed runtime run contains all selected cases.” Use the
-exact run ID to target an older compatible record, or rerun the needed live/offline
-case after freezing the current fingerprint. `--records` supports direct legacy
-record input but is not preferred for a canonical campaign.
-
-Faithfulness is skipped/N/A without bounded evidence; graph usefulness is
-skipped/N/A without bounded graph labels. A missing required final worker is
-also skipped/N/A, while the deterministic routing failure remains visible.
-Provider, parser, and schema failures are judge execution errors with unavailable
-scores. All remain non-gating. `--allow-expanded-judge-suite` permits more than
-three jobs after explicit quota review.
-
-### Verify the judge corrections before continuing
-
-A judge run manifest can be `completed` because its artifacts were written even
-when individual judge jobs have `status=error`. The terminal now reports
-`successful` and `error` job counts. HTTP 200 proves only that the provider
-returned a response; success also requires schema parsing and validation.
-
-Run the offline correction checks first; they make no provider or Tavily calls:
-
-```bash
-uv run --no-sync python scripts/check_offline.py tests/test_runtime_evaluation.py \
-  tests/test_evaluation_reporting.py
-
-uv run --no-sync ruff check \
-  backend/evaluation/runtime_evaluation.py \
-  backend/evaluation/runtime_live.py \
-  backend/evaluation/evaluation_reporting.py \
-  scripts/evaluate_runtime_workflow.py \
-  tests/test_runtime_evaluation.py \
-  tests/test_evaluation_reporting.py
-```
-
-These corrections change the evaluation fingerprint. Old runs remain immutable
-history, but `--source-run latest` will not select an older fingerprint. Capture
-fresh source records for all three judge examples:
-
-```bash
-uv run --locked python scripts/evaluate_runtime_workflow.py live \
-  --case-id local_transformer_answer_success \
-  --case-id mentor_stuck_continuation \
-  --case-id explicit_mamba_visualization_success \
-  --confirm-provider-calls
-```
-
-This command does not authorize Tavily. Copy the printed live run ID and inspect
-non-content prerequisites:
-
-```bash
-EVAL_LIVE_RUN_ID=<printed-live-run-directory-name>
-
-jq -c '{scenario_id, passed, failed_checks: [.checks[] | select(.status == "fail") | {name, gating, reason}]}' \
-  "data/evaluation/runs/$EVAL_LIVE_RUN_ID/case_results.jsonl"
-
-jq -c '{scenario_id, final_worker: (.worker_sequence[-1] // null), evidence_capture_status, bounded_evidence_count: (.bounded_evidence | length), graph_capture_status: .graph.capture_status, graph_label_count: (.graph.node_labels | length), labeled_edge_count: (.graph.labeled_edges | length)}' \
-  "data/evaluation/runs/$EVAL_LIVE_RUN_ID/runtime_records.jsonl"
-```
-
-| Case | Required source observation |
-| --- | --- |
-| `local_transformer_answer_success` | Pass; final worker `analyst`; bounded evidence captured |
-| `mentor_stuck_continuation` | Pass; final worker `mentor` |
-| `explicit_mamba_visualization_success` | Pass; final worker `visualizer`; graph capture `captured` with labels and labeled edges |
-
-Do not interpret a role-specific semantic score when its deterministic case
-fails. The evaluator records the job as skipped before a provider call. If the Mentor
-case routes to Retriever → Analyst, it retains that deterministic regression and
-leaves Mentor pedagogy/continuity as `N/A`.
-
-Run the Analyst judges against that exact fresh source run:
-
-```bash
-uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
-  --source-run "$EVAL_LIVE_RUN_ID" \
-  --case-id local_transformer_answer_success \
-  --dimension claim_faithfulness \
-  --dimension analyst_usefulness \
-  --confirm-provider-calls
-```
-
-The expected terminal shape is:
-
-```text
-(2 successful, 0 skipped, 0 error; provider calls attempted: 2)
-```
-
-Copy the printed judge run ID and inspect its safe result metadata:
-
-```bash
-EVAL_JUDGE_RUN_ID=<printed-judge-run-directory-name>
-
-jq -c '{scenario_id, dimension, status, score, provider_call_attempted, transport_status, http_status_code, stop_reason, configured_output_token_limit, output_present, output_size_chars, parser_classification, confirmed_truncation, error_type, error_cause_types, raw_output_omitted}' \
-  "data/evaluation/runs/$EVAL_JUDGE_RUN_ID/judge_results.jsonl"
-```
-
-A parser failure now identifies its exception type/cause chain without
-persisting raw model output. Try the default `function_calling` transport first.
-If it still fails, review those fields before authorizing one deliberate
-diagnostic rerun. Append exactly one of these alternatives to the same judge
-command:
-
-```bash
-uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
-  --source-run "$EVAL_LIVE_RUN_ID" \
-  --case-id local_transformer_answer_success \
-  --dimension claim_faithfulness \
-  --dimension analyst_usefulness \
-  --structured-output-method json_schema \
-  --confirm-provider-calls
-```
-
-For the other alternative, replace `json_schema` with `json_mode`.
-
-Do not run both automatically: every selected dimension is another provider
-call, and a transport change is recorded in invocation/configuration identity.
-
-Run Mentor quality only when the Mentor source prerequisite passed:
-
-```bash
-uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
-  --source-run "$EVAL_LIVE_RUN_ID" \
-  --case-id mentor_stuck_continuation \
-  --dimension mentor_pedagogy \
-  --dimension conversational_continuity \
-  --confirm-provider-calls
-```
-
-Run graph usefulness only when the graph source prerequisite passed:
-
-```bash
-uv run --locked --group evaluation python scripts/evaluate_runtime_workflow.py judge \
-  --source-run "$EVAL_LIVE_RUN_ID" \
-  --case-id explicit_mamba_visualization_success \
-  --dimension graph_usefulness \
-  --confirm-provider-calls
-```
-
-Graph usefulness now reuses bounded node labels and labeled relations from the
-captured Plotly artifact. It never queries current storage to repair an old run.
-An old record with `graph.capture_status=unavailable` therefore needs a fresh
-live source run; rerunning judge mode alone cannot supply its missing labels.
-
-After intended judge jobs are successful or explicitly accepted as `N/A`,
-continue with Complexity 6.
+To reproduce the public October report without new measurements, use the
+[system-publication command and its saved inputs](runtime_evaluation.md#publish-saved-system-evaluation).
+August and October system observations keep separate populations and identities; retrieval optimization experiments are reported separately.
+The tool writes descriptive files under `reports/evaluation/history/`, generates
+the publication index, and selects `latest.*` by observation date. Republishing
+an older historical scorecard cannot replace a newer report. Never hand-edit
+generated scorecards, indexes or provenance.
 
 ## Complexity 6 — rebuild, audit, and publish
 
@@ -714,8 +531,9 @@ that less-expressive form: pair the exact fingerprint with `--confirm-complete`
 or `--allow-incomplete` so publication intent is reviewable. Likewise, do not
 rely on confirmation or an override without an exact fingerprint.
 
-Publication writes latest aliases, a stable historical snapshot, sanitized
-provenance, and `reports/evaluation/index.md`.
+Publication writes a historical snapshot, sanitized provenance and a generated
+index. Latest aliases select the newest observation rather than the most recently
+published historical snapshot.
 
 Review the generated files before committing them. Raw run artifacts remain
 ignored in `data/evaluation`.
@@ -734,10 +552,13 @@ ignored in `data/evaluation`.
 | Any evaluator | `--output-dir PATH` | Debug-only explicit destination; use a unique directory and keep it under the selected root's `runs/` if it must aggregate |
 | Offline | `--trace-export PATH` | Select an exact LangSmith export |
 | Offline/live | `--framework agentevals` | Add non-gating strict trajectory comparison |
+| Live/judge | `--provider-quota PATH --max-provider-attempts N` | Fresh quota observation and explicit per-run attempt ceiling |
+| Live | `--max-web-attempts N` | Per-run web attempt ceiling, combined with `--allow-tavily` |
 | Live | repeated `--case-id` | Select explicit workflow executions |
 | Live | `--repetitions N` | Measure stochastic reliability |
 | Live | `--allow-tavily` | Acknowledge expected web-provider use |
 | Live | `--allow-expanded-live-suite` | Permit more than three executions after quota review |
+| Judge | `--judge-provider openrouter --judge-model MODEL` | Explicit separately authorized judge identity; must match quota metadata |
 | Judge | repeated `--dimension` | Select separate semantic rubrics |
 | Judge | `--source-run RUN_ID` | Pin the judge to one immutable runtime run |
 | Judge | `--structured-output-method METHOD` | Deliberate parser diagnostic; default `function_calling`, alternatives `json_schema` or `json_mode` |
@@ -757,7 +578,7 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --analyst-variant optimized \
   --storage-dir storage \
   --embedder-model-path models/all-MiniLM-L6-v2 \
-  --benchmark-file evals/retrieval/benchmark_cases.jsonl \
+  --benchmark-file backend/evaluation/cases/retrieval/benchmark_cases.jsonl \
   --evaluation-root data/evaluation_comparisons/optimized_analyst \
   --no-render-html
 ```
@@ -787,8 +608,7 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
 The [published scorecards](../reports/evaluation/README.md) are historical and
 incomplete. They are not measurements of the current OpenRouter runtime or a
 paired graph-versus-vector improvement. Semantic judge errors and unavailable
-scores must remain visible. No fresh evaluation campaign is part of the M1
-offline engineering checks.
+scores must remain visible. No new measurements are implied by publishing these saved observations.
 
 Use [the setup and offline gates](project_overview.md#setup-and-offline-checks)
 for a locked clean-checkout test run without `.env`, credentials, private

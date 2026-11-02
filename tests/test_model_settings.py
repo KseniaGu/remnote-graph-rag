@@ -130,17 +130,17 @@ def test_ollama_pipeline_selector_remains_openrouter_compatibility_alias(monkeyp
 
 def test_runtime_routing_prompt_versions_are_current(monkeypatch) -> None:
     default = ModelSettings()
-    assert default.orchestrator.prompt_version["routing"] == "v5"
-    assert default.retriever.prompt_version == "v6"
-    assert default.researcher.prompt_version == "v5"
+    assert default.orchestrator.prompt_version["routing"] == "v6"
+    assert default.retriever.prompt_version == "v7"
+    assert default.researcher.prompt_version == "v6"
 
     monkeypatch.setenv("VLLM_ROUTING_URL", "https://vllm.example")
     monkeypatch.setenv("VLLM_GENERATION_URL", "https://vllm-generation.example")
     monkeypatch.setenv("VLLM_MODEL_PATH", "test-model")
     vllm = _vllm_models()
-    assert vllm.orchestrator.prompt_version["routing"] == "v5"
-    assert vllm.retriever.prompt_version == "v6"
-    assert vllm.researcher.prompt_version == "v5"
+    assert vllm.orchestrator.prompt_version["routing"] == "v6"
+    assert vllm.retriever.prompt_version == "v7"
+    assert vllm.researcher.prompt_version == "v6"
 
 
 def test_graph_index_ollama_params_include_model_and_indexing_generation_fields() -> (

@@ -936,7 +936,7 @@
   {
     "schema_version": "runtime-evaluation",
     "id": "in_scope_retnet_local_miss_fallback",
-    "version": 2,
+    "version": 3,
     "review_status": "reviewed",
     "description": "An in-domain named topic must not be answered from adjacent local evidence; a true local support gap should escalate to qualified web research.",
     "trace_ids": [],
@@ -989,7 +989,8 @@
           "required_terms_any": [
             "Retentive Network",
             "AI",
-            "machine learning"
+            "machine learning",
+            "neural network"
           ],
           "forbidden_terms": [
             "ResNet"

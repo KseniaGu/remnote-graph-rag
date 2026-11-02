@@ -2,10 +2,10 @@ import asyncio
 import json
 import random
 import re
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.configs.chat_limits import ChatLimitsSettings
 from backend.configs.constants import (
@@ -101,6 +101,10 @@ TopicAliasGroup = Annotated[list[str], Field(min_length=1, max_length=3)]
 class KnowledgeSearchInput(QueryListInput):
     """Knowledge-search arguments with deterministic named-topic requirements."""
 
+    topic_policy: Literal["named", "broad"] = Field(
+        description="Use named for required topic aliases, or broad for an in-scope broad search."
+    )
+
     required_topics: list[TopicAliasGroup] = Field(
         default_factory=list,
         max_length=3,
@@ -142,6 +146,14 @@ class KnowledgeSearchInput(QueryListInput):
             normalized_groups.append(normalized_aliases)
 
         return normalized_groups
+
+    @model_validator(mode="after")
+    def validate_topic_policy(self):
+        if self.topic_policy == "named" and not self.required_topics:
+            raise ValueError("named searches require topic aliases")
+        if self.topic_policy == "broad" and self.required_topics:
+            raise ValueError("broad searches must not specify topic aliases")
+        return self
 
 
 def _topic_tokens(text: str) -> list[str]:
@@ -210,7 +222,9 @@ def search_knowledge_base(
 
     @tool("search_knowledge_base", args_schema=KnowledgeSearchInput)
     def _search_knowledge_base(
-        queries: list[str], required_topics: list[list[str]] | None = None
+        queries: list[str],
+        topic_policy: str,
+        required_topics: list[list[str]] | None = None,
     ):
         """Searches the knowledge base using advanced graph and vector retrieval.
 

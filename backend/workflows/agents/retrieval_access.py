@@ -67,12 +67,14 @@ class RetrievalHealthReport:
 class RetrievalStoreAccess:
     """Shared access layer for retrieval vector, graph, and docstore reads."""
 
-    def __init__(self, knowledge_graph_indexer: Any) -> None:
+    def __init__(
+        self, knowledge_graph_indexer: Any, *, include_graph: bool = True
+    ) -> None:
         self.indexer = knowledge_graph_indexer
         self.storage_context = getattr(knowledge_graph_indexer, "storage_context", None)
         self.embedder = getattr(knowledge_graph_indexer, "embedder", None)
         self.vector_store = self._resolve_vector_store()
-        self.graph_store = self._resolve_graph_store()
+        self.graph_store = self._resolve_graph_store() if include_graph else None
         self.health_report = RetrievalHealthReport()
         self._concept_nodes: list[Any] | None = None
         self._concept_by_id: dict[str, Any] = {}

@@ -12,6 +12,7 @@ from langgraph.checkpoint.mongodb import MongoDBSaver
 from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from pydantic import ValidationError
 from pymongo import MongoClient
 from tavily import TavilyClient
 
@@ -52,6 +53,7 @@ from backend.workflows.agents.analyst_retrieval import AnalystRetrievalPipeline
 from backend.workflows.agents.factory import AgentsFactory
 from backend.workflows.agents.schemas import ResearchResult, RoutingDecision, State
 from backend.workflows.agents.tools import (
+    KnowledgeSearchInput,
     deep_web_research,
     get_subgraphs_to_visualize,
     search_knowledge_base,
@@ -246,7 +248,9 @@ class LearnerWorkflow:
 
                 # Configure role-specific model capabilities
                 if role_type == ModelRoleType.orchestrator:
-                    model = model.with_structured_output(RoutingDecision)
+                    model = model.with_structured_output(
+                        RoutingDecision, include_raw=True
+                    )
                 elif role_type == ModelRoleType.retriever:
                     model = model.bind_tools(
                         [base_kb_search_tool, visualizer_kb_search_tool]
@@ -485,7 +489,15 @@ class LearnerWorkflow:
                 response = await model.ainvoke(
                     messages_to_pass, config={"run_name": run_name}
                 )
-                self.chat_limit_service.record_model_usage(context, response)
+                usage_response = (
+                    response.get("raw")
+                    if role_type == ModelRoleType.orchestrator
+                    and isinstance(response, dict)
+                    else response
+                )
+                self.chat_limit_service.record_model_usage(context, usage_response)
+                if role_type == ModelRoleType.orchestrator:
+                    return self._normalize_routing_decision(response)
                 return response
             except UserFacingChatError:
                 raise
@@ -634,7 +646,7 @@ class LearnerWorkflow:
         # Context is empty or unrecognized; an LLM classifier is needed for intent routing.
         return None
 
-    async def orchestrator_node(self, state: State) -> dict[str, str]:
+    async def orchestrator_node(self, state: State) -> dict[str, Any]:
         """Orchestrator agent: central router that decides next workflow step.
 
         Fast path: when the context uniquely determines the next step (sentinels, KB results,
@@ -685,16 +697,60 @@ class LearnerWorkflow:
                 request_scope=request_scope,
                 reasoning=response.reasoning,
             )
-            return {"next_step": next_step, "request_scope": request_scope}
+            return {
+                "next_step": next_step,
+                "request_scope": request_scope,
+                "routing_validated": True,
+            }
 
-        logger.warning(
-            "[ORCHESTRATOR] LLM failed on ambiguous input; defaulting to retriever."
-        )
-        add_trace_metadata("request_scope", "ambiguous")
-        return {
-            "next_step": ModelRoleType.retriever.name,
-            "request_scope": "ambiguous",
-        }
+        raise AIResponseInvalid()
+
+    @staticmethod
+    def _normalize_routing_decision(response: Any) -> RoutingDecision:
+        """Validate the raw structured envelope before making routing decisions."""
+        if not isinstance(response, dict) or set(response) != {
+            "raw",
+            "parsed",
+            "parsing_error",
+        }:
+            raise AIResponseInvalid()
+        raw = response["raw"]
+        if not isinstance(raw, AIMessage) or raw.invalid_tool_calls:
+            raise AIResponseInvalid()
+        calls = raw.tool_calls
+        try:
+            if calls:
+                if (
+                    len(calls) != 1
+                    or calls[0].get("name") != "RoutingDecision"
+                    or raw.content
+                    or response["parsing_error"] is not None
+                ):
+                    raise ValueError("invalid routing tool envelope")
+                decision = RoutingDecision.model_validate(
+                    calls[0].get("args"), strict=True
+                )
+                parsed = response["parsed"]
+                if not isinstance(parsed, RoutingDecision) or parsed != decision:
+                    raise ValueError("conflicting routing decision")
+                return decision
+            if response["parsed"] is not None or response["parsing_error"] is not None:
+                raise ValueError("conflicting text envelope")
+            if not isinstance(raw.content, str):
+                raise ValueError("routing text is not a string")
+
+            def unique_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("duplicate routing field")
+                    result[key] = value
+                return result
+
+            value = json.loads(raw.content, object_pairs_hook=unique_fields)
+            return RoutingDecision.model_validate(value, strict=True)
+        except (ValueError, TypeError, ValidationError):
+            raise AIResponseInvalid() from None
 
     async def retriever_node(self, state: State) -> dict[str, str]:
         """Retriever agent: fetches information from knowledge base or prepares visualization data.
@@ -718,7 +774,24 @@ class LearnerWorkflow:
         )
 
         response = await self.call_model(messages_to_pass, ModelRoleType.retriever)
+        if response and response.invalid_tool_calls:
+            raise AIResponseInvalid()
         if response and response.tool_calls:
+            for tool_call in response.tool_calls:
+                if tool_call.get("name") == "search_knowledge_base":
+                    try:
+                        search = KnowledgeSearchInput.model_validate(
+                            tool_call.get("args")
+                        )
+                        if search.topic_policy == "broad" and (
+                            state.request_scope != "in_scope"
+                            or not state.routing_validated
+                        ):
+                            raise ValueError(
+                                "broad search requires validated in-scope routing"
+                            )
+                    except (ValueError, TypeError, ValidationError):
+                        raise AIResponseInvalid() from None
             tool_results = await self.call_tools(response)
             retrieval_status = self._assess_retrieval_results(tool_results)
         else:
@@ -798,7 +871,9 @@ class LearnerWorkflow:
         model_name = ModelRoleType.researcher.name.upper()
         add_trace_metadata("context", state.context or "")
         messages_to_pass = self.create_messages_to_pass(
-            ModelRoleType.researcher, state, ("input_text", "context")
+            ModelRoleType.researcher,
+            state,
+            ("input_text", "context", "conversation_history"),
         )
 
         response = await self.call_model(

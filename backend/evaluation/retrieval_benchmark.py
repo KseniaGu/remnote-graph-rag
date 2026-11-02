@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -464,7 +464,7 @@ class EvidenceCatalog:
 class CaseResult:
     case_id: str
     mode: str
-    passed: bool
+    passed: bool | None
     scores: dict[str, float | int | None]
     variant: str | None = None
     diagnostics: dict[str, float | int | None] = field(default_factory=dict)
@@ -472,9 +472,17 @@ class CaseResult:
     missing_required: dict[str, list[Any]] = field(default_factory=dict)
     forbidden_hits: dict[str, list[Any]] = field(default_factory=dict)
     actual_evidence: dict[str, Any] = field(default_factory=dict)
+    observability: dict[str, Any] = field(default_factory=dict)
+    unavailable_checks: list[str] = field(default_factory=list)
 
     def model_dump(self, *, exclude_none: bool = False) -> dict[str, Any]:
-        return _dump_dataclass(self, exclude_none=exclude_none)
+        payload = _dump_dataclass(self, exclude_none=exclude_none)
+        if self.variant == "source_vector_only":
+            payload["passed"] = self.passed
+            payload["scores"] = dict(self.scores)
+            payload["diagnostics"] = dict(self.diagnostics)
+        payload["observability"] = dict(self.observability)
+        return payload
 
 
 @dataclass
@@ -687,8 +695,10 @@ def score_case(
     else:
         concept_eval = concept_label_eval
         concept_field = "concept_labels"
-    _add_missing(missing_required, concept_field, concept_eval["missing_all"])
-    scores["concept_recall"] = concept_eval["recall"]
+    source_only = variant == "source_vector_only" and case.mode == "analyst"
+    if not source_only:
+        _add_missing(missing_required, concept_field, concept_eval["missing_all"])
+    scores["concept_recall"] = None if source_only else concept_eval["recall"]
 
     relation_id_eval = _eval_relation_ids(
         case.expected_evidence.relation_ids, actual, catalog
@@ -704,13 +714,28 @@ def score_case(
     else:
         relation_eval = relation_spec_eval
         relation_field = "relations"
-    _add_missing(missing_required, relation_field, relation_eval["missing_all"])
-    scores["relation_recall"] = relation_eval["recall"]
+    if not source_only:
+        _add_missing(missing_required, relation_field, relation_eval["missing_all"])
+    scores["relation_recall"] = None if source_only else relation_eval["recall"]
+    if source_only:
+        diagnostics.update(
+            {
+                "concept_id_recall": None,
+                "concept_label_recall": None,
+                "relation_id_recall": None,
+                "relation_spec_recall": None,
+            }
+        )
 
     forbidden_hits = _forbidden_hits(case.forbidden_evidence, actual, catalog)
     scores["forbidden_evidence_count"] = sum(
         len(values) for values in forbidden_hits.values()
     )
+    if source_only:
+        scores["source_forbidden_evidence_count"] = len(
+            forbidden_hits.get("source_chunk_ids", [])
+        )
+        scores["forbidden_evidence_count"] = None
     scores["retrieval_adequate"] = int(
         bool(
             actual.source_chunk_ids_ranked
@@ -721,10 +746,12 @@ def score_case(
         )
     )
     scores["retrieval_error_count"] = int(actual.retrieval_error is not None)
-    scores["dangling_edge_count"] = _int_metric(
-        actual.graph_metrics, "dangling_edge_count"
+    scores["dangling_edge_count"] = (
+        None
+        if source_only
+        else _int_metric(actual.graph_metrics, "dangling_edge_count")
     )
-    scores["chunk_node_count"] = _chunk_node_count(actual)
+    scores["chunk_node_count"] = None if source_only else _chunk_node_count(actual)
     context_scores = _score_context_relevance(case, actual)
     scores.update(context_scores["scores"])
     diagnostics.update(context_scores["diagnostics"])
@@ -732,12 +759,29 @@ def score_case(
     if actual.retrieval_error:
         failures.append(f"retrieval failed: {actual.retrieval_error}")
     _apply_required_all_failures(missing_required, failures)
-    _apply_thresholds(case.thresholds, scores, failures)
+    if source_only:
+        source_thresholds = replace(
+            case.thresholds,
+            concept_recall=None,
+            relation_recall=None,
+            max_dangling_edges=None,
+            max_chunk_nodes=None,
+            forbidden_evidence_count=None,
+        )
+        _apply_thresholds(source_thresholds, scores, failures)
+        if (
+            case.thresholds.forbidden_evidence_count is not None
+            and scores["source_forbidden_evidence_count"]
+            > case.thresholds.forbidden_evidence_count
+        ):
+            failures.append("source forbidden evidence exceeds threshold")
+    else:
+        _apply_thresholds(case.thresholds, scores, failures)
 
     return CaseResult(
         case_id=case.id,
         mode=case.mode,
-        passed=not failures,
+        passed=False if failures else None if source_only else True,
         variant=variant,
         scores=scores,
         diagnostics=diagnostics,
@@ -745,6 +789,14 @@ def score_case(
         missing_required=missing_required,
         forbidden_hits=forbidden_hits,
         actual_evidence=actual.compact(),
+        unavailable_checks=[
+            "concepts",
+            "relations",
+            "graph_shape",
+            "graph_forbidden_evidence",
+        ]
+        if source_only
+        else [],
     )
 
 
@@ -756,9 +808,12 @@ def summarize_results(results: list[CaseResult]) -> dict[str, Any]:
                 score_totals.setdefault(metric, []).append(float(value))
     return {
         "case_count": len(results),
-        "passed_count": sum(1 for result in results if result.passed),
-        "failed_count": sum(1 for result in results if not result.passed),
-        "failed_case_ids": [result.case_id for result in results if not result.passed],
+        "passed_count": sum(1 for result in results if result.passed is True),
+        "failed_count": sum(1 for result in results if result.passed is False),
+        "incomplete_count": sum(1 for result in results if result.passed is None),
+        "failed_case_ids": [
+            result.case_id for result in results if result.passed is False
+        ],
         "mean_scores": {
             metric: sum(values) / len(values)
             for metric, values in sorted(score_totals.items())
@@ -1010,8 +1065,9 @@ def render_markdown_summary(summary: dict[str, Any], results: list[CaseResult]) 
         f"- Cases: {summary['case_count']}",
         f"- Passed: {summary['passed_count']}",
         f"- Failed: {summary['failed_count']}",
+        f"- Incomplete: {summary.get('incomplete_count', 0)}",
     ]
-    failed = [result for result in results if not result.passed]
+    failed = [result for result in results if result.passed is False]
     if failed:
         lines.extend(["", "## Failed Cases"])
         lines.extend(

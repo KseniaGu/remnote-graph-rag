@@ -1,7 +1,7 @@
 """Run local retrieval benchmarks and debugging for Graph RAG retrieval.
 
 By default this script scores reviewed benchmark cases from
-evals/retrieval/benchmark_cases.jsonl against local production storage. Pass
+backend/evaluation/cases/retrieval/benchmark_cases.jsonl against local production storage. Pass
 --debug-default-queries to run the older exploratory query set without scoring.
 """
 
@@ -12,9 +12,11 @@ import hashlib
 import json
 import re
 import sys
+import time
 from collections import Counter, deque
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -56,7 +58,14 @@ DEFAULT_RUN_ROOT = (
 DEFAULT_STORAGE_DIR = ROOT_DIR / "storage"
 DEFAULT_RAW_DATA_DIR = ROOT_DIR / "data" / "raw" / "AI Research"
 DEFAULT_EMBEDDER_DIR = ROOT_DIR / "models" / "all-MiniLM-L6-v2"
-DEFAULT_BENCHMARK_FILE = ROOT_DIR / "evals" / "retrieval" / "benchmark_cases.jsonl"
+DEFAULT_BENCHMARK_FILE = (
+    ROOT_DIR
+    / "backend"
+    / "evaluation"
+    / "cases"
+    / "retrieval"
+    / "benchmark_cases.jsonl"
+)
 
 DEFAULT_ANALYST_QUERIES = [
     "Text Classification",
@@ -185,7 +194,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--analyst-variant",
-        choices=["config", "optimized", "legacy_vector_context"],
+        choices=["config", "optimized", "legacy_vector_context", "source_vector_only"],
         default="config",
         help=(
             "Analyst implementation to score. 'config' uses the runtime "
@@ -243,7 +252,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Open Visualizer figures interactively with Plotly show().",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if (
+        args.analyst_variant == "source_vector_only"
+        and args.analyst_reranker_mode != "disabled"
+    ):
+        parser.error("source_vector_only requires --analyst-reranker-mode disabled")
+    if args.analyst_variant == "source_vector_only" and (
+        args.mode != "analyst" or args.debug_default_queries
+    ):
+        parser.error(
+            "source_vector_only requires --mode analyst and scored benchmark mode"
+        )
+    return args
 
 
 def timestamp_id() -> str:
@@ -336,6 +357,31 @@ def load_indexer(args: argparse.Namespace) -> tuple[KnowledgeGraphIndexer, Path]
         vector_storage=local_storage,
         property_graph_storage=local_storage,
     )
+    if args.analyst_variant == "source_vector_only":
+        embedder = HuggingFaceEmbedding(
+            str(embedder_path),
+            trust_remote_code=True,
+            embed_batch_size=5,
+            local_files_only=True,
+        )
+        from llama_index.core.storage.docstore import SimpleDocumentStore
+        from llama_index.core.vector_stores import SimpleVectorStore
+
+        for name in ("docstore.json", "default__vector_store.json"):
+            if not (storage_dir / name).is_file():
+                raise FileNotFoundError(f"Source-only storage missing {name}")
+        storage = SimpleNamespace(
+            docstore=SimpleDocumentStore.from_persist_dir(persist_dir=str(storage_dir)),
+            vector_store=SimpleVectorStore.from_persist_dir(
+                persist_dir=str(storage_dir)
+            ),
+        )
+        return SimpleNamespace(
+            index=None,
+            storage_context=storage,
+            embedder=embedder,
+            kg_search_settings=make_search_settings(args),
+        ), embedder_path
     kg_storage = KnowledgeGraphStorage(path_settings, storage_settings)
     embedder = HuggingFaceEmbedding(
         str(embedder_path),
@@ -982,8 +1028,11 @@ def run_benchmark(
         else "not_run"
     )
     analyst_pipeline = (
-        AnalystRetrievalPipeline(indexer)
-        if analyst_variant == "optimized" and "analyst" in case_modes
+        AnalystRetrievalPipeline(
+            indexer, source_only=analyst_variant == "source_vector_only"
+        )
+        if analyst_variant in {"optimized", "source_vector_only"}
+        and "analyst" in case_modes
         else None
     )
     visualizer_pipeline = (
@@ -1012,21 +1061,58 @@ def run_benchmark(
 
     for case in cases:
         variant = analyst_variant if case.mode == "analyst" else visualizer_variant
+        observation = {
+            "retrieval_seconds": None,
+            "timing_boundary": "retrieval calls only; excludes initialization, evidence normalization and scoring",
+            "candidate_count": None,
+            "final_count": None,
+            "context_count": None,
+            "context_count_reason": "benchmark does not render the final context",
+            "normalized_source_count": None,
+            "embedding_operations": None,
+            "reranking_operations": None,
+            "reranking_failures": None,
+            "requested_reranker_mode": args.analyst_reranker_mode
+            if case.mode == "analyst"
+            else None,
+            "effective_reranker_mode": None,
+            "peak_memory_bytes": None,
+        }
         try:
             if case.mode == "analyst":
                 if analyst_pipeline is not None:
+                    analyst_pipeline.start_observation()
+                    start = time.perf_counter()
+                    try:
+                        raw_results = [
+                            analyst_pipeline._search_one(query)
+                            for query in case.queries
+                        ]
+                    finally:
+                        observation["retrieval_seconds"] = time.perf_counter() - start
+                        observation.update(analyst_pipeline.finish_observation())
+                    observation["requested_reranker_mode"] = args.analyst_reranker_mode
+                    observation["candidate_count"] = sum(
+                        item["diagnostics"]["candidate_count"] for item in raw_results
+                    )
+                    observation["final_count"] = sum(
+                        item["diagnostics"]["final_count"] for item in raw_results
+                    )
+                    observation.update(analyst_pipeline.observe_context(raw_results))
+                    observation["context_count_reason"] = None
                     query_actuals = [
-                        actual_evidence_from_analyst_result(
-                            analyst_pipeline._search_one(query),
-                            catalog,
-                        )
-                        for query in case.queries
+                        actual_evidence_from_analyst_result(item, catalog)
+                        for item in raw_results
                     ]
                     actual = merge_actual_evidence(query_actuals)
                 elif analyst_retriever is not None:
-                    query_results = retrieve_legacy_query_evidence(
-                        analyst_retriever, case.queries, analyst=True
-                    )
+                    start = time.perf_counter()
+                    try:
+                        query_results = retrieve_legacy_query_evidence(
+                            analyst_retriever, case.queries, analyst=True
+                        )
+                    finally:
+                        observation["retrieval_seconds"] = time.perf_counter() - start
                     actual = actual_evidence_from_legacy_results(query_results, catalog)
                     actual = enrich_source_observations(
                         actual,
@@ -1038,13 +1124,21 @@ def run_benchmark(
                     )
             else:
                 if visualizer_pipeline is not None:
-                    nodes, triplets, returned_queries = visualizer_pipeline.visualize(
-                        case.queries
-                    )
+                    start = time.perf_counter()
+                    try:
+                        nodes, triplets, returned_queries = (
+                            visualizer_pipeline.visualize(case.queries)
+                        )
+                    finally:
+                        observation["retrieval_seconds"] = time.perf_counter() - start
                 elif visualizer_retriever is not None:
-                    query_results = retrieve_legacy_query_evidence(
-                        visualizer_retriever, case.queries, analyst=False
-                    )
+                    start = time.perf_counter()
+                    try:
+                        query_results = retrieve_legacy_query_evidence(
+                            visualizer_retriever, case.queries, analyst=False
+                        )
+                    finally:
+                        observation["retrieval_seconds"] = time.perf_counter() - start
                     nodes, triplets, returned_queries = format_visualization_results(
                         query_results
                     )
@@ -1067,7 +1161,26 @@ def run_benchmark(
         except Exception as exc:
             actual = ActualEvidence(retrieval_error=type(exc).__name__)
 
+        if not actual.retrieval_error:
+            observation["normalized_source_count"] = len(actual.source_chunk_ids_ranked)
+        if analyst_pipeline is not None and case.mode == "analyst":
+            effective = observation["effective_reranker_mode"]
+            reason = None
+            if actual.retrieval_error:
+                reason = "retrieval failed"
+            elif effective in {"fallback", "partial", "not_invoked"}:
+                reason = f"reranker {effective}"
+            elif effective is None:
+                reason = "reranker disposition unavailable"
+            observation["comparison_measurement_valid"] = reason is None
+            observation["comparison_measurement_reason"] = reason
+        else:
+            observation["comparison_measurement_valid"] = None
+            observation["comparison_measurement_reason"] = (
+                "not observed for this retrieval path"
+            )
         result = score_case(case, actual, catalog, variant=variant)
+        result.observability = observation
         results.append(result)
         actual_rows.append(
             {
@@ -1076,6 +1189,7 @@ def run_benchmark(
                 "variant": variant,
                 "queries": case.queries,
                 "actual_evidence": actual.compact(),
+                "observability": observation,
             }
         )
 
@@ -1229,7 +1343,9 @@ def main() -> int:
                     RetrievalStoreAccess,
                 )
 
-                review_source_access = RetrievalStoreAccess(indexer)
+                review_source_access = RetrievalStoreAccess(
+                    indexer, include_graph=args.analyst_variant != "source_vector_only"
+                )
                 args.write_relevance_review.parent.mkdir(parents=True, exist_ok=True)
                 args.write_relevance_review.write_text(
                     render_context_relevance_review(
@@ -1270,7 +1386,13 @@ def main() -> int:
             print(f"- Summary: {output_dir / 'summary.md'}")
             print(f"- Case results: {output_dir / 'case_results.jsonl'}")
             print(f"- Actual evidence: {output_dir / 'actual_evidence.jsonl'}")
-            print(f"- Passed: {summary['passed_count']}/{summary['case_count']}")
+            print(
+                f"- Passed: {summary['passed_count']}/{summary['case_count'] - summary['incomplete_count']} complete cases"
+            )
+            if summary["incomplete_count"]:
+                print(
+                    f"- Incomplete (unavailable checks): {summary['incomplete_count']}"
+                )
             if summary["failed_count"]:
                 print(f"- Failed cases: {', '.join(summary['failed_case_ids'])}")
                 return 1 if args.fail_on_threshold else 0
