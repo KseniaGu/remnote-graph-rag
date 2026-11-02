@@ -1,4 +1,4 @@
-# Portfolio evaluation: controlled final observations
+# Controlled evaluation: saved observations
 
 This is an offline summary of saved evaluation artifacts, not a publication
 scorecard or a production-traffic measurement. The controlled runtime completed
@@ -19,8 +19,8 @@ quality score is available.
 ## Runtime outcomes and quality boundaries
 
 A deterministic pass requires all applicable gating checks in the
-[scenario contract](../../evals/runtime/scenarios.json) to pass; report-only
-checks do not change that result (see [runtime methods](../../docs/runtime_evaluation.md#scorecard)).
+[scenario contract](../../../../evals/runtime/scenarios.json) to pass; report-only
+checks do not change that result (see [runtime methods](../../../../docs/runtime_evaluation.md#scorecard)).
 The deterministic pass share is 83.3% of the 12 completed, scored records. The 10/15
 planned observed-pass count does not assign a score to interrupted cases. The
 Mentor continuation failed its routing/worker-step contract; RetNet failed its
@@ -34,7 +34,7 @@ was 429; no response body or rate-limit headers were retained. Neither its origi
 nor cooldown is known. The configured fixed model and Phala-only routing are
 not observed serving identity: serving identity was unavailable for 1/1 attempt.
 Input, output and total token availability were each 0/1; subtotals and averages
-are N/A. The [sanitized pilot status](fixed_judge_pilot_status_20261031.json)
+are N/A. The [sanitized pilot status](judge.json)
 binds the saved stop evidence. Four judge attempts and nine runtime attempts
 remain unspent; the shared judge retry was not used.
 
@@ -68,34 +68,34 @@ Analyst used `legacy_vector_context`, Visualizer `optimized`; document/index/gra
 stores were local, vector storage Pinecone, and checkpoints MongoDB.
 The selected prepared-storage manifest SHA256 was
 `48c0d76bad4b1f8563199c8e398c0b2ce6d80543be30071138ad67d9ea5d6db7`,
-also identified in the [sanitized retrieval provenance](retrieval_ablation_20261030.json).
+also identified in the [sanitized retrieval provenance](retrieval.json).
 This identifies local prepared assets, not cloud-vector or deployed-demo parity.
 Some captured runtime events report free-model IDs that vary; missing
 serving-provider fields and uncaptured/failed-attempt identities remain unknown. Configured routing is not a fixed serving model.
 The later v3 judge evaluator is separately
-`e3545f82672e7197c6e567f2`, bound by the [sanitized pilot freeze/status](fixed_judge_pilot_status_20261031.json);
+`e3545f82672e7197c6e567f2`, bound by the [sanitized pilot freeze/status](judge.json);
 it is not the evaluator identity of these runtime groups.
 
 ## Engineering example: Researcher context handoff
 
-WP4.4 investigated a contextual Medusa case whose saved baseline took a local
+The contextual follow-up investigation examined a contextual Medusa case whose saved baseline took a local
 answer path; that record alone could not establish whether its evidence was
 substantively sufficient or diagnose a Researcher failure.
 A separate offline actual-node reproduction showed that, after a valid local
 gap cleared context, Researcher received the follow-up without prior topic
 history or the older session summary.
 The focused correction passes existing bounded history and summary through
-[Researcher message assembly](../../backend/workflows/learner.py) and selects the
-[shared v6 prompt](../../backend/llm/prompts/learner_workflow/researcher/v6.yaml),
+[Researcher message assembly](../../../../backend/workflows/learner.py) and selects the
+[shared v6 prompt](../../../../backend/llm/prompts/learner_workflow/researcher/v6.yaml),
 without lowering adequacy thresholds.
-[Scripted regression cases](../../tests/test_researcher_context.py) cover both
+[Scripted regression cases](../../../../tests/test_researcher_context.py) cover both
 retrieval modes, context-preserving web fallback, adequate evidence staying
 local and source exhaustion; the saved focused gate was 27 passed / 1 expected
 failure, which demonstrates wiring rather than live model adherence.
-Sanitized evidence identities are the accepted WP4.4 source tree
+Sanitized evidence identities are the accepted source tree
 `3dbc6f3c7e8f9d553385f9007d64e3165a53dfba` and patch SHA256
 `25b5b8b82b953ca64ee8c309dc10a99f2e28fc239824dfc4552d290d2e9742e1`;
-the later [accepted source-freeze identity](fixed_judge_pilot_status_20261031.json)
+the later [accepted source-freeze identity](judge.json)
 retains the source lineage without publishing private trace excerpts.
 The current live contextual Medusa observation passed its deterministic contract,
 while RetNet still failed the contextual web-topic requirement, so substantive
@@ -104,11 +104,11 @@ with no causal overall quality improvement established.
 
 ## Retrieval comparison and limits
 
-The [retrieval comparison](../../docs/retrieval_ablation.md) and its [aggregate
-and provenance](retrieval_ablation_20261030.json) retain development and frozen
+The [retrieval comparison](../../../../docs/retrieval_ablation.md) and its [aggregate
+and provenance](retrieval.json) retain development and frozen
 cohorts, definitions, denominators and matched differences. The 176/176
 Precision and 145/176 Recall counts above describe score availability, not
-quality values: the [cohort/arm means table](../../docs/retrieval_ablation.md#arms-and-observed-evidence)
+quality values: the [cohort/arm means table](../../../../docs/retrieval_ablation.md#arms-and-observed-evidence)
 reports development A/B/C/D Precision 49.44/48.33/45.00/36.67% and frozen
 33.57/34.29/32.14/28.57%; available-only development Recall is 100% in each
 arm, and frozen Recall is 85.71/85.71/78.57/100%. Precision uses relevance
@@ -133,5 +133,4 @@ remain separate and unchanged.
 The controlled runtime inventory SHA256 is
 `7e63ed839833b45304c00d100ffd475517cc37e2f7c7c961d32aff5ef9d5df0f`;
 the pilot stop freeze is recorded in the sanitized status. Their underlying
-private evidence remains private. Further independent final-report and M2
-assessment is required; this report does not claim M2 completion.
+private evidence remains private. The findings are historical and do not establish current answer quality or an overall quality improvement.

@@ -44,7 +44,9 @@ from backend.utils.chat_limits import (  # noqa: E402
     bind_evaluation_budget,
 )
 
-DEFAULT_SCENARIOS = ROOT / "evals" / "runtime" / "scenarios.json"
+DEFAULT_SCENARIOS = (
+    ROOT / "backend" / "evaluation" / "cases" / "runtime" / "scenarios.json"
+)
 DEFAULT_TRACE_EXPORT = ROOT / "exports" / "langsmith_traces_20260816T233652Z.json"
 
 

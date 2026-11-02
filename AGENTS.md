@@ -82,9 +82,9 @@ corresponding documentation in the same change. At minimum, check:
 - the relevant focused review or runbook under `docs/` when it describes the
   changed behavior.
 - `docs/runtime_evaluation.md` and
-  `evals/runtime/scenarios_review.md` when runtime routes, tools, budgets,
+  `backend/evaluation/cases/runtime/scenarios_review.md` when runtime routes, tools, budgets,
   failure classifications, evaluation defaults, or scenario contracts change.
-- `evals/retrieval/benchmark_cases.jsonl` and its Markdown review when
+- `backend/evaluation/cases/retrieval/benchmark_cases.jsonl` and its Markdown review when
   retrieval evidence, relevance labels, storage snapshots, or metric contracts
   change.
 

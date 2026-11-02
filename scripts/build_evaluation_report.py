@@ -16,6 +16,7 @@ from backend.evaluation.evaluation_reporting import (  # noqa: E402
     DEFAULT_REPORTS_ROOT,
     build_evaluation_reports,
     publish_evaluation_report,
+    publish_saved_evaluation,
 )
 
 
@@ -70,11 +71,148 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Exact campaign run ID used by --verify-run-fingerprints.",
     )
 
+    parser.add_argument(
+        "--saved-runtime", type=Path, help="Reviewed runtime observation summary JSON."
+    )
+    parser.add_argument(
+        "--saved-retrieval", type=Path, help="Sanitized retrieval aggregate JSON."
+    )
+    parser.add_argument("--saved-judge", type=Path, help="Sanitized judge status JSON.")
+    parser.add_argument(
+        "--saved-report",
+        type=Path,
+        help="Optional sanitized detailed findings in Markdown.",
+    )
+
+    parser.add_argument(
+        "--derive-saved-runtime",
+        action="store_true",
+        help="Aggregate already-scored live records without rescoring.",
+    )
+    parser.add_argument(
+        "--scored-run-dir",
+        action="append",
+        type=Path,
+        default=[],
+        help="Completed live run directory; repeat for each saved observation.",
+    )
+    parser.add_argument(
+        "--derived-output",
+        type=Path,
+        help="Destination for sanitized derived runtime metrics JSON.",
+    )
+
+    parser.add_argument(
+        "--system-reference-scorecard",
+        "--system-august-scorecard",
+        dest="system_august_scorecard",
+        type=Path,
+        help="Preserved reference scorecard JSON.",
+    )
+    parser.add_argument(
+        "--system-reference-provenance",
+        "--system-august-provenance",
+        dest="system_august_provenance",
+        type=Path,
+        help="Preserved reference provenance JSON.",
+    )
+    parser.add_argument(
+        "--system-runtime", type=Path, help="Sanitized runtime summary JSON."
+    )
+    parser.add_argument(
+        "--system-metrics",
+        type=Path,
+        help="Derived metrics from already-scored runs.",
+    )
+    parser.add_argument(
+        "--system-judge", type=Path, help="Sanitized judge status JSON."
+    )
+
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    system_inputs = (
+        args.system_august_scorecard,
+        args.system_august_provenance,
+        args.system_runtime,
+        args.system_metrics,
+        args.system_judge,
+    )
+    if any(system_inputs):
+        if (
+            not args.publish
+            or not all(system_inputs)
+            or args.derive_saved_runtime
+            or args.fingerprint
+            or args.saved_runtime
+            or args.saved_retrieval
+            or args.saved_judge
+            or args.saved_report
+        ):
+            print(
+                "System publication requires --publish and all five system inputs.",
+                file=sys.stderr,
+            )
+            return 2
+        from backend.evaluation.system_report import publish_system_evaluation
+
+        try:
+            result = publish_system_evaluation(
+                *system_inputs, reports_root=args.reports_root
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"System publication failed: {exc}", file=sys.stderr)
+            return 2
+        print(f"Published {result['snapshot']} to {result['history_directory']}.")
+        return 0
+    if args.derive_saved_runtime:
+        if not args.scored_run_dir or args.derived_output is None or args.publish:
+            print(
+                "Derivation requires --scored-run-dir and --derived-output without --publish.",
+                file=sys.stderr,
+            )
+            return 2
+        from backend.evaluation.system_report import derive_saved_runs
+
+        try:
+            derived = derive_saved_runs(args.scored_run_dir)
+            args.derived_output.parent.mkdir(parents=True, exist_ok=True)
+            args.derived_output.write_text(
+                json.dumps(derived, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except (OSError, ValueError) as exc:
+            print(f"Saved runtime derivation failed: {exc}", file=sys.stderr)
+            return 2
+        print(f"Derived saved runtime metrics to {args.derived_output}.")
+        return 0
+    saved = (args.saved_runtime, args.saved_retrieval, args.saved_judge)
+    if any(saved) or args.saved_report:
+        if (
+            not args.publish
+            or not all(saved)
+            or args.fingerprint
+            or args.audit_completeness
+            or args.verify_run_fingerprints
+        ):
+            print(
+                "Saved publication requires --publish and all three saved JSON inputs.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            result = publish_saved_evaluation(
+                *saved,
+                reports_root=args.reports_root,
+                source_report_path=args.saved_report,
+            )
+        except (ValueError, OSError) as exc:
+            print(f"Saved publication failed: {exc}", file=sys.stderr)
+            return 2
+        print(f"Published {result['snapshot']} to {result['history_directory']}.")
+        return 0
     if args.verify_run_fingerprints:
         if not args.run_id:
             print(

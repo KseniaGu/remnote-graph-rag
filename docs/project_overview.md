@@ -440,8 +440,8 @@ proves it. AgentEvals/OpenEvals stay optional. Explicit, completeness-aware
 publication writes sanitized,
 commit-friendly scorecards and provenance to `reports/evaluation` without
 copying raw traces or evidence. See [the evaluation guide](runtime_evaluation.md),
-[generated runtime scenario review](../evals/runtime/scenarios_review.md), and
-[retrieval contract](../evals/retrieval/benchmark_cases.jsonl).
+[generated runtime scenario review](../backend/evaluation/cases/runtime/scenarios_review.md), and
+[retrieval contract](../backend/evaluation/cases/retrieval/benchmark_cases.jsonl).
 
 The [published evidence](../reports/evaluation/README.md) is historical and
 incomplete. It is retained for inspection, not as a current answer-quality

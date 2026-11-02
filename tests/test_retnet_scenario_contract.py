@@ -9,7 +9,9 @@ from backend.evaluation.runtime_evaluation import (
 
 
 def test_retnet_web_topic_accepts_neural_network_but_not_ambiguous_or_resnet():
-    scenarios = load_runtime_scenarios(Path("evals/runtime/scenarios.json"))
+    scenarios = load_runtime_scenarios(
+        Path("backend/evaluation/cases/runtime/scenarios.json")
+    )
     scenario = next(
         s for s in scenarios if s.id == "in_scope_retnet_local_miss_fallback"
     )

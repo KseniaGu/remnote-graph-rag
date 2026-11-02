@@ -2,7 +2,7 @@
 
 Generated from [scenarios.json](scenarios.json); edit the machine contract,
 then regenerate this review. This view is not executable input or measured results.
-Use the [regeneration recipe](../../docs/runtime_evaluation.md#regenerate-the-runtime-scenario-review).
+Use the [regeneration recipe](../../../../docs/runtime_evaluation.md#regenerate-the-runtime-scenario-review).
 
 - Contract SHA256: `b0dfd1af372437e8c52257c70613e76130efe9721907300252b81d1bc4619f31`
 - Scenarios: 13

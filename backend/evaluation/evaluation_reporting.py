@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 import statistics
 import subprocess
@@ -24,8 +25,8 @@ RUNTIME_RUN_KINDS = {"offline", "live"}
 HASHED_RELATIVE_PATHS = (
     "pyproject.toml",
     "uv.lock",
-    "evals/runtime/scenarios.json",
-    "evals/retrieval/benchmark_cases.jsonl",
+    "backend/evaluation/cases/runtime/scenarios.json",
+    "backend/evaluation/cases/retrieval/benchmark_cases.jsonl",
     "scripts/evaluate_runtime_workflow.py",
     "scripts/evaluate_retrieval_pipeline.py",
     "scripts/build_evaluation_report.py",
@@ -367,18 +368,31 @@ def publish_evaluation_report(
     history_dir.mkdir(parents=True, exist_ok=True)
     reports_root.mkdir(parents=True, exist_ok=True)
 
-    shutil.copyfile(source_dir / "scorecard.md", history_dir / "scorecard.md")
-    shutil.copyfile(source_dir / "scorecard.json", history_dir / "scorecard.json")
-    shutil.copyfile(source_dir / "scorecard.md", reports_root / "latest.md")
-    shutil.copyfile(source_dir / "scorecard.json", reports_root / "latest.json")
-
-    provenance = _publication_provenance(
-        evaluation_root,
-        scorecard,
-        snapshot_name=snapshot_name,
-    )
-    _write_json(history_dir / "provenance.json", provenance)
-    _write_json(reports_root / "latest_provenance.json", provenance)
+    existing_json = history_dir / "scorecard.json"
+    if existing_json.exists():
+        previous = _read_json(existing_json)
+        if {k: v for k, v in previous.items() if k != "generated_at"} != {
+            k: v for k, v in scorecard.items() if k != "generated_at"
+        }:
+            snapshot_name += (
+                "_"
+                + _hash_json(
+                    {k: v for k, v in scorecard.items() if k != "generated_at"}
+                )[:12]
+            )
+            history_dir = reports_root / "history" / snapshot_name
+            history_dir.mkdir(parents=True, exist_ok=True)
+    if not (history_dir / "provenance.json").exists():
+        shutil.copyfile(source_dir / "scorecard.md", history_dir / "scorecard.md")
+        shutil.copyfile(source_dir / "scorecard.json", history_dir / "scorecard.json")
+        provenance = _publication_provenance(
+            evaluation_root, scorecard, snapshot_name=snapshot_name
+        )
+        provenance["observation_end"] = (
+            max(created_dates).date().isoformat() if created_dates else snapshot_date
+        )
+        _write_json(history_dir / "provenance.json", provenance)
+    _refresh_publication_aliases(reports_root)
     _write_publication_index(reports_root)
     return {
         "fingerprint": selected_fingerprint,
@@ -1247,7 +1261,9 @@ def _coverage_requirement(
 
 
 def _scenario_campaign_contract() -> dict[str, dict[str, int]]:
-    payload = _read_json(ROOT / "evals" / "runtime" / "scenarios.json")
+    payload = _read_json(
+        ROOT / "backend" / "evaluation" / "cases" / "runtime" / "scenarios.json"
+    )
     if not isinstance(payload, list):
         return {}
     return {
@@ -2248,40 +2264,347 @@ def _publication_provenance(
     }
 
 
-def _write_publication_index(reports_root: Path) -> None:
-    rows = []
-    for path in sorted((reports_root / "history").glob("*/provenance.json")):
-        provenance = _read_json(path)
-        if not isinstance(provenance, dict):
-            continue
-        snapshot = path.parent.name
-        rows.append(
-            (
-                str(provenance.get("published_at") or ""),
-                snapshot,
-                str(provenance.get("fingerprint") or ""),
-                int(provenance.get("contributing_run_count") or 0),
+def _render_saved_evaluation(report: dict[str, Any], prefix: str) -> str:
+    runtime, retrieval, judge = report["runtime"], report["retrieval"], report["judge"]
+    coverage = retrieval["coverage"]
+    lines = [
+        "# Controlled evaluation findings",
+        "",
+        f"Observations through **{report['observation_end']} UTC**. These historical results do not measure subsequent revisions or production traffic.",
+        "",
+        "## Deterministic runtime compliance",
+        "",
+        f"- Completed: {runtime['completed']} / {runtime['planned']} planned observations across {runtime['scenario_count']} scenarios.",
+        f"- Passed: {runtime['passed']} / {runtime['completed']} completed; failed: {runtime['failed']}; interrupted and unscored: {runtime['interrupted']}.",
+        "- A contract pass measures the recorded route and tool behavior; it is not an answer-correctness score.",
+        f"- Original runtime evaluator fingerprints: {', '.join('`' + str(value) + '`' for value in runtime['fingerprints'])}.",
+    ]
+    lines.extend(f"- {line}" for line in runtime.get("details", []))
+    if runtime.get("fingerprint_groups"):
+        lines += [
+            "",
+            "| Runtime evaluator fingerprint | Observations | Completed | Interrupted |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+        for group in runtime["fingerprint_groups"]:
+            lines.append(
+                f"| `{group['fingerprint']}` | {group['observations']} | {group['completed']} | {group.get('interrupted', 0)} |"
             )
+    lines += [
+        "",
+        "## Retrieved-evidence quality",
+        "",
+        f"- Precision@10 available for {coverage['precision_observations']} observations; required-point Recall available for {coverage['recall_available']}. These are availability counts, not quality scores.",
+    ]
+    source = retrieval.get("provenance", {})
+    if source.get("accepted_source_tree"):
+        lines.append(
+            f"- Retrieval source tree: `{source['accepted_source_tree']}`; storage manifest SHA256: `{source.get('snapshot_manifest_sha256', 'unknown')}`."
         )
+        lines.append(
+            f"- Embedding model: {source.get('embedding_model', 'unknown')}; local reranker: {source.get('local_reranker_model', 'unknown')}."
+        )
+    if retrieval.get("cohort_cases"):
+        lines.append(
+            f"- Cases: {retrieval['cohort_cases'].get('development')} development and {retrieval['cohort_cases'].get('frozen')} frozen. Repetitions are not independent samples."
+        )
+    if retrieval.get("arm_cohort_metrics"):
+        lines += [
+            "",
+            "| Cohort / arm | Precision@10 | Precision scored / observed | Recall (available only) | Recall scored / observed |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+        for key, value in retrieval["arm_cohort_metrics"].items():
+            lines.append(
+                f"| {key} | {value['precision_mean']:.2%} | {value['precision_ready']} / {value['observations']} | {value['recall_available_only_mean']:.2%} | {value['recall_ready']} / {value['observations']} |"
+            )
+    if coverage.get("recall_unavailable_development") is not None:
+        lines.append(
+            f"\nDevelopment Recall is unavailable for {coverage['recall_unavailable_development']} observations; unavailable values are not zero."
+        )
+    lines.append("")
+    lines.extend(f"- {line}" for line in report.get("retrieval_notes", []))
+    lines += [
+        "",
+        "## Generated-answer quality",
+        "",
+        f"- Eligible judge inputs: {judge['eligible_inputs']}; attempted: {judge['logical_attempted']}; successfully scored: {judge['successful_scored']}; unstarted: {judge['unstarted']}.",
+        f"- HTTP 429 errors: {judge['error_http_429']}. Judge quality score: {'N/A' if judge['judge_score'] is None else judge['judge_score']}.",
+        f"- Judge evaluator fingerprint: `{judge['evaluator_fingerprint']}`. Configured and observed serving identities are distinct; unavailable usage is not zero.",
+    ]
+    if judge.get("configured_judge_model"):
+        lines.append(
+            f"- Configured model: `{judge['configured_judge_model']}`; configured route: {judge.get('configured_endpoint', 'unknown')}. Observed serving identity: {judge.get('observed_serving_identity') or 'unknown'}."
+        )
+    lines.extend(f"- {line}" for line in report.get("limitations", []))
+    lines += [
+        "",
+        "## Evidence and provenance",
+        "",
+        f"- [Runtime summary]({prefix}/runtime.json)",
+        f"- [Retrieval aggregate]({prefix}/retrieval.json)",
+        f"- [Judge status]({prefix}/judge.json)",
+    ]
+    if report.get("source_report"):
+        lines.append(f"- [Detailed saved findings]({prefix}/source-report.md)")
+    lines += [
+        "",
+        "The original runtime, retrieval, and judge populations and configurations are separate. No combined fingerprint or pooled quality score is implied.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def publish_saved_evaluation(
+    runtime_path: Path,
+    retrieval_path: Path,
+    judge_path: Path,
+    *,
+    reports_root: Path = DEFAULT_REPORTS_ROOT,
+    source_report_path: Path | None = None,
+) -> dict[str, Any]:
+    """Publish reviewed aggregate observations without rescoring their source data."""
+    runtime_input = _read_json(runtime_path)
+    retrieval = _read_json(retrieval_path)
+    judge = _read_json(judge_path)
+    try:
+        publication_id = runtime_input["publication_id"]
+        observed = runtime_input["observation_end"]
+        if not isinstance(publication_id, str) or not re.fullmatch(
+            r"[a-z0-9]+(?:-[a-z0-9]+)*", publication_id
+        ):
+            raise ValueError("invalid publication identity")
+        datetime.fromisoformat(observed)
+        runtime = runtime_input["runtime"]
+        counts = [
+            runtime[key]
+            for key in (
+                "planned",
+                "completed",
+                "passed",
+                "failed",
+                "interrupted",
+                "scenario_count",
+            )
+        ]
+        counts += [
+            judge[key]
+            for key in (
+                "eligible_inputs",
+                "logical_attempted",
+                "successful_scored",
+                "error_http_429",
+                "unstarted",
+            )
+        ]
+        counts += [
+            retrieval["coverage"][key]
+            for key in ("precision_observations", "recall_available")
+        ]
+        if any(type(value) is not int or value < 0 for value in counts):
+            raise ValueError("saved observation counts must be nonnegative integers")
+        if judge["error_http_429"] > judge["logical_attempted"]:
+            raise ValueError("judge errors exceed attempted inputs")
+        if (
+            runtime["passed"] + runtime["failed"] != runtime["completed"]
+            or runtime["completed"] + runtime["interrupted"] != runtime["planned"]
+        ):
+            raise ValueError("inconsistent runtime counts")
+        if (
+            judge["logical_attempted"]
+            + judge["unstarted"]
+            + judge.get("skipped", 0)
+            + judge.get("uncertain_dispatch", 0)
+            != judge["eligible_inputs"]
+            or judge["successful_scored"] + judge["error_http_429"]
+            > judge["logical_attempted"]
+        ):
+            raise ValueError("inconsistent judge counts")
+        if (
+            not isinstance(runtime["fingerprints"], list)
+            or not runtime["fingerprints"]
+            or not all(
+                isinstance(value, str) and value for value in runtime["fingerprints"]
+            )
+            or not isinstance(judge["evaluator_fingerprint"], str)
+            or not judge["evaluator_fingerprint"]
+        ):
+            raise ValueError("missing evaluation identity")
+        groups = runtime.get("fingerprint_groups", [])
+        if groups and (
+            sum(group["observations"] for group in groups) != runtime["planned"]
+            or sum(group["completed"] for group in groups) != runtime["completed"]
+            or [group["fingerprint"] for group in groups] != runtime["fingerprints"]
+        ):
+            raise ValueError("runtime fingerprint groups do not match the population")
+        if (
+            retrieval["coverage"]["recall_available"]
+            > retrieval["coverage"]["precision_observations"]
+        ):
+            raise ValueError("inconsistent retrieval coverage")
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError("invalid saved evaluation inputs") from exc
+    report = {
+        **runtime_input,
+        "retrieval": retrieval,
+        "judge": judge,
+        "source_report": source_report_path is not None,
+    }
+    markdown = _render_saved_evaluation(report, ".")
+    identity = {
+        "runtime_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
+        "retrieval_sha256": hashlib.sha256(retrieval_path.read_bytes()).hexdigest(),
+        "judge_sha256": hashlib.sha256(judge_path.read_bytes()).hexdigest(),
+        "source_report_sha256": hashlib.sha256(
+            source_report_path.read_bytes()
+        ).hexdigest()
+        if source_report_path
+        else None,
+    }
+    history_dir = reports_root / "history" / publication_id
+    history_dir.mkdir(parents=True, exist_ok=True)
+    existing = history_dir / "provenance.json"
+    if existing.exists() and _read_json(existing).get("input_hashes") != identity:
+        raise ValueError("saved publication identity already has different inputs")
+    if existing.exists() and _read_json(history_dir / "report.json") != report:
+        raise ValueError("saved publication report differs from its inputs")
+    if not existing.exists():
+        for name, source in (
+            ("runtime.json", runtime_path),
+            ("retrieval.json", retrieval_path),
+            ("judge.json", judge_path),
+        ):
+            destination = history_dir / name
+            if source.resolve() != destination.resolve():
+                shutil.copyfile(source, destination)
+        if source_report_path is not None:
+            destination = history_dir / "source-report.md"
+            if source_report_path.resolve() != destination.resolve():
+                shutil.copyfile(source_report_path, destination)
+        _write_json(history_dir / "report.json", report)
+        (history_dir / "report.md").write_text(markdown, encoding="utf-8")
+        provenance = {
+            "publication_kind": "saved-observations",
+            "publication_id": publication_id,
+            "observation_end": observed,
+            "runtime_fingerprints": runtime["fingerprints"],
+            "runtime_provenance": {
+                key: runtime[key]
+                for key in (
+                    "fingerprint_groups",
+                    "inventory_sha256",
+                    "scenario_contract_sha256",
+                    "prompt_tree_sha256",
+                    "storage_manifest_sha256",
+                    "observation_dates_utc",
+                )
+                if key in runtime
+            },
+            "retrieval_provenance": retrieval["provenance"],
+            "judge_evaluator_fingerprint": judge["evaluator_fingerprint"],
+            "judge_provenance": {
+                key: judge[key]
+                for key in (
+                    "configured_judge_model",
+                    "configured_endpoint",
+                    "observed_serving_identity",
+                    "source_stop_freeze_sha256",
+                    "source_v3_freeze_sha256",
+                )
+                if key in judge
+            },
+            "input_hashes": identity,
+            "excluded_content": ["raw traces", "private evidence", "credentials"],
+        }
+        _write_json(existing, provenance)
+    _refresh_publication_aliases(reports_root)
+    _write_publication_index(reports_root)
+    return {
+        "snapshot": publication_id,
+        "history_directory": history_dir,
+        "latest_markdown": reports_root / "latest.md",
+    }
+
+
+def _observation_end(provenance: dict[str, Any]) -> str:
+    if provenance.get("observation_end"):
+        return str(provenance["observation_end"])[:10]
+    dates = [
+        str(item.get("created_at", ""))[:10]
+        for item in provenance.get("contributing_runs", [])
+        if isinstance(item, dict)
+    ]
+    return max(dates, default=str(provenance.get("published_at", ""))[:10])
+
+
+def _publication_entries(reports_root: Path) -> list[tuple[str, Path, dict[str, Any]]]:
+    entries = []
+    for path in (reports_root / "history").glob("*/provenance.json"):
+        provenance = _read_json(path)
+        if (
+            isinstance(provenance, dict)
+            and provenance.get("publication_kind") != "optimization-experiment"
+        ):
+            entries.append((_observation_end(provenance), path.parent, provenance))
+    return sorted(
+        entries,
+        key=lambda item: (
+            item[0],
+            item[2].get("publication_kind") == "system-evaluation",
+            item[2].get("publication_revision", 0),
+            item[1].name,
+        ),
+    )
+
+
+def _refresh_publication_aliases(reports_root: Path) -> None:
+    entries = _publication_entries(reports_root)
+    if not entries:
+        return
+    _, folder, provenance = entries[-1]
+    stem = (
+        "report"
+        if provenance.get("publication_kind")
+        in {"saved-observations", "system-evaluation"}
+        else "scorecard"
+    )
+    if stem == "report":
+        markdown = (folder / "report.md").read_text(encoding="utf-8")
+        markdown = markdown.replace("](../../experiments/", "](experiments/")
+        markdown = markdown.replace("](../", "](history/")
+        markdown = markdown.replace("](./", f"](history/{folder.name}/")
+        (reports_root / "latest.md").write_text(markdown, encoding="utf-8")
+    else:
+        shutil.copyfile(folder / f"{stem}.md", reports_root / "latest.md")
+    shutil.copyfile(folder / f"{stem}.json", reports_root / "latest.json")
+    shutil.copyfile(folder / "provenance.json", reports_root / "latest_provenance.json")
+
+
+def _write_publication_index(reports_root: Path) -> None:
     lines = [
         "# Published evaluation reports",
         "",
-        "Each row is one configuration fingerprint. Republishing the same "
-        "fingerprint updates its stable history snapshot and the latest aliases.",
+        "Reports are ordered by observation date. Distinct evaluation identities remain separate.",
         "",
-        "| Published | Fingerprint | Runs | Scorecard | Provenance |",
-        "| --- | --- | ---: | --- | --- |",
+        "| Observed through | Identity | Report | Provenance |",
+        "| --- | --- | --- | --- |",
     ]
-    for published_at, snapshot, fingerprint, run_count in sorted(rows, reverse=True):
-        relative = f"history/{snapshot}"
-        lines.append(
-            f"| {published_at} | `{fingerprint}` | {run_count} | "
-            f"[Markdown]({relative}/scorecard.md) / "
-            f"[JSON]({relative}/scorecard.json) | "
-            f"[JSON]({relative}/provenance.json) |"
+    for observed, folder, provenance in reversed(_publication_entries(reports_root)):
+        relative = f"history/{folder.name}"
+        saved = provenance.get("publication_kind") in {
+            "saved-observations",
+            "system-evaluation",
+        }
+        stem = "report" if saved else "scorecard"
+        identity = (
+            provenance.get("publication_id")
+            if saved
+            else provenance.get("fingerprint", "")
         )
-    lines.append("")
-    (reports_root / "index.md").write_text("\n".join(lines), encoding="utf-8")
+        lines.append(
+            f"| {observed} | `{identity}` | [Markdown]({relative}/{stem}.md) / [JSON]({relative}/{stem}.json) | [JSON]({relative}/provenance.json) |"
+        )
+    (reports_root / "index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _display_path(path: Path) -> str:

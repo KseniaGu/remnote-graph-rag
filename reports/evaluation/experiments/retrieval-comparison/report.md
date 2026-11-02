@@ -6,7 +6,7 @@ that difference reversed on development. The local reranker added substantial
 CPU retrieval time and did not improve the measured evidence metrics. The current
 legacy reference had lower frozen precision and higher required-point coverage.
 These results do not select a new default or evaluate generated answers. The
-[sanitized aggregate and provenance](../reports/evaluation/retrieval_ablation_20261030.json)
+[sanitized aggregate and provenance](results.json)
 contains the underlying aggregate values; raw case text and evidence are private.
 
 ## Arms and observed evidence
@@ -18,7 +18,7 @@ the optimized graph-assisted path; C adds the local reranker to B; D is the
 current legacy vector-context pipeline with its existing settings. A/B/C share the source-first
 retrieval and applicable budgets. D uses different normalization, traversal and
 budgets, so D comparisons are whole-pipeline comparisons. D is not a matched
-pre-fix or B0 condition. Production defaults remain legacy Analyst and optimized
+pre-fix baseline. Production defaults remain legacy Analyst and optimized
 Visualizer.
 
 | Cohort | Arm | Precision@10 mean | Scored / observed | Required-point Recall mean | Scored / observed |
@@ -104,4 +104,4 @@ retrospective traces and mocked tests. Current canonical task success,
 generated-answer quality and production traffic remain unmeasured in this
 retrieval slice. Retrieval evidence coverage is not generated-answer correctness
 or completeness, and local run completion is not workflow reliability. Full
-runtime evaluation and overall M2 acceptance remain separate work.
+runtime evaluation and generated-answer quality are separate questions.

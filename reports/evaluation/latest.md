@@ -1,4 +1,12 @@
-# Graph RAG Evaluation Scorecard
+# System evaluation: consolidated report
+
+The editions below have distinct populations, configurations and evaluator identities. They are not a controlled before/after comparison.
+
+## Reference evaluation — 2026-08-22 UTC
+
+Imported traces: 12; live executions: 15. The imported-trace configuration is not established by the recorded live configuration.
+
+## Graph RAG Evaluation Scorecard
 
 - Fingerprint: `f8d6f3b6f3e0348c75a194bf`
 - Generated: 2026-08-23T20:14:33.266128+00:00
@@ -7,7 +15,7 @@
 
 This report intentionally has no overall score or overall status.
 
-## Campaign coverage
+### Campaign coverage
 
 **Campaign completeness:** Incomplete
 **Missing requirements:** Retrieval relevance labels
@@ -22,7 +30,7 @@ This report intentionally has no overall score or overall status.
 | Agentevals when requested | Complete | 12 | results required only when --framework agentevals was requested |
 | Invocation and configuration provenance | Complete | 10 | every contributing run has invocation and configuration snapshots |
 
-### Offline runtime
+#### Offline runtime
 
 | Item | Observed | Expected |
 | --- | --- | --- |
@@ -38,7 +46,7 @@ This report intentionally has no overall score or overall status.
 | `transformer_encoder_graph_coverage` | 1 | 1 |
 | `colbert_guidance_mode_continuation` | 1 | 1 |
 
-### Reviewed live suite
+#### Reviewed live suite
 
 | Item | Observed | Expected |
 | --- | --- | --- |
@@ -56,7 +64,7 @@ This report intentionally has no overall score or overall status.
 | `in_scope_retnet_local_miss_fallback` | 1 | 1 |
 | `researcher_structured_output_truncation_reliability` | 3 | 3 |
 
-### Semantic dimensions
+#### Semantic dimensions
 
 | Dimension | Results | Success | Skipped | Errors | Provider attempts | Accounted | Expected |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -66,7 +74,7 @@ This report intentionally has no overall score or overall status.
 | Conversational continuity | 1 | 0 | 1 | 0 | 0 | Yes | Yes |
 | Graph usefulness | 1 | 0 | 0 | 1 | 1 | Yes | Yes |
 
-## Retrieval quality
+### Retrieval quality
 
 <details><summary>Source runs (1)</summary>
 
@@ -90,7 +98,7 @@ This report intentionally has no overall score or overall status.
 | Context Precision@10 | 36.9% |
 | Context Recall | 63.1% |
 
-### Retrieval diagnostics
+#### Retrieval diagnostics
 
 | Metric | Result |
 | --- | --- |
@@ -99,7 +107,7 @@ This report intentionally has no overall score or overall status.
 | Relation ID recall | 36.1% |
 | Relation spec recall | 36.1% |
 
-## Runtime task behavior
+### Runtime task behavior
 
 <details><summary>Source runs (6)</summary>
 
@@ -131,20 +139,20 @@ This report intentionally has no overall score or overall status.
 | Termination rate | 96.3% |
 | Graph contract rate | 83.3% |
 
-### Samples by mode
+#### Samples by mode
 
 | Mode | Samples |
 | --- | --- |
 | Offline | 12 |
 | Live | 15 |
 
-### Distributions
+#### Distributions
 
 | Measurement | Samples | Mean | Median | P95 |
 | --- | --- | --- | --- | --- |
 | Path efficiency ratio | 23 | 88.4% | 100.0% | 100.0% |
 
-## Reliability
+### Reliability
 
 <details><summary>Source runs (6)</summary>
 
@@ -165,7 +173,7 @@ This report intentionally has no overall score or overall status.
 | Looping rate | 0.0% |
 | Output limit hit rate | 11.1% |
 
-### Route consistency
+#### Route consistency
 
 **Mean:** 89.1%
 
@@ -183,7 +191,7 @@ This report intentionally has no overall score or overall status.
 | `transformer_encoder_graph_coverage` | 100.0% |
 | `colbert_guidance_mode_continuation` | 100.0% |
 
-### Evidence-set Jaccard stability
+#### Evidence-set Jaccard stability
 
 **Mean:** 78.7%
 
@@ -201,7 +209,7 @@ This report intentionally has no overall score or overall status.
 | `transformer_encoder_graph_coverage` | 79.2% |
 | `colbert_guidance_mode_continuation` | 100.0% |
 
-### Failure types
+#### Failure types
 
 | Failure | Count |
 | --- | --- |
@@ -210,7 +218,7 @@ This report intentionally has no overall score or overall status.
 | Structured output parse error | 1 |
 | Sources exhausted | 3 |
 
-## Efficiency
+### Efficiency
 
 <details><summary>Source runs (6)</summary>
 
@@ -229,7 +237,7 @@ This report intentionally has no overall score or overall status.
 | Tokens per successful run | 11,294.19 |
 | Gating | No |
 
-### Distributions
+#### Distributions
 
 | Measurement | Samples | Mean | Median | P95 |
 | --- | --- | --- | --- | --- |
@@ -243,7 +251,7 @@ This report intentionally has no overall score or overall status.
 | Total tokens | 27 | 6,692.85 | 6,502 | 13,474 |
 | Latency seconds | 27 | 39.66 | 40.37 | 79.29 |
 
-## Optional semantic quality
+### Optional semantic quality
 
 <details><summary>Source runs (3)</summary>
 
@@ -261,7 +269,7 @@ This report intentionally has no overall score or overall status.
 | Conversational continuity | N/A | 1 | 0 | 1 | 0 | 0 | semantic prerequisites were unavailable |
 | Graph usefulness | N/A | 1 | 0 | 0 | 1 | 1 | all attempted scores unavailable because judge execution failed |
 
-### Judge execution identities
+#### Judge execution identities
 
 | Dimension | Provider/model | Rubric | Success | Skipped | Errors | Truncations |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -271,14 +279,14 @@ This report intentionally has no overall score or overall status.
 | Graph usefulness | ollama/qwen3.5:cloud | runtime-semantic-v1 | 0 | 0 | 1 | 0 |
 | Mentor pedagogy | ollama/qwen3.5:cloud | runtime-semantic-v1 | 0 | 1 | 0 | 0 |
 
-## Diagnostics
+### Diagnostics
 
 | Diagnostic | Count |
 | --- | --- |
 | Failed runtime checks | 77 |
 | AgentEvals rows | 12 |
 
-### Failure types
+#### Failure types
 
 | Failure | Count |
 | --- | --- |
@@ -287,14 +295,14 @@ This report intentionally has no overall score or overall status.
 | Structured output parse error | 1 |
 | Sources exhausted | 3 |
 
-### Runtime modes
+#### Runtime modes
 
 | Mode | Samples | Passed | Failed |
 | --- | --- | --- | --- |
 | Offline | 12 | 6 | 6 |
 | Live | 15 | 10 | 5 |
 
-### Runtime failure types by mode
+#### Runtime failure types by mode
 
 | Mode | Failure | Count |
 | --- | --- | --- |
@@ -304,7 +312,7 @@ This report intentionally has no overall score or overall status.
 | Offline | Sources exhausted | 2 |
 | Live | Sources exhausted | 1 |
 
-### Provenance diagnostics
+#### Provenance diagnostics
 
 | Metric | Result |
 | --- | --- |
@@ -312,20 +320,20 @@ This report intentionally has no overall score or overall status.
 | Invocation present count | 10 |
 | Configuration snapshot present count | 10 |
 
-#### Runtime source mode counts
+##### Runtime source mode counts
 
 | Metric | Result |
 | --- | --- |
 | Offline | 12 |
 | Live | 15 |
 
-#### Offline trace configuration status counts
+##### Offline trace configuration status counts
 
 | Metric | Result |
 | --- | --- |
 | Needs verification | 12 |
 
-#### Offline runs needing configuration verification
+##### Offline runs needing configuration verification
 
 - `20260822T012029Z_offline_479d922a`
 
@@ -430,11 +438,11 @@ This report intentionally has no overall score or overall status.
 
 </details>
 
-## Metric definitions
+### Metric definitions
 
 <details><summary>Show metric definitions</summary>
 
-### Retrieval quality
+#### Retrieval quality
 
 | Measurement | Definition |
 | --- | --- |
@@ -449,7 +457,7 @@ This report intentionally has no overall score or overall status.
 | Context Recall | Reviewed required answer points supported by returned Analyst evidence divided by all required answer points. |
 | Concept/relation diagnostics | Separate ID, label, and relation-spec recall used to explain aggregate misses. |
 
-### Runtime task behavior
+#### Runtime task behavior
 
 | Measurement | Definition |
 | --- | --- |
@@ -467,7 +475,7 @@ This report intentionally has no overall score or overall status.
 | Final response/modality/termination rates | Shares satisfying final-response presence, requested output modality, and workflow termination contracts. |
 | Graph contract rate | Share of graph-applicable runs passing all structural and required-anchor checks. |
 
-### Reliability
+#### Reliability
 
 | Measurement | Definition |
 | --- | --- |
@@ -479,7 +487,7 @@ This report intentionally has no overall score or overall status.
 | Output limit hit rate | Runs observing a provider output-limit stop or classified truncation divided by runtime runs. |
 | Failure type frequency | Counts of classified provider, parser, tool, storage, timeout, truncation, recursion, and workflow failures. |
 
-### Efficiency
+#### Efficiency
 
 | Measurement | Definition |
 | --- | --- |
@@ -493,7 +501,7 @@ This report intentionally has no overall score or overall status.
 | Latency seconds | End-to-end time-to-resolution distribution with mean, median, and p95. |
 | Gating | False means efficiency limits are reported but do not initially fail functional task success. |
 
-### Optional semantic quality
+#### Optional semantic quality
 
 | Measurement | Definition |
 | --- | --- |
@@ -507,9 +515,280 @@ This report intentionally has no overall score or overall status.
 
 </details>
 
-## Metric interpretation
+### Metric interpretation
 
 - Functional task success excludes non-gating token and latency limits.
 - Context Precision@10 and Context Recall remain N/A until human labels are reviewed.
 - Live repetitions accumulate; deterministic invocations use their latest successful run.
 - Optional semantic judges never change deterministic task success.
+
+## Current evaluation — 2026-10-31 UTC
+
+15 planned executions across 13 scenarios; 12 completed, 10 passed, 2 failed and 3 interrupted/unscored.
+Worker-step and Tavily-search bounds can gate deterministic success; logical calls, provider attempts, retries, token usage and latency bounds are report-only. Saved outcomes are unchanged.
+- Failures: Mentor continuation routing/worker-step contract and RetNet contextual web-topic contract. Three interrupted observations have no runtime record or score.
+- Configuration: Orchestrator routing v6 / graph-index v2, Retriever v7, Researcher v6, Analyst v6 and Mentor v4. Generative roles used the variable openrouter/free route; serving identities were not always observed.
+- Analyst used legacy vector context; Visualizer used optimized retrieval. Document, index and graph stores were local, vector storage Pinecone, and checkpoints MongoDB.
+- All 12 completed runtime records lack complete token totals. Runtime attempt reservations were 45 of 54; full effort used 79 of 92, including failures and retries.
+
+### Coverage and runtime behavior
+
+#### Evaluator `1095d6342e69b04143ef971d`
+
+7 / 7 planned observations scored; 6 / 7 passed.
+
+| Runtime summary | Result | Eligible observations/checks |
+| --- | ---: | ---: |
+| Routing Correctness | 85.7% | 7 |
+| Required Agent Compliance | 85.7% | 7 |
+| Forbidden Agent Compliance | 85.7% | 7 |
+| One Tool Per Worker | 100.0% | 7 |
+| Retrieval Status Correctness | 100.0% | 5 |
+| Source Exhaustion Correctness | 100.0% | 5 |
+| Final Response Rate | 100.0% | 7 |
+| Modality Correctness | 100.0% | 7 |
+| Termination Rate | 100.0% | 7 |
+| Tool Selection Correctness | 85.7% | 7 |
+| Tool Argument Validity | 100.0% | 4 |
+| Local To Web Fallback Correctness | 100.0% | 1 |
+| Unnecessary Web Rate | 0.0% | 6 |
+| Task Success Rate | 85.7% | 7 |
+| Graph Contract Rate | 100.0% | 3 |
+
+<details><summary>Recorded contract checks and gating</summary>
+
+| Workflow metric | Passed / eligible | Not observed | Gating metadata |
+| --- | ---: | ---: | --- |
+| answer: final response present | 7 / 7 | 0 | true: 7 |
+| budget: latency seconds | 7 / 7 | 0 | false: 7 |
+| budget: logical llm calls | 6 / 7 | 0 | false: 7 |
+| budget: provider attempts | 5 / 7 | 0 | false: 7 |
+| budget: retries | 7 / 7 | 0 | false: 7 |
+| budget: tavily searches | 7 / 7 | 0 | true: 7 |
+| budget: total tokens | N/A — no observed eligible checks | 7 | false: 7 |
+| budget: worker steps | 6 / 7 | 0 | true: 7 |
+| fallback: sources exhausted | 5 / 5 | 0 | true: 5 |
+| graph: artifact present | 3 / 3 | 0 | true: 3 |
+| graph: edge count max | 3 / 3 | 0 | true: 3 |
+| graph: edge count min | 3 / 3 | 0 | true: 3 |
+| graph: no dangling edges | 3 / 3 | 0 | true: 3 |
+| graph: node count max | 3 / 3 | 0 | true: 3 |
+| graph: node count min | 3 / 3 | 0 | true: 3 |
+| graph: required nodes | 1 / 1 | 0 | true: 1 |
+| modality: requested modality | 7 / 7 | 0 | true: 7 |
+| reliability: forbidden failures | 7 / 7 | 0 | true: 7 |
+| retrieval: retrieval outcome | 4 / 4 | 0 | true: 4 |
+| retrieval: retrieval status | 5 / 5 | 0 | true: 5 |
+| routing: basic loop detector | 7 / 7 | 0 | true: 7 |
+| routing: forbidden agents | 6 / 7 | 0 | true: 7 |
+| routing: required agents | 6 / 7 | 0 | true: 7 |
+| routing: worker sequence | 6 / 7 | 0 | true: 7 |
+| scope: request scope | 7 / 7 | 0 | true: 7 |
+| termination: terminated | 7 / 7 | 0 | true: 7 |
+| tools: deep web research: topic | 1 / 1 | 0 | true: 1 |
+| tools: forbidden tools | 6 / 7 | 0 | true: 7 |
+| tools: get subgraphs to visualize: queries | 3 / 3 | 0 | true: 3 |
+| tools: one tool per worker | 7 / 7 | 0 | true: 7 |
+| tools: required tools | 5 / 5 | 0 | true: 5 |
+
+</details>
+
+##### Efficiency distributions
+
+| Metric | Available / scored | Mean | Median | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| worker steps | 7 / 7 | 2.00 | 2.00 | 3.00 |
+| logical llm calls | 7 / 7 | 2.71 | 2.00 | 5.00 |
+| provider attempts | 7 / 7 | 2.86 | 2.00 | 5.00 |
+| retries | 7 / 7 | 0.14 | 0.00 | 1.00 |
+| tavily searches | 7 / 7 | 0.14 | 0.00 | 1.00 |
+| latency seconds | 7 / 7 | 30.79 | 19.09 | 72.50 |
+| input tokens | 0 / 7 | N/A — not captured | N/A — not captured | N/A — not captured |
+| output tokens | 0 / 7 | N/A — not captured | N/A — not captured | N/A — not captured |
+| total tokens | 0 / 7 | N/A — not captured | N/A — not captured | N/A — not captured |
+
+##### Reliability
+
+| Metric | Result | Population |
+| --- | --- | --- |
+| loop detected | 0 | 7 observed |
+| output limit hit | 0 | 7 observed |
+| Classified failures | None recorded | 7 scored |
+| route consistency | N/A — no repeated scenario runs | No eligible repeated scenarios |
+| evidence set jaccard stability | N/A — no repeated scenario pairs | No eligible repeated scenarios |
+
+#### Evaluator `2b1301ae85cf5a5a77713187`
+
+2 / 2 planned observations scored; 2 / 2 passed.
+
+| Runtime summary | Result | Eligible observations/checks |
+| --- | ---: | ---: |
+| Routing Correctness | 100.0% | 2 |
+| Required Agent Compliance | 100.0% | 1 |
+| Forbidden Agent Compliance | 100.0% | 2 |
+| One Tool Per Worker | 100.0% | 2 |
+| Retrieval Status Correctness | N/A — no eligible observations | 0 |
+| Source Exhaustion Correctness | 100.0% | 1 |
+| Final Response Rate | 100.0% | 2 |
+| Modality Correctness | 100.0% | 2 |
+| Termination Rate | 100.0% | 2 |
+| Tool Selection Correctness | 100.0% | 2 |
+| Tool Argument Validity | N/A — no eligible observations | 0 |
+| Local To Web Fallback Correctness | N/A — no eligible observations | 0 |
+| Unnecessary Web Rate | 0.0% | 2 |
+| Task Success Rate | 100.0% | 2 |
+| Graph Contract Rate | N/A — no eligible observations | 0 |
+
+<details><summary>Recorded contract checks and gating</summary>
+
+| Workflow metric | Passed / eligible | Not observed | Gating metadata |
+| --- | ---: | ---: | --- |
+| answer: final response present | 2 / 2 | 0 | true: 2 |
+| budget: latency seconds | 2 / 2 | 0 | false: 2 |
+| budget: logical llm calls | 2 / 2 | 0 | false: 2 |
+| budget: provider attempts | 2 / 2 | 0 | false: 2 |
+| budget: retries | 2 / 2 | 0 | false: 2 |
+| budget: tavily searches | 2 / 2 | 0 | true: 2 |
+| budget: total tokens | N/A — no observed eligible checks | 2 | false: 2 |
+| budget: worker steps | 2 / 2 | 0 | true: 2 |
+| fallback: sources exhausted | 1 / 1 | 0 | true: 1 |
+| modality: requested modality | 2 / 2 | 0 | true: 2 |
+| reliability: forbidden failures | 2 / 2 | 0 | true: 2 |
+| routing: basic loop detector | 2 / 2 | 0 | true: 2 |
+| routing: forbidden agents | 2 / 2 | 0 | true: 2 |
+| routing: required agents | 1 / 1 | 0 | true: 1 |
+| routing: worker sequence | 2 / 2 | 0 | true: 2 |
+| scope: request scope | 2 / 2 | 0 | true: 2 |
+| termination: terminated | 2 / 2 | 0 | true: 2 |
+| tools: forbidden tools | 2 / 2 | 0 | true: 2 |
+| tools: one tool per worker | 2 / 2 | 0 | true: 2 |
+
+</details>
+
+##### Efficiency distributions
+
+| Metric | Available / scored | Mean | Median | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| worker steps | 2 / 2 | 0.50 | 0.50 | 1.00 |
+| logical llm calls | 2 / 2 | 1.50 | 1.50 | 2.00 |
+| provider attempts | 2 / 2 | 1.50 | 1.50 | 2.00 |
+| retries | 2 / 2 | 0.00 | 0.00 | 0.00 |
+| tavily searches | 2 / 2 | 0.00 | 0.00 | 0.00 |
+| latency seconds | 2 / 2 | 6.17 | 6.17 | 8.56 |
+| input tokens | 0 / 2 | N/A — not captured | N/A — not captured | N/A — not captured |
+| output tokens | 0 / 2 | N/A — not captured | N/A — not captured | N/A — not captured |
+| total tokens | 0 / 2 | N/A — not captured | N/A — not captured | N/A — not captured |
+
+##### Reliability
+
+| Metric | Result | Population |
+| --- | --- | --- |
+| loop detected | 0 | 2 observed |
+| output limit hit | 0 | 2 observed |
+| Classified failures | None recorded | 2 scored |
+| route consistency | N/A — no repeated scenario runs | No eligible repeated scenarios |
+| evidence set jaccard stability | N/A — no repeated scenario pairs | No eligible repeated scenarios |
+
+#### Evaluator `aacdf873baacf605652888e1`
+
+3 / 6 planned observations scored; 2 / 3 passed.
+
+| Runtime summary | Result | Eligible observations/checks |
+| --- | ---: | ---: |
+| Routing Correctness | 100.0% | 3 |
+| Required Agent Compliance | 100.0% | 3 |
+| Forbidden Agent Compliance | 100.0% | 2 |
+| One Tool Per Worker | 100.0% | 3 |
+| Retrieval Status Correctness | 100.0% | 1 |
+| Source Exhaustion Correctness | 100.0% | 3 |
+| Final Response Rate | 100.0% | 3 |
+| Modality Correctness | 100.0% | 3 |
+| Termination Rate | 100.0% | 3 |
+| Tool Selection Correctness | 100.0% | 3 |
+| Tool Argument Validity | 66.7% | 3 |
+| Local To Web Fallback Correctness | 100.0% | 3 |
+| Unnecessary Web Rate | N/A — no eligible observations | 0 |
+| Task Success Rate | 66.7% | 3 |
+| Graph Contract Rate | N/A — no eligible observations | 0 |
+
+<details><summary>Recorded contract checks and gating</summary>
+
+| Workflow metric | Passed / eligible | Not observed | Gating metadata |
+| --- | ---: | ---: | --- |
+| answer: final response present | 3 / 3 | 0 | true: 3 |
+| budget: latency seconds | 3 / 3 | 0 | false: 3 |
+| budget: logical llm calls | 3 / 3 | 0 | false: 3 |
+| budget: provider attempts | 3 / 3 | 0 | false: 3 |
+| budget: retries | 3 / 3 | 0 | false: 3 |
+| budget: tavily searches | 3 / 3 | 0 | true: 3 |
+| budget: total tokens | N/A — no observed eligible checks | 3 | false: 3 |
+| budget: worker steps | 3 / 3 | 0 | true: 3 |
+| fallback: sources exhausted | 3 / 3 | 0 | true: 3 |
+| modality: requested modality | 3 / 3 | 0 | true: 3 |
+| reliability: forbidden failures | 3 / 3 | 0 | true: 3 |
+| retrieval: retrieval status | 1 / 1 | 0 | true: 1 |
+| routing: basic loop detector | 3 / 3 | 0 | true: 3 |
+| routing: forbidden agents | 2 / 2 | 0 | true: 2 |
+| routing: required agents | 3 / 3 | 0 | true: 3 |
+| routing: worker sequence | 3 / 3 | 0 | true: 3 |
+| scope: request scope | 3 / 3 | 0 | true: 3 |
+| termination: terminated | 3 / 3 | 0 | true: 3 |
+| tools: deep web research: topic | 2 / 3 | 0 | true: 3 |
+| tools: forbidden tools | 3 / 3 | 0 | true: 3 |
+| tools: one tool per worker | 3 / 3 | 0 | true: 3 |
+| tools: required tools | 3 / 3 | 0 | true: 3 |
+| tools: search knowledge base: queries | 1 / 1 | 0 | true: 1 |
+| tools: search knowledge base: required topics | 1 / 1 | 0 | true: 1 |
+
+</details>
+
+##### Efficiency distributions
+
+| Metric | Available / scored | Mean | Median | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| worker steps | 3 / 3 | 2.33 | 2.00 | 3.00 |
+| logical llm calls | 3 / 3 | 4.33 | 4.00 | 5.00 |
+| provider attempts | 3 / 3 | 4.67 | 4.00 | 6.00 |
+| retries | 3 / 3 | 0.33 | 0.00 | 1.00 |
+| tavily searches | 3 / 3 | 1.00 | 1.00 | 1.00 |
+| latency seconds | 3 / 3 | 69.76 | 73.36 | 97.66 |
+| input tokens | 0 / 3 | N/A — not captured | N/A — not captured | N/A — not captured |
+| output tokens | 0 / 3 | N/A — not captured | N/A — not captured | N/A — not captured |
+| total tokens | 0 / 3 | N/A — not captured | N/A — not captured | N/A — not captured |
+
+##### Reliability
+
+| Metric | Result | Population |
+| --- | --- | --- |
+| loop detected | 0 | 3 observed |
+| output limit hit | 0 | 3 observed |
+| Classified failures | None recorded | 3 scored |
+| route consistency | 1.000 | 1 repeated scenarios |
+| evidence set jaccard stability | 1.000 | 1 repeated scenarios |
+
+Evidence-set Jaccard uses the established convention that two empty evidence sets have similarity 1; this does not establish evidence quality.
+
+### Retrieval quality and diagnostics
+
+| Metric | Result | Population |
+| --- | --- | --- |
+| Evidence recall, precision and graph retrieval quality | N/A — no system retrieval benchmark was saved for these executions | Not measured |
+
+Workflow retrieval checks above do not measure evidence precision. The [retrieval optimization experiment](experiments/retrieval-comparison/report.md) has separate cohorts and results.
+
+### Answer and graph quality
+
+| Dimension | Score | Status | Coverage |
+| --- | ---: | --- | --- |
+| Graph Usefulness | N/A | Unavailable | 2 eligible; 1 HTTP 429 error; 1 unstarted |
+| Claim Faithfulness | N/A | Unavailable | 2 eligible; 0 attempted; 2 unstarted |
+| Analyst Usefulness | N/A | Unavailable | Not assessed in this pilot |
+| Mentor Pedagogy | N/A | Unavailable | Not assessed in this pilot |
+| Conversational Continuity | N/A | Unavailable | Not assessed in this pilot |
+
+Eligible inputs: 4; attempts: 1; successful scores: 0; unstarted: 3; HTTP 429 errors: 1. Missing scores are not zero.
+Judge evaluator: `e3545f82672e7197c6e567f2`; configured model: `xingchen-agi/xing4.0-29b-a4b:free`; observed serving identity: unknown.
+
+### Diagnostics and interpretation
+
+Unavailable usage remains N/A; deterministic compliance does not establish evidence support or answer quality. See [provenance](history/system-evaluation-v2-controlled-observations-1640fed21174/provenance.json) for original identities and source hashes. No historical observation was rescored.

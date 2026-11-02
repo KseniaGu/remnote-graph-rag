@@ -37,8 +37,8 @@ machine-readable representation.
 | `scripts/build_evaluation_report.py` | Rebuild reports from evaluation history and optionally publish a commit-friendly snapshot. |
 
 The authoritative contracts are
-[`evals/retrieval/benchmark_cases.jsonl`](../evals/retrieval/benchmark_cases.jsonl)
-and [`evals/runtime/scenarios.json`](../evals/runtime/scenarios.json).
+[`backend/evaluation/cases/retrieval/benchmark_cases.jsonl`](../backend/evaluation/cases/retrieval/benchmark_cases.jsonl)
+and [`backend/evaluation/cases/runtime/scenarios.json`](../backend/evaluation/cases/runtime/scenarios.json).
 Their Markdown companions are review views, not executable input.
 
 ## Runtime routing and knowledge-search boundaries
@@ -83,8 +83,8 @@ and a positive `--max-web-attempts`.
 ## Regenerate the runtime scenario review
 
 Run this standard-library recipe from the repository root after editing
-`evals/runtime/scenarios.json`. It regenerates the
-[readable review](../evals/runtime/scenarios_review.md) without invoking models,
+`backend/evaluation/cases/runtime/scenarios.json`. It regenerates the
+[readable review](../backend/evaluation/cases/runtime/scenarios_review.md) without invoking models,
 services, or evaluation executors. The JSON contract remains authoritative.
 
 ```bash
@@ -93,14 +93,14 @@ import hashlib
 import json
 from pathlib import Path
 
-source = Path('evals/runtime/scenarios.json')
+source = Path('backend/evaluation/cases/runtime/scenarios.json')
 scenarios = json.loads(source.read_text())
 lines = [
     '# Runtime scenario review',
     '',
     'Generated from [scenarios.json](scenarios.json); edit the machine contract,',
     'then regenerate this review. This view is not executable input or measured results.',
-    'Use the [regeneration recipe](../../docs/runtime_evaluation.md#regenerate-the-runtime-scenario-review).',
+    'Use the [regeneration recipe](../../../../docs/runtime_evaluation.md#regenerate-the-runtime-scenario-review).',
     '',
     f'- Contract SHA256: `{hashlib.sha256(source.read_bytes()).hexdigest()}`',
     f'- Scenarios: {len(scenarios)}',
@@ -119,7 +119,7 @@ for scenario in scenarios:
         '```',
         '',
     ])
-Path('evals/runtime/scenarios_review.md').write_text('\n'.join(lines))
+Path('backend/evaluation/cases/runtime/scenarios_review.md').write_text('\n'.join(lines))
 PY
 ```
 
@@ -130,7 +130,7 @@ context-relevance annotation, use
 [full_evaluation_report_runbook.md](full_evaluation_report_runbook.md). The
 commands below describe individual evaluator modes.
 
-The [retrieval comparison guide](retrieval_ablation.md) defines the offline
+The [retrieval comparison guide](../reports/evaluation/experiments/retrieval-comparison/report.md) defines the offline
 source-only, graph-assisted, reranked, and legacy arms, their measurement
 boundaries, and the review required before drawing paired comparisons.
 
@@ -257,7 +257,7 @@ uv run --locked python scripts/evaluate_retrieval_pipeline.py \
   --analyst-variant legacy_vector_context \
   --analyst-reranker-mode disabled \
   --no-render-html \
-  --write-relevance-review evals/retrieval/context_relevance_review.md
+  --write-relevance-review backend/evaluation/cases/retrieval/context_relevance_review.md
 ```
 
 Rebuild reports without running retrieval or the workflow:
@@ -299,6 +299,48 @@ publication is not a full campaign: the override only permits publication while
 the missing requirements remain visible. The CLI accepts an exact fingerprint
 without either policy flag, but documented publication always pairs the exact
 fingerprint with one flag so intent is explicit.
+
+## Publish saved system evaluation
+
+Rebuild the consolidated system edition from the sanitized saved inputs without
+running an evaluation or rescoring historical observations:
+
+```bash
+uv run --locked python scripts/build_evaluation_report.py --publish \
+  --system-reference-scorecard reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/scorecard.json \
+  --system-reference-provenance reports/evaluation/history/2026-08-22_f8d6f3b6f3e0/provenance.json \
+  --system-runtime reports/evaluation/history/controlled-observations/runtime.json \
+  --system-metrics reports/evaluation/inputs/runtime-metrics.json \
+  --system-judge reports/evaluation/inputs/system-judge-status.json
+```
+
+The publisher derives an immutable edition identity from the runtime publication ID
+and input hashes. A later edition on the same observation date can set a larger
+positive `publication_revision` in its runtime input to select it as latest.
+Per-dimension judge scores and statuses come from the supplied judge input; no
+overall quality score is inferred. The preserved scorecard presentation was
+checked against `main` commit `76659bd6c02de3d52815e48b5e9d0faa401e7a21`. The August scorecard and prior October snapshot remain unchanged. The edition
+contains separately identified August imported-trace/live results and October
+evaluator groups; it does not combine their scores or imply improvement.
+October metrics were derived from 12 already-scored completed live runs. Their
+manifest, case-result and runtime-record SHA256 identities, grouped by original
+fingerprint, are in the derived input and edition provenance. No case was rescored.
+To rederive the sanitized metrics from the original private run directories, pass
+all 12 completed directories using repeated `--scored-run-dir` options:
+
+```bash
+uv run --locked python scripts/build_evaluation_report.py --derive-saved-runtime \
+  --scored-run-dir "$SCORED_RUN_DIRECTORY" \
+  --derived-output /tmp/derived-runtime.json
+```
+
+The example illustrates one argument; reproduce this edition with all 12 run
+directories and verify the resulting hashes against the published provenance.
+Raw records and trace content remain private. The separate
+[retrieval optimization experiment](../reports/evaluation/experiments/README.md)
+keeps its own populations, scores and provenance and cannot replace the latest
+system report. The publication index is generated by the CLI, and older
+publications do not overwrite newer latest aliases.
 
 ## Immutable history and fingerprints
 
@@ -347,14 +389,15 @@ ones; historical runs and published reports are not regenerated or rewritten.
 For the same deterministic retrieval or offline invocation, only the newest
 completed run contributes to current metrics. Older and failed runs remain in
 `history.json`. Live repetitions accumulate. Judge rows aggregate only under
-the same dimension, provider, model, and rubric identity. Root `latest.*`
-always copies one fingerprint's scorecard.
+the same dimension, provider, model, and rubric identity. Working
+`data/evaluation/latest.*` selects one fingerprint; published `reports/evaluation/latest.*`
+selects the newest observation and can present a separately identified saved bundle.
 
 Archived evaluation output and legacy scratch directories are excluded from current history.
 The report builder scans only `data/evaluation/runs/*/manifest.json`.
 
 The tracked publication layer is `reports/evaluation`. It contains only the
-selected scorecard, a generated index, and sanitized provenance. Raw traces,
+selected reports, a generated index, and sanitized provenance. Raw traces,
 runtime records, evidence text, and tool outputs remain in ignored working
 history. See the full runbook for the detailed distinction between runs,
 fingerprints, working `latest` aliases, and published snapshots.
@@ -610,8 +653,7 @@ evaluation, and one aggregate quality score remain out of scope.
 The [published scorecards](../reports/evaluation/README.md) are historical and
 incomplete. They are not measurements of the current OpenRouter runtime or a
 paired graph-versus-vector improvement. Semantic judge errors and unavailable
-scores must remain visible. No fresh evaluation campaign is part of the M1
-offline engineering checks.
+scores must remain visible. No new measurements are implied by publishing these saved observations.
 
 Use [the setup and offline gates](project_overview.md#setup-and-offline-checks)
 for a locked clean-checkout test run without `.env`, credentials, private
