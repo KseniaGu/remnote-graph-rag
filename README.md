@@ -8,7 +8,7 @@
 
 A learning and technical interview practice app for developers working with a personal [RemNote](https://www.remnote.com) knowledge base. It turns exported notes into searchable evidence and a concept graph, then supports explanations, web research, guided practice, and interactive graph exploration through chat.
 
-## [Live Demo](https://remnote-graph-rag-frontend-875003222198.europe-west1.run.app/)
+## [Live Demo](https://remnote-graph-rag-frontend-875003222198.europe-west1.run.app/) (paused)
 
 ![Chat welcome screen](app/assets/welcome_screen.png)
 
