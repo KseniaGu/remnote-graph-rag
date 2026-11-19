@@ -157,6 +157,76 @@ class RetrievalEvidenceTests(unittest.TestCase):
         self.assertEqual(["chunk_edge"], relation.evidence_chunk_ids)
         self.assertEqual(("Subject (A)", "USES", "Object"), relation.as_triplet())
 
+    def test_legacy_structured_graph_retains_canonical_identity_and_resolved_sources(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from backend.workflows.agents.retrieval_access import RetrievalStoreAccess
+        from backend.workflows.presentation import GraphToolResult
+
+        relations = [
+            f"{source} ({{'postprocess_concept_id': '{source}', 'entity_name': 'Shared label'}}) -> "
+            "USES ({'postprocess_relation_id': 'rel_1', 'evidence_chunk_ids': ['chunk_edge']}) -> "
+            f"{target} ({{'postprocess_concept_id': '{target}', 'entity_name': 'Shared label'}})"
+            for source, target in [("concept_a", "concept_b")]
+        ]
+        store = SimpleNamespace(
+            get=lambda *, ids: [
+                SimpleNamespace(
+                    id=node_id,
+                    label="CONCEPT",
+                    properties={
+                        "entity_name": "Shared label",
+                        "source_chunk_ids": [
+                            "chunk_good",
+                            "chunk_missing",
+                            "chunk_quarantined",
+                            "chunk_wrong",
+                        ],
+                    },
+                )
+                for node_id in ids
+                if node_id.startswith("concept_")
+            ]
+        )
+        docstore = SimpleNamespace(
+            docs={
+                "chunk_good": FakeNode(
+                    "evidence " * 100,
+                    node_id="chunk_good",
+                    metadata={"note_title": "Actual note"},
+                ),
+                "chunk_quarantined": FakeNode(
+                    "hidden",
+                    node_id="chunk_quarantined",
+                    metadata={"quarantined": True},
+                ),
+                "chunk_wrong": FakeNode("wrong", node_id="chunk_other"),
+            }
+        )
+        access = RetrievalStoreAccess(
+            SimpleNamespace(
+                storage_context=SimpleNamespace(
+                    property_graph_store=store, docstore=docstore
+                )
+            )
+        )
+        retriever = FakeRetriever({"graph": [FakeNode(text) for text in relations]})
+        graph = GraphToolResult.model_validate(
+            get_subgraphs_to_visualize(
+                retriever, structured=True, graph_access=access
+            ).invoke({"queries": ["graph"]})
+        ).graph
+        self.assertEqual(
+            [(node.id, node.label) for node in graph.nodes],
+            [("concept_a", "Shared label"), ("concept_b", "Shared label")],
+        )
+        self.assertEqual(graph.edges[0].relation_id, "rel_1")
+        self.assertEqual(graph.edges[0].evidence_source_ids, ["note:chunk_edge"])
+        self.assertEqual([source.title for source in graph.sources], ["Actual note"])
+        self.assertEqual(len(graph.sources[0].excerpt), 500)
+
     def test_child_parent_and_low_score_handling(self) -> None:
         parent_node = FakeNode("Parent -> PARENT -> Child")
         self.assertEqual(
@@ -391,7 +461,7 @@ class RetrievalEvidenceTests(unittest.TestCase):
 
     def test_optimized_formatted_output_uses_same_topic_coverage_check(self) -> None:
         class FakeAnalystPipeline:
-            def search(self, queries: list[str]) -> str:
+            def search(self, queries: list[str], *, spans=None) -> str:
                 return (
                     "RETRIEVER RESULTS:\n\nQUERY: "
                     f"{queries[0]}\n[SOURCE] (Score: 0.90) ResNet is a CNN."

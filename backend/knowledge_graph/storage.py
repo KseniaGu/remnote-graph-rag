@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ from pinecone import Pinecone
 from backend.configs.constants import DEFAULT_EMBEDDING_DIM
 from backend.configs.enums import StorageType
 from backend.configs.paths import PathSettings
-from backend.configs.storage import StorageSettings
+from backend.configs.storage import LocalStorageSettings, RedisSettings, StorageSettings
 from backend.knowledge_graph.custom_types import (
     CustomMemgraphPropertyGraphStore,
     CustomNeo4jPropertyGraphStore,
@@ -71,6 +72,27 @@ def _get_redis_vector_schema(embedding_dim: int) -> Any:
     if hasattr(IndexSchema, "from_dict"):
         return IndexSchema.from_dict(schema)
     return IndexSchema(**schema)
+
+
+def open_document_store(settings: LocalStorageSettings | RedisSettings) -> Any:
+    if settings.storage_type == StorageType.local:
+        if any(settings.storage_path.iterdir()):
+            return SimpleDocumentStore.from_persist_dir(
+                persist_dir=str(settings.storage_path)
+            )
+        return SimpleDocumentStore()
+    if settings.storage_type == StorageType.redis:
+        if settings.password:
+            client = redis.from_url(settings.get_connection_url(driver="rediss"))
+            return KVDocumentStore(
+                RedisKVStore(redis_client=client, namespace="llama_index")
+            )
+        return RedisDocumentStore.from_host_and_port(
+            host=settings.host, port=settings.port, namespace="llama_index"
+        )
+    raise ValueError(
+        "Only Local and Redis storage types are supported for Document Storage"
+    )
 
 
 class KnowledgeGraphStorage:
@@ -120,51 +142,23 @@ class KnowledgeGraphStorage:
         Returns:
             Document storage instance (SimpleDocumentStore or RedisDocumentStore).
         """
-        if self.storage_settings.document_storage.storage_type == StorageType.local:
-            storage_path = self.storage_settings.document_storage.storage_path
-            if self.not_empty(storage_path):
-                document_storage = SimpleDocumentStore.from_persist_dir(
-                    persist_dir=str(storage_path)
-                )
-            else:
-                document_storage = SimpleDocumentStore()
-        elif self.storage_settings.document_storage.storage_type == StorageType.redis:
-            if self.storage_settings.document_storage.password:
-                redis_url = self.storage_settings.document_storage.get_connection_url(
-                    driver="rediss"
-                )
-                redis_client = redis.from_url(redis_url)
-                kv_store = RedisKVStore(
-                    redis_client=redis_client, namespace="llama_index"
-                )
-                document_storage = KVDocumentStore(kv_store)
-            else:
-                document_storage = RedisDocumentStore.from_host_and_port(
-                    host=self.storage_settings.document_storage.host,
-                    port=self.storage_settings.document_storage.port,
-                    namespace="llama_index",
-                )
-            if self.storage_settings.document_storage.init_from_local:
-                storage_is_empty = document_storage._kvstore._redis_client.dbsize() == 0
-            else:
-                storage_is_empty = False
-
-            if storage_is_empty:
-                local_path_to_check = kwargs.get(
-                    "local_storage", self.path_settings.local_storage_dir
-                )
-                if self.not_empty(local_path_to_check):
-                    local_document_storage = SimpleDocumentStore.from_persist_dir(
-                        persist_dir=str(local_path_to_check)
-                    )
-                    document_storage.add_documents(
-                        list(local_document_storage.docs.values())
-                    )
-        else:
-            raise ValueError(
-                "Only Local and Redis storage types are supported for Document Storage"
+        settings = self.storage_settings.document_storage
+        document_storage = open_document_store(settings)
+        if (
+            settings.storage_type == StorageType.redis
+            and settings.init_from_local
+            and document_storage._kvstore._redis_client.dbsize() == 0
+        ):
+            local_path = kwargs.get(
+                "local_storage", self.path_settings.local_storage_dir
             )
-
+            if self.not_empty(local_path):
+                local_document_storage = SimpleDocumentStore.from_persist_dir(
+                    persist_dir=str(local_path)
+                )
+                document_storage.add_documents(
+                    list(local_document_storage.docs.values())
+                )
         return document_storage
 
     @retry(
@@ -391,14 +385,20 @@ class KnowledgeGraphStorage:
                     list(local_property_graph_storage.graph.relations.values())
                 )
 
-    def _init_storage_context(self, **kwargs):
+    def _init_storage_context(
+        self, *, document_store_loader: Callable[[], Any] | None = None, **kwargs
+    ):
         """Initializes the storage context with all storage backends.
 
         Args:
             **kwargs: Additional arguments passed to storage initialization methods.
         """
         with ThreadPoolExecutor(max_workers=4) as executor:
-            docstore_future = executor.submit(self.get_document_storage, **kwargs)
+            docstore_future = (
+                executor.submit(document_store_loader)
+                if document_store_loader is not None
+                else executor.submit(self.get_document_storage, **kwargs)
+            )
             index_store_future = executor.submit(self.get_index_storage, **kwargs)
             vector_store_future = executor.submit(self.get_vector_storage, **kwargs)
             property_graph_store_future = executor.submit(

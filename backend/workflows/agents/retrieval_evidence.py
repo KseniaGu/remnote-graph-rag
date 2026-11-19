@@ -1,13 +1,32 @@
 import ast
 import json
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from math import isfinite
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from backend.configs.constants import MAX_SOURCE_CHARS, RELATION_DROP_SCORE
+from backend.configs.constants import (
+    MAX_SOURCE_CHARS,
+    RELATION_DROP_SCORE,
+    WORKFLOW_LOGGING,
+)
+from backend.utils.helpers import get_logger
+from backend.workflows.agents.retrieval_access import RetrievalStoreAccess
+from backend.workflows.presentation import (
+    MAX_GRAPH_SOURCES,
+    GraphNode,
+    ResponseEvidence,
+    ResponseSource,
+    note_source_id,
+    stored_string,
+    stored_strings,
+)
 
 FACT_BLOCK_HEADER = "Here are some facts extracted from the provided text:"
+logger = get_logger(WORKFLOW_LOGGING)
 
 
 class NormalizedMetadata(BaseModel):
@@ -74,6 +93,127 @@ class QueryEvidenceResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+@dataclass
+class EvidenceSpan:
+    """Offsets into formatted context, with excerpts limited to the admitted prefix."""
+
+    start: int
+    end: int
+    source: ResponseSource | None = None
+    related_sources: tuple[ResponseSource, ...] = ()
+    concept_ids: tuple[str, ...] = ()
+
+
+def note_source(
+    metadata: NormalizedMetadata | None,
+    chunk_id: str | None,
+    *,
+    retrieval_score: float | None = None,
+) -> ResponseSource:
+    raw = metadata.raw if metadata else {}
+    path = []
+    if metadata is not None:
+        path = (
+            stored_strings(_parse_structured_value(raw.get("path", metadata.path)))
+            or stored_strings(
+                _parse_structured_value(raw.get("heading_path", metadata.heading_path))
+            )
+            or stored_strings(raw.get("source", metadata.source))
+        )
+    return ResponseSource(
+        kind="note",
+        source_id=note_source_id(chunk_id)
+        if chunk_id
+        else stored_string(raw.get("source_id")),
+        chunk_id=chunk_id,
+        note_id=stored_string(raw.get("note_id")),
+        title=stored_string(raw.get("note_title")) or stored_string(raw.get("title")),
+        path=path,
+        summary=stored_string(raw.get("postprocess_chunk_summary")),
+        retrieval_score=retrieval_score
+        if retrieval_score is not None and isfinite(retrieval_score)
+        else None,
+    )
+
+
+def graph_sources(
+    access: RetrievalStoreAccess, nodes: list[GraphNode]
+) -> list[ResponseSource]:
+    """Resolve bounded source details for stored concept mentions."""
+    source_ids = list(
+        dict.fromkeys(source for node in nodes for source in node.source_ids)
+    )
+    return resolve_note_chunks(
+        access.docstore_node,
+        [source_id.removeprefix("note:") for source_id in source_ids],
+    )
+
+
+def resolve_note_chunks(
+    get_document: Callable[[str], Any], chunk_ids: list[str]
+) -> list[ResponseSource]:
+    """Read a bounded preview of each referenced, eligible note chunk."""
+    sources = []
+    for chunk_id in list(dict.fromkeys(chunk_ids))[:MAX_GRAPH_SOURCES]:
+        try:
+            document = get_document(chunk_id)
+        except Exception as exc:
+            logger.warning(
+                "Note source lookup unavailable", error_type=type(exc).__name__
+            )
+            break
+        if document is None:
+            continue
+        metadata = normalize_metadata(document)
+        if (
+            metadata.chunk_id != chunk_id
+            or metadata.quarantined
+            or metadata.retrieval_enabled is False
+        ):
+            continue
+        source = note_source(metadata, chunk_id)
+        source.excerpt = RetrievalStoreAccess.node_text(document).strip()[:500] or None
+        if source.title or source.path or source.excerpt or source.summary:
+            sources.append(source)
+    return sources
+
+
+def admitted_evidence(
+    text: str, spans: list[EvidenceSpan], limit: int
+) -> ResponseEvidence:
+    sources: dict[object, ResponseSource] = {}
+    concept_ids: dict[str, None] = {}
+    has_relationship_context = False
+    for span in spans:
+        if span.start >= limit:
+            continue
+        if span.source is not None:
+            excerpt = text[span.start : min(span.end, limit, span.start + 500)].strip()
+            if not excerpt:
+                continue
+            candidates = (span.source.model_copy(update={"excerpt": excerpt}),)
+        else:
+            has_relationship_context = True
+            if span.end > limit:
+                continue
+            candidates = span.related_sources
+        concept_ids.update(dict.fromkeys(span.concept_ids))
+        for source in candidates:
+            key = source.source_id or (
+                source.note_id,
+                tuple(source.path),
+                source.excerpt,
+            )
+            previous = sources.get(key)
+            if previous is None or (source.excerpt and not previous.excerpt):
+                sources[key] = source
+    return ResponseEvidence(
+        sources=list(sources.values()),
+        concept_ids=list(concept_ids),
+        has_relationship_context=has_relationship_context,
+    )
+
+
 def evidence_from_retrieved_node(
     item: Any, *, query: str, rank: int
 ) -> list[SourceEvidence | RelationEvidence]:
@@ -131,21 +271,46 @@ def normalize_metadata(node: Any) -> NormalizedMetadata:
     )
 
 
-def format_search_results(results: list[QueryEvidenceResult]) -> str:
+def format_search_results(
+    results: list[QueryEvidenceResult], *, spans: list[EvidenceSpan] | None = None
+) -> str:
     evidence_lines: list[str] = []
+    block_start = len("RETRIEVER RESULTS:\n\n")
     seen_sources_global: set[str] = set()
     seen_paths_global: set[str] = set()
 
     for result in results:
         query_lines: list[str] = []
+        line_start = block_start + len(f"QUERY: {result.query}\n")
 
         for evidence in result.items:
             if isinstance(evidence, RelationEvidence):
-                query_lines.append(
-                    _clean(
-                        f"[RELATION] {evidence.raw_relation} (Score: {_score_for_display(evidence.score):.2f})"
-                    )
+                line = _clean(
+                    f"[RELATION] {evidence.raw_relation} (Score: {_score_for_display(evidence.score):.2f})"
                 )
+                query_lines.append(line)
+                if spans is not None:
+                    spans.append(
+                        EvidenceSpan(
+                            line_start,
+                            line_start + len(line),
+                            related_sources=tuple(
+                                note_source(
+                                    evidence.metadata
+                                    if chunk_id == evidence.metadata.chunk_id
+                                    else None,
+                                    chunk_id,
+                                )
+                                for chunk_id in _relation_source_chunk_ids(evidence)
+                            ),
+                            concept_ids=tuple(
+                                value
+                                for value in (evidence.subject_id, evidence.object_id)
+                                if value
+                            ),
+                        )
+                    )
+                line_start += len(line) + 1
 
             if isinstance(evidence, SourceEvidence) and evidence.text:
                 clipped = _smart_truncate(evidence.text.strip(), MAX_SOURCE_CHARS)
@@ -157,15 +322,41 @@ def format_search_results(results: list[QueryEvidenceResult]) -> str:
                         if evidence.derived_from_relation_node
                         else f" (Score: {_score_for_display(evidence.score):.2f})"
                     )
-                    query_lines.append(f"[SOURCE]{score_tag} {_clean(clipped)}")
+                    prefix = f"[SOURCE]{score_tag} "
+                    line = prefix + _clean(clipped)
+                    query_lines.append(line)
+                    if spans is not None:
+                        metadata = evidence.metadata
+                        # Relation wrappers may have a node ID of their own.
+                        chunk_id = stored_string(metadata.raw.get("chunk_id"))
+                        if chunk_id is None and not evidence.derived_from_relation_node:
+                            chunk_id = metadata.node_id
+                        spans.append(
+                            EvidenceSpan(
+                                line_start + len(prefix),
+                                line_start + len(line),
+                                source=note_source(
+                                    metadata,
+                                    chunk_id,
+                                    retrieval_score=None
+                                    if evidence.derived_from_relation_node
+                                    else evidence.score,
+                                ),
+                            )
+                        )
+                    line_start += len(line) + 1
 
             for path in _evidence_paths(evidence):
                 if path and path not in seen_paths_global:
                     seen_paths_global.add(path)
-                    query_lines.append(f"[SOURCE PATH] {_clean(path)}")
+                    line = f"[SOURCE PATH] {_clean(path)}"
+                    query_lines.append(line)
+                    line_start += len(line) + 1
 
         if query_lines:
-            evidence_lines.append(f"QUERY: {result.query}\n" + "\n".join(query_lines))
+            block = f"QUERY: {result.query}\n" + "\n".join(query_lines)
+            evidence_lines.append(block)
+            block_start += len(block) + 2
 
     if not evidence_lines:
         return "No relevant information found."
@@ -191,6 +382,19 @@ def format_visualization_results(
                 all_nodes.append(evidence.metadata.node_id)
 
     return _ordered_unique(all_nodes), _ordered_unique(all_triplets), queries
+
+
+def _relation_source_chunk_ids(evidence: RelationEvidence) -> list[str]:
+    """Read stored relation support without treating concept mentions as edge evidence."""
+    return _ordered_unique(
+        chunk_id
+        for props in evidence.relation_properties
+        if not _concept_id(props)
+        for chunk_id in stored_strings(
+            props.get("evidence_chunk_ids")
+            or (_relation_id(props) and props.get("source_chunk_ids"))
+        )
+    )
 
 
 def _evidence_from_fact_block(

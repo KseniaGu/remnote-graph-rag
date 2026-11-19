@@ -43,6 +43,10 @@ Their Markdown companions are review views, not executable input.
 
 ## Runtime routing and knowledge-search boundaries
 
+The OpenRouter Orchestrator requests strict JSON Schema and requires an endpoint
+that supports the request parameters. The app validates the full raw JSON before
+choosing a route and rejects conflicting parsed decisions or duplicate fields.
+
 The active Retriever prompt is `v7` for the default and vLLM pipelines. Knowledge
 search requires `topic_policy`: `named` requires nonempty topic alias groups;
 `broad` uses no groups and requires a validated in-scope route. Invalid routing
@@ -418,6 +422,13 @@ Historical evidence is never reconstructed by querying mutable storage.
 System prompts, credentials, authorization values, and tool secrets are not
 included. Missing evidence text or graph labels is `N/A`; it is never inferred
 from an ID.
+
+The evaluator reads the formatted content of knowledge-search tool messages.
+The presentation evidence attached to those messages is scoped to the response.
+The application Visualizer emits structured graph tool results and artifacts.
+Both normalize to the existing graph observation fields. Historical traces can
+still supply Plotly figures and legacy tuples. Prepared retrieval measurements
+and optional Plotly exports continue to use the independent retrieval path.
 
 ## Scorecard
 

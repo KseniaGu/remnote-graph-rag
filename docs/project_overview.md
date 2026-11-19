@@ -128,9 +128,11 @@ source-grounded relation selection.
 The Visualizer tool defaults to `VisualizerRetrievalPipeline`. It is
 concept-first: it resolves query anchors, retrieves supporting source chunks and
 concept candidates, uses passage-aware source support, expands semantic graph
-edges, filters noisy or ungrounded relations, and returns the graph tuple
-consumed by the Visualizer node. Its legacy mode remains available for explicit
-comparison.
+edges, filters noisy or ungrounded relations, and returns the structured result
+consumed by the Visualizer node. The application also supports the legacy
+vector-context mode, which retains canonical identities and stored evidence
+when the retriever provides them. The prepared-retrieval benchmark uses its
+independent tuple projection.
 
 The optimized pipelines share low-level store access through
 `RetrievalStoreAccess`, which centralizes vector-store fallback, graph relation
@@ -154,7 +156,7 @@ five worker agents:
 - `Analyst`: writes grounded technical explanations from retrieved context.
 - `Mentor`: conducts interview-style practice using retrieved context as ground
   truth.
-- `Visualizer`: converts retrieved graph tuples into Plotly figures.
+- `Visualizer`: emits versioned graph artifacts from retrieved concepts and directed relations.
 
 All worker nodes return to the Orchestrator. The Orchestrator uses deterministic
 fast paths when context already implies the next step, and falls back to one
@@ -180,7 +182,8 @@ older summary so contextual follow-ups retain their technical domain; its latest
 request remains authoritative. This does not guarantee model compliance. Explicit
 broad mode is a structural safeguard, not a guarantee of semantic relevance.
 
-The workflow state includes messages, retrieved context, a compact older-session
+The workflow state includes messages, retrieved context and its admitted evidence,
+a compact older-session
 summary, visual artifacts, routing state, `request_scope`, `retrieval_status`,
 and retrieval failure flags. Retrieval status distinguishes `not_run`,
 `adequate`, `no_results`, `below_threshold`, and `topic_mismatch`. The wrapper
@@ -191,23 +194,48 @@ all-sources-exhausted, visualization, and no-results outcomes.
 
 ## Frontend And Session Experience
 
-The UI is a Reflex application with a chat-first layout, streaming responses,
-agent status, and recent graph navigation. The frontend can render Markdown,
-LaTeX, Mermaid blocks, and Plotly graph artifacts.
+The Reflex UI opens on Welcome and switches to Study when a conversation begins.
+Study keeps the composer below an independently scrolling reading pane and uses
+native drawers for session history and Sources & concepts below 960 px.
+The interface supports both themes, streaming responses, real agent status,
+Markdown, LaTeX, and Mermaid. Sources & concepts follows the selected response.
+Graph renders structured artifacts in the local React Balanced workspace. It
+keeps the selected map mounted when the user returns to Study. Graph has its
+own session map selector when multiple maps exist. Map view shows the selected
+artifact's compact title, which is generated from retrieval queries. Relations
+uses “Relations in this map” as its heading. Hovering over or focusing the
+subtitle in Map view or the graph result in Study
+shows the full query phrases passed to the Visualizer's retrieval tool when the
+artifact includes them.
+Older maps can open from their compact title. Clear session is available from
+Map controls when maps exist and from the session history panel in Study.
 
-`ReflexLearnerWorkflow` lazily initializes the heavy workflow singleton and
-streams workflow events back to `AppState`. Session memory is MongoDB-backed:
-recent messages, older extractive summaries, session history, recent maps, and
-visual artifacts can be restored across browser sessions. A MongoDB-backed
-quick-action cache can replay configured quick-action responses without
-initializing the full workflow.
+The [UI redesign handoff](ui_redesign_handoff.md) records the Reflex–React
+boundary, response evidence and execution contracts, cache and snapshot
+compatibility, and remaining browser and service-backed verification. The
+[Reflex browser checks](../tests/browser/README.md) run the compiled app with
+disposable dependencies and deterministic workflow events.
+
+`ReflexLearnerWorkflow` lazily initializes the workflow singleton and streams
+events to `AppState`. MongoDB session snapshots restore the current tab's
+messages, execution reports, and retained maps. Quick-action cache replay
+assigns fresh presentation IDs to the receiving session. Sources & concepts
+shows answer-scoped context, while execution details shows the turn's observed
+agent invocations and outcome. The live renderer uses structured graph
+artifacts. Plotly remains available for offline exports and historical trace
+decoding.
 
 Anonymous browser identity and chat admission are deliberately separate from a
 conversation. Reflex stores an opaque UUID `visitor_id` in browser LocalStorage
 and a replaceable `session_id` in session storage. Clearing a conversation
-rotates only the session ID, so it does not reset usage counters. This is a cost
-control rather than an identity guarantee: clearing site storage creates a new
-anonymous visitor and bypasses prior visitor quotas.
+rotates the session ID and preserves visitor usage counters. The app invalidates
+the active request, drains in-flight writes, and replaces the old snapshot
+with a content-free retirement marker that expires on the snapshot TTL.
+The marker blocks stale MongoDB upserts for that ID. A browser reload can
+restore a turn that finishes while the socket is disconnected. A failed
+snapshot read leaves the conversation usable in memory and preserves any
+existing snapshot. Anonymous visitor quotas are a cost control. Clearing site
+storage creates a new anonymous visitor and bypasses prior visitor quotas.
 
 When `CHAT_LIMITS_SHARED_QUOTAS_ENABLED=true`, MongoDB coordinates admission
 across Cloud Run instances. A visitor lease enforces one active turn and a

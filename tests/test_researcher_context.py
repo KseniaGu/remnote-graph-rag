@@ -155,7 +155,7 @@ def _synthetic_kb(case, mode):
     if mode == "optimized":
 
         class Pipeline:
-            def search(self, queries):
+            def search(self, queries, *, spans=None):
                 if name == "empty":
                     return RETRIEVAL_NO_RESULTS
                 if name == "below_threshold":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
 from backend.configs.constants import WORKFLOW_LOGGING
 from backend.configs.search import KnowledgeGraphSearchSettings
@@ -12,6 +13,17 @@ from backend.workflows.agents.retrieval_access import (
     POSTPROCESSED_CONCEPT_KIND,
     POSTPROCESSED_PASSAGE_KIND,
     RetrievalStoreAccess,
+)
+from backend.workflows.agents.retrieval_evidence import graph_sources
+from backend.workflows.presentation import (
+    GraphEdge,
+    GraphNode,
+    GraphPayload,
+    GraphToolResult,
+    graph_title,
+    note_source_id,
+    stored_string,
+    stored_strings,
 )
 
 logger = get_logger(WORKFLOW_LOGGING)
@@ -35,6 +47,7 @@ class ConceptCandidate:
     score: float
     support_chunk_ids: list[str] = field(default_factory=list)
     is_anchor: bool = False
+    source_chunk_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -49,6 +62,8 @@ class EdgeCandidate:
     generality_score: float | None = None
     visualization_usefulness: float | None = None
     synthetic: bool = False
+    relation_id: str | None = None
+    provenance_chunk_ids: list[str] | None = None
 
 
 class VisualizerRetrievalPipeline:
@@ -74,9 +89,66 @@ class VisualizerRetrievalPipeline:
     def visualize(
         self, queries: list[str]
     ) -> tuple[list[str], list[tuple[str, str, str]], list[str]]:
-        original_queries = list(queries)
+        nodes, edges = self._visualize_candidates(queries)
+        triplets = [(edge.subject_id, edge.predicate, edge.object_id) for edge in edges]
+        return [node.node_id for node in nodes], triplets, list(queries)
+
+    def structured_graph(self, queries: list[str]) -> GraphToolResult:
+        """Produce the structured map from the same selected graph as Plotly."""
+        nodes, edges = self._visualize_candidates(queries)
+        if not nodes:
+            return GraphToolResult(queries=list(queries), graph=None)
+
+        graph_nodes = []
+        for candidate in nodes:
+            node = candidate.node
+            properties = getattr(node, "properties", {}) or {}
+            graph_nodes.append(
+                GraphNode(
+                    id=candidate.node_id,
+                    label=candidate.label,
+                    type=stored_string(getattr(node, "label", None)),
+                    description=stored_string(properties.get("description")),
+                    source_ids=[
+                        note_source_id(chunk) for chunk in candidate.source_chunk_ids
+                    ],
+                )
+            )
+        return GraphToolResult(
+            queries=list(queries),
+            graph=GraphPayload(
+                artifact_id=str(uuid4()),
+                title=graph_title(queries),
+                nodes=graph_nodes,
+                sources=graph_sources(self.access, graph_nodes),
+                edges=[
+                    GraphEdge.from_relationship(
+                        edge.subject_id,
+                        edge.predicate,
+                        edge.object_id,
+                        relation_id=edge.relation_id,
+                        synthetic=edge.synthetic,
+                        evidence_source_ids=list(
+                            dict.fromkeys(
+                                note_source_id(chunk)
+                                for chunk in (
+                                    edge.provenance_chunk_ids
+                                    if edge.provenance_chunk_ids is not None
+                                    else edge.evidence_chunk_ids
+                                )
+                            )
+                        ),
+                    )
+                    for edge in edges
+                ],
+            ),
+        )
+
+    def _visualize_candidates(
+        self, queries: list[str]
+    ) -> tuple[list[ConceptCandidate], list[EdgeCandidate]]:
         if not queries:
-            return [], [], original_queries
+            return [], []
 
         canonical_queries = [
             query_text
@@ -132,14 +204,13 @@ class VisualizerRetrievalPipeline:
                     self._merge_edge_candidate(edge_candidates, edge)
 
         if not concept_candidates:
-            return [], [], original_queries
+            return [], []
 
         nodes, edges = self._shape_graph(concept_candidates, edge_candidates)
         if len(nodes) < self.settings.visualizer_min_nodes and not edges:
-            return [], [], original_queries
+            return [], []
 
-        triplets = [(edge.subject_id, edge.predicate, edge.object_id) for edge in edges]
-        return nodes, triplets, original_queries
+        return nodes, edges
 
     def _resolve_anchors(self, query: str) -> list[ConceptCandidate]:
         anchors: dict[str, ConceptCandidate] = {}
@@ -166,6 +237,7 @@ class VisualizerRetrievalPipeline:
                     label=label,
                     score=score,
                     support_chunk_ids=self._node_source_chunk_ids(node),
+                    source_chunk_ids=self._stored_node_chunk_ids(node),
                     is_anchor=True,
                 )
                 self._merge_concept_candidate(
@@ -324,6 +396,7 @@ class VisualizerRetrievalPipeline:
                     label=label,
                     score=self._clip_score(score),
                     support_chunk_ids=self._node_source_chunk_ids(node),
+                    source_chunk_ids=self._stored_node_chunk_ids(node),
                 )
             )
 
@@ -445,6 +518,10 @@ class VisualizerRetrievalPipeline:
                     relation_phrases=relation_phrases,
                     generality_score=generality_score,
                     visualization_usefulness=visualization_usefulness,
+                    relation_id=stored_string(
+                        relation_properties.get("postprocess_relation_id")
+                    ),
+                    provenance_chunk_ids=self._stored_relation_chunk_ids(relation),
                 )
             )
 
@@ -575,6 +652,12 @@ class VisualizerRetrievalPipeline:
             candidate.support_chunk_ids = self._ordered_unique(
                 [*candidate.support_chunk_ids, *evidence_chunk_ids]
             )
+            mention_ids = self._stored_relation_chunk_ids(relation)
+            if not mention_ids:
+                mention_ids = stored_strings(getattr(source_node, "id", None))
+            candidate.source_chunk_ids = self._ordered_unique(
+                [*candidate.source_chunk_ids, *mention_ids]
+            )
             self._merge_concept_candidate(candidates, candidate, "", evidence_chunk_ids)
 
         return sorted(
@@ -587,7 +670,7 @@ class VisualizerRetrievalPipeline:
         self,
         concepts: dict[str, ConceptCandidate],
         edges: dict[tuple[str, str, str], EdgeCandidate],
-    ) -> tuple[list[str], list[EdgeCandidate]]:
+    ) -> tuple[list[ConceptCandidate], list[EdgeCandidate]]:
         concepts, edges = self._dedupe_concepts_by_label(concepts, edges)
         edges = self._drop_redundant_generic_edges(edges)
         edge_list = [
@@ -681,7 +764,7 @@ class VisualizerRetrievalPipeline:
                 if not node_id.startswith("chunk_")
             ]
 
-        return selected_node_ids, selected_edges
+        return [concepts[node_id] for node_id in selected_node_ids], selected_edges
 
     def _query_vector_store(self, query: str, *, top_k: int, node_kind: str) -> Any:
         query_embedding = self.embedder.get_query_embedding(query)
@@ -736,6 +819,7 @@ class VisualizerRetrievalPipeline:
             label=label,
             score=self._clip_score(score),
             support_chunk_ids=self._node_source_chunk_ids(node),
+            source_chunk_ids=self._stored_node_chunk_ids(node),
         )
 
     def _merge_concept_candidate(
@@ -765,6 +849,9 @@ class VisualizerRetrievalPipeline:
         existing.is_anchor = existing.is_anchor or candidate.is_anchor
         existing.support_chunk_ids = self._ordered_unique(
             [*existing.support_chunk_ids, *candidate.support_chunk_ids]
+        )
+        existing.source_chunk_ids = self._ordered_unique(
+            [*existing.source_chunk_ids, *candidate.source_chunk_ids]
         )
 
     @staticmethod
@@ -832,6 +919,9 @@ class VisualizerRetrievalPipeline:
                 canonical.support_chunk_ids = self._ordered_unique(
                     [*canonical.support_chunk_ids, *candidate.support_chunk_ids]
                 )
+                canonical.source_chunk_ids = self._ordered_unique(
+                    [*canonical.source_chunk_ids, *candidate.source_chunk_ids]
+                )
             merged_concepts[canonical.node_id] = canonical
 
         remapped_edges: dict[tuple[str, str, str], EdgeCandidate] = {}
@@ -851,6 +941,8 @@ class VisualizerRetrievalPipeline:
                 generality_score=edge.generality_score,
                 visualization_usefulness=edge.visualization_usefulness,
                 synthetic=edge.synthetic,
+                relation_id=edge.relation_id,
+                provenance_chunk_ids=edge.provenance_chunk_ids,
             )
             self._merge_edge_candidate(remapped_edges, remapped_edge)
 
@@ -1167,6 +1259,18 @@ class VisualizerRetrievalPipeline:
     @staticmethod
     def _node_source_chunk_ids(node: Any) -> list[str]:
         return RetrievalStoreAccess.node_source_chunk_ids(node)
+
+    @staticmethod
+    def _stored_node_chunk_ids(node: Any) -> list[str]:
+        properties = getattr(node, "properties", {}) or {}
+        return list(dict.fromkeys(stored_strings(properties.get("source_chunk_ids"))))
+
+    @staticmethod
+    def _stored_relation_chunk_ids(relation: Any) -> list[str]:
+        properties = getattr(relation, "properties", {}) or {}
+        return stored_strings(properties.get("evidence_chunk_ids")) or stored_strings(
+            properties.get("source_chunk_ids")
+        )
 
     @staticmethod
     def _relation_label(relation: Any) -> str:

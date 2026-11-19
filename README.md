@@ -8,11 +8,13 @@
 
 A learning and technical interview practice app for developers working with a personal [RemNote](https://www.remnote.com) knowledge base. It turns exported notes into searchable evidence and a concept graph, then supports explanations, web research, guided practice, and interactive graph exploration through chat.
 
-## [Live Demo](https://remnote-graph-rag-frontend-et6s3zquja-ew.a.run.app/)
+## [Try the live demo ↗](https://remnote-graph-rag-frontend-et6s3zquja-ew.a.run.app/)
+
+Start with a sample prompt, then explore a concept map and inspect its sources.
 
 ![Chat welcome screen](app/assets/welcome_screen.png)
 
-The backend uses **Python, [LangGraph](https://github.com/langchain-ai/langgraph), and [LlamaIndex](https://developers.llamaindex.ai/python/framework/)**; the web interface uses **[Reflex](https://github.com/reflex-dev/reflex) and [Plotly](https://plotly.com/)**. Storage adapters support local files, [Redis](https://redis.io/), [Pinecone](https://www.pinecone.io/), [MongoDB](https://www.mongodb.com/), [Neo4j](https://neo4j.com/), and [Memgraph](https://memgraph.com/); deployment uses [Google Cloud Run](https://cloud.google.com/run).
+The backend uses Python, [LangGraph](https://github.com/langchain-ai/langgraph), and [LlamaIndex](https://developers.llamaindex.ai/python/framework/). The web interface uses [Reflex](https://github.com/reflex-dev/reflex) and a local [React](https://react.dev/) workspace for interactive concept maps. [Plotly](https://plotly.com/) remains available for offline graph exports and historical trace decoding. Storage adapters support local files, [Redis](https://redis.io/), [Pinecone](https://www.pinecone.io/), [MongoDB](https://www.mongodb.com/), [Neo4j](https://neo4j.com/), and [Memgraph](https://memgraph.com/). Deployment uses [Google Cloud Run](https://cloud.google.com/run).
 
 The default LLM pipeline uses [OpenRouter](https://openrouter.ai/) `openrouter/free` automatic routing; the pipeline selector retains [Ollama](https://ollama.com/library?sort=newest) `ollama` as a compatibility alias.
 
@@ -23,31 +25,50 @@ flowchart LR
     D[Reflex chat] --> E[LangGraph agents]
     E --> C
     E --> F[Tavily web research]
-    E --> G[Answers, Mentor practice, Plotly graphs]
+    E --> G[Answers, Mentor practice, interactive concept maps]
     G --> D
 ```
 
 Preparation runs ahead of serving; application startup loads prepared storage. Analyst retrieval defaults to `legacy_vector_context`; Visualizer retrieval uses `optimized`. The default stores combine local files, Redis, Pinecone, and MongoDB. See the [architecture and configuration](docs/project_overview.md) for decisions, active prompts, optional backends, and limitations. Knowledge searches use explicit named-topic or in-scope broad policies; broad mode does not guarantee that every retrieved result is relevant.
 
-<details>
-<summary><strong>More application screenshots — click to expand</strong></summary>
 
-![Knowledge graph visualization](app/assets/visualization.png)
-![Web research response](app/assets/research.png)
-![Mentor practice](app/assets/mentor.png)
+<details>
+<summary><strong>View additional interface examples</strong></summary>
+
+![Knowledge graph](app/assets/visualization.png)
+![Research response](app/assets/research.png)
+![Practice session](app/assets/mentor.png)
 
 </details>
 
-For a supported Python 3.11 environment with **uv 0.12.3**, install the locked checks and run the offline suite:
+## Running locally
+
+Install the project dependencies using [uv](https://docs.astral.sh/uv/) and configure the required environment variables as described in the [project documentation](docs/project_overview.md).
 
 ```bash
 uv sync --locked --group dev --group evaluation
+```
+
+Ensure that the configured services are running and accessible, including the required databases, knowledge stores, and LLM provider. The application expects prepared knowledge-graph and retrieval data.
+
+Start the application:
+
+```bash
+uv run reflex run
+```
+
+The frontend is typically available at `http://localhost:3000`, with the backend at `http://localhost:8000`.
+
+**Optional — run offline regression checks:**
+
+```bash
 uv run --no-sync python scripts/check_offline.py
 ```
 
-The suite uses synthetic data and mocked model/embedding calls; prepared-storage integration checks are explicitly skipped by default. It needs no `.env`, credentials, private corpus, downloaded models, or services. See [setup, usage, and offline gates](docs/project_overview.md#setup-and-offline-checks) for the complete commands and integration boundary.
+Run these checks from a checkout without a `.env` file. They use synthetic data and mocked model calls without requiring external services or provider API requests.
 
-Live and judge evaluation require explicit provider confirmation, a fresh quota observation, and a durable local request guard. See the [request guard](docs/runtime_evaluation.md#evaluation-request-guard) for limits and the operator's responsibility to verify external quota.
+For detailed setup instructions, service configuration, and available testing options, see the [project documentation](docs/project_overview.md).
+
 
 ## Evaluation results
 

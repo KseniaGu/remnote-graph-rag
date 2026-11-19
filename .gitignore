@@ -27,6 +27,11 @@ __pycache__/
 *.download
 *.part
 
+# Local design explorations and tooling
+design/
+/.devcontainer/design/
+/skills-lock.json
+
 # Data/models folders
 data/
 docs/*

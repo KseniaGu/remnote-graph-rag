@@ -1,46 +1,40 @@
 import reflex as rx
 
+from app.practice_components import MermaidDiagram
 from app.state import (
     CHAT_MESSAGE_MAX_CHARS,
     AppState,
-    Message,
+    LiveAgent,
     RecentMapItem,
     SessionHistoryItem,
+    StudySource,
+    StudyStage,
+    StudyTurn,
 )
 from app.strings import (
     APP_NAME,
-    APP_TAGLINE,
     CHAT_EMPTY_HEADING,
+    CHAT_EMPTY_HEADING_SECOND_LINE,
     CHAT_EMPTY_SUBTEXT,
+    CHAT_FOLLOW_UP_PLACEHOLDER,
     CHAT_INPUT_PLACEHOLDER,
     CHAT_PROCESSING_LABEL,
+    CHAT_PROCESSING_PLACEHOLDER,
     CONTEXT_PANEL_TITLE,
     GRAPH_EMPTY_HEADING,
     GRAPH_EMPTY_SUBTEXT,
     GRAPH_LOADING_HEADING,
     GRAPH_LOADING_SUBTEXT,
     GRAPH_UNAVAILABLE_HEADING,
-    GRAPH_UPDATED_ACTION,
-    GRAPH_UPDATED_NOTICE,
     QUICK_ACTIONS,
-    SIDEBAR_BTN_CLEAR_CHAT,
-    VIZ_PANEL_TITLE,
-    WORKSPACE_GRAPH_LABEL,
-    WORKSPACE_GRAPH_SUBTITLE,
-    WORKSPACE_STUDY_LABEL,
-    WORKSPACE_STUDY_SUBTITLE,
+    STUDY_INTENTS,
 )
 from app.styles import (
-    AGENT_COLORS,
-    ASSISTANT_ARTIFACT_STYLE,
-    BUTTON_PRIMARY_STYLE,
-    BUTTON_SECONDARY_STYLE,
     CARD_STYLE,
     COLORS,
-    INPUT_STYLE,
-    MESSAGE_BUBBLE_USER,
 )
-from backend.configs.constants import LOGO_URL
+from app.ui.knowledge_graph import KnowledgeGraph, SourceList
+from backend.workflows.presentation import Message
 
 
 def surface(*children, style: dict | None = None, **props) -> rx.Component:
@@ -82,144 +76,6 @@ def section_header(title: str, icon_name: str | None = None, **props) -> rx.Comp
     )
 
 
-def icon_text_button(
-    icon_name: str,
-    label: str,
-    on_click,
-    style: dict,
-    icon_color: str | None = None,
-    icon_size: int = 16,
-    text_size: str = "0.875rem",
-) -> rx.Component:
-    """Button primitive for icon + text actions."""
-    return rx.button(
-        rx.hstack(
-            rx.icon(icon_name, size=icon_size, color=icon_color),
-            rx.text(label, font_size=text_size),
-            spacing="2",
-            align="center",
-        ),
-        on_click=on_click,
-        style=style,
-    )
-
-
-def agent_label(name, color: str, animated: bool = False) -> rx.Component:
-    """Small artifact label used inside assistant study cards."""
-    indicator_style = {
-        "width": "5px",
-        "height": "5px",
-        "borderRadius": "50%",
-        "background": color,
-    }
-    if animated:
-        indicator_style["animation"] = "pulse 1.5s ease-in-out infinite"
-
-    return rx.hstack(
-        rx.box(style=indicator_style),
-        rx.text(
-            name,
-            font_size="0.72rem",
-            font_weight="750",
-            color=color,
-            letter_spacing="0",
-            text_transform="uppercase",
-        ),
-        spacing="2",
-        align="center",
-        class_name="artifact-label",
-    )
-
-
-def artifact_header(
-    label, timestamp, color: str, animated: bool = False
-) -> rx.Component:
-    """Metadata row for assistant study artifacts."""
-    return rx.hstack(
-        agent_label(label, color, animated=animated),
-        rx.spacer(),
-        rx.text(
-            timestamp,
-            class_name="artifact-timestamp",
-        ),
-        class_name="artifact-header",
-        align="center",
-        width="100%",
-    )
-
-
-def message_card(*children, style, class_name: str | None = None) -> rx.Component:
-    """Reusable message card wrapper for persisted and streaming messages."""
-    return rx.box(
-        rx.vstack(
-            *children,
-            align="start",
-            spacing="0",
-        ),
-        class_name=class_name,
-        style=style,
-    )
-
-
-ANALYST_MESSAGE_STYLE = {
-    **ASSISTANT_ARTIFACT_STYLE,
-    "width": "100%",
-    "maxWidth": "100%",
-}
-
-
-def assistant_label_color(agent_name):
-    """Return the display color for an assistant message label."""
-    return rx.cond(
-        agent_name == "analyst",
-        COLORS["accent_blue"],
-        COLORS["accent_green"],
-    )
-
-
-def assistant_artifact_label(agent_name):
-    """Return the study artifact label for an assistant agent."""
-    return rx.cond(
-        agent_name == "analyst",
-        "Synthesis",
-        rx.cond(
-            agent_name == "mentor",
-            "Practice Guidance",
-            rx.cond(
-                (agent_name == "researcher") | (agent_name == "retriever"),
-                "Retrieved Context",
-                agent_name,
-            ),
-        ),
-    )
-
-
-def message_style(message: Message):
-    """Choose the card style for a persisted chat message."""
-    return rx.cond(
-        (message.role != "user") & (message.agent == "analyst"),
-        ANALYST_MESSAGE_STYLE,
-        rx.cond(
-            message.role == "user",
-            MESSAGE_BUBBLE_USER,
-            ASSISTANT_ARTIFACT_STYLE,
-        ),
-    )
-
-
-def message_class_name(message: Message):
-    """Choose the message card class for agent-specific rendering."""
-    return rx.cond(
-        (message.role != "user") & (message.agent == "analyst"),
-        "message-card analyst-message",
-        rx.cond(
-            (message.role != "user") & (message.agent == "mentor"),
-            "message-card mentor-message",
-            "message-card",
-        ),
-    )
-
-
 def workflow_status_label():
     """Human-readable label for the active workflow stage."""
     return rx.cond(
@@ -249,16 +105,17 @@ def state_notice(
     icon_name: str,
     title,
     detail,
-    color: str = COLORS["accent_blue"],
+    tone: str = "",
     animated: bool = False,
 ) -> rx.Component:
     """Compact empty/loading/error state block."""
     icon_props = {"class_name": "animate-spin"} if animated else {}
     return rx.vstack(
-        rx.icon(icon_name, size=28, color=color, **icon_props),
-        rx.text(title, class_name="state-notice-title"),
+        rx.icon(icon_name, size=28, **icon_props),
+        rx.el.h2(title, class_name="state-notice-title"),
         rx.text(detail, class_name="state-notice-detail"),
         class_name="state-notice",
+        data_tone=tone,
         spacing="2",
         align="center",
         width="100%",
@@ -281,6 +138,7 @@ def submission_error_notice() -> rx.Component:
                     align="start",
                     min_width="0",
                     flex="1",
+                    role="alert",
                 ),
                 rx.icon_button(
                     rx.icon("x", size=14),
@@ -288,6 +146,7 @@ def submission_error_notice() -> rx.Component:
                     size="1",
                     variant="ghost",
                     class_name="submission-error-close",
+                    aria_label="Dismiss error",
                 ),
                 width="100%",
                 spacing="3",
@@ -304,195 +163,112 @@ def submission_error_notice() -> rx.Component:
     )
 
 
-def logo() -> rx.Component:
-    """Application logo."""
-    return rx.hstack(
-        rx.image(
-            src=LOGO_URL,
-            width="32px",
-            height="32px",
-            style={
-                "filter": "brightness(0) saturate(100%) invert(52%) sepia(85%) saturate(1352%) hue-rotate(131deg) brightness(90%) contrast(92%)",
-                "opacity": "0.95",
-            },
-        ),
-        rx.text(
-            APP_NAME,
-            font_size="1.45rem",
-            font_weight="800",
-            color=COLORS["text_primary"],
-            font_family="var(--font-display)",
-            letter_spacing="0",
-        ),
-        spacing="3",
-        align="center",
-        min_height="44px",
-    )
-
-
-def agent_activity_item(status: dict) -> rx.Component:
-    """Compact workflow step marker for the inline agent activity row."""
-    agent_color = rx.cond(
-        status["name"] == "orchestrator",
-        AGENT_COLORS["orchestrator"],
-        rx.cond(
-            status["name"] == "retriever",
-            AGENT_COLORS["retriever"],
-            rx.cond(
-                status["name"] == "researcher",
-                AGENT_COLORS["researcher"],
-                rx.cond(
-                    status["name"] == "analyst",
-                    AGENT_COLORS["analyst"],
-                    rx.cond(
-                        status["name"] == "mentor",
-                        AGENT_COLORS["mentor"],
-                        AGENT_COLORS["visualizer"],
-                    ),
-                ),
-            ),
-        ),
-    )
-    visible_color = rx.cond(
-        status["is_active"] | status["was_used"],
-        agent_color,
-        COLORS["text_muted"],
-    )
-    return rx.tooltip(
-        rx.hstack(
-            rx.box(
-                class_name=rx.cond(status["is_active"], "animate-pulse", ""),
-                style={
-                    "width": "6px",
-                    "height": "6px",
-                    "border_radius": "50%",
-                    "background": rx.cond(
-                        status["is_active"] | status["was_used"],
-                        agent_color,
-                        COLORS["text_muted"],
-                    ),
-                },
-            ),
-            rx.text(
-                status["name"],
-                font_size="0.78rem",
-                font_weight=rx.cond(
-                    status["is_active"],
-                    "700",
-                    rx.cond(status["was_used"], "650", "500"),
-                ),
-                text_transform="capitalize",
-            ),
-            spacing="1",
-            align="center",
-            class_name="agent-activity-row",
-            style={
-                "color": visible_color,
-                "min_width": "0",
-            },
-        ),
-        content=status["description"],
-        delay_duration=300,
-    )
-
-
-def agent_activity_strip() -> rx.Component:
-    """Inline overview of workflow agents."""
-    return rx.hstack(
-        rx.foreach(AppState.agent_status_list, agent_activity_item),
-        class_name="agent-activity-list",
-        spacing="3",
-        wrap="wrap",
-    )
-
-
 def quick_action_button(icon_name: str, label: str, action: str) -> rx.Component:
     """Quick action suggestion button."""
-    return icon_text_button(
-        icon_name,
-        label,
-        lambda: AppState.set_input(action),
-        icon_color=COLORS["text_secondary"],
-        icon_size=16,
-        text_size="0.9rem",
-        style={
-            **BUTTON_SECONDARY_STYLE,
-            "min_width": "0",
-            "padding": "0.75rem 1rem",
-            "_hover": {
-                "background": "rgba(22, 51, 59, 0.96)",
-                "color": COLORS["text_primary"],
-                "border_color": "rgba(167, 186, 196, 0.34)",
-            },
-        },
+    return rx.el.li(
+        rx.el.button(
+            rx.el.span(rx.icon(icon_name, size=14), label, class_name="prompt-intent"),
+            rx.el.span(action),
+            rx.icon("arrow-right", size=14),
+            type="button",
+            disabled=AppState.is_processing,
+            data_draft=action,
+        )
+    )
+
+
+def practice_brand() -> rx.Component:
+    return rx.el.button(
+        rx.html("""
+<svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+  <path d="m7 8 4 7m6-7-4 7"/><circle cx="6" cy="6" r="3"/>
+  <path d="m18 3 3 3-3 3-3-3Z"/><rect class="hub" x="8.5" y="15" width="7" height="7" rx="1"/>
+</svg>
+"""),
+        rx.el.span(APP_NAME),
+        type="button",
+        on_click=AppState.open_chat,
+        aria_label="AI Practice study workspace",
+        class_name="practice-brand",
+    )
+
+
+def practice_theme_button(class_name: str = "") -> rx.Component:
+    return rx.el.button(
+        rx.el.span(rx.icon("sun", size=16), class_name="theme-sun"),
+        rx.el.span(rx.icon("moon", size=16), class_name="theme-moon"),
+        type="button",
+        aria_label="Switch to light theme",
+        data_practice_action="theme",
+        class_name=f"practice-icon theme-toggle {class_name}".strip(),
     )
 
 
 def empty_session_intro() -> rx.Component:
-    """Focused first-viewport introduction shown before the session starts."""
-    return rx.vstack(
-        rx.icon("message-square-text", size=40, color=COLORS["accent_green"]),
-        rx.text(
-            CHAT_EMPTY_HEADING,
-            class_name="empty-session-heading",
-            text_align="center",
+    """Render the approved Welcome heading and illustrative connection."""
+    return rx.el.div(
+        rx.el.div(
+            practice_brand(),
+            rx.el.h1(
+                CHAT_EMPTY_HEADING + " ", rx.el.br(), CHAT_EMPTY_HEADING_SECOND_LINE
+            ),
+            rx.el.p(CHAT_EMPTY_SUBTEXT),
+            class_name="welcome-copy",
         ),
-        rx.text(
-            CHAT_EMPTY_SUBTEXT,
-            class_name="empty-session-subtext",
-            font_size="1rem",
-            color=COLORS["text_secondary"],
-            text_align="center",
-            font_family="var(--font-body)",
+        rx.html(
+            """
+<svg viewBox="0 0 440 290" aria-hidden="true">
+  <path class="diagram-arc" d="M40 100Q170 0 350 110M60 230Q240 300 380 80"/>
+  <path pathLength="100" class="diagram-line" d="M80 65C150 65 150 155 220 155S290 235 365 235"/>
+  <circle class="diagram-halo" cx="220" cy="155" r="62"/>
+  <circle class="diagram-halo outer" cx="220" cy="155" r="98"/>
+  <circle class="diagram-dot" cx="80" cy="65" r="5"/>
+  <rect class="diagram-center" x="211" y="146" width="18" height="18" rx="3"/>
+  <rect class="diagram-dot" x="360" y="230" width="10" height="10" rx="1"/>
+</svg>
+<span class="diagram-label diagram-gqa">Grouped-query attention<small>shrinks</small></span>
+<span class="diagram-label diagram-kv">KV cache</span>
+<span class="diagram-label diagram-paged"><small>allocated in blocks by</small>PagedAttention</span>
+""",
+            class_name="welcome-diagram",
+            role="img",
+            aria_label="Illustration of grouped-query attention, KV cache and PagedAttention",
         ),
-        spacing="3",
-        align="center",
-        width="100%",
-        class_name="empty-session-intro",
+        class_name="welcome-intro",
     )
 
 
 def starter_prompt_row() -> rx.Component:
     """Starter prompts attached to the empty-state composer."""
-    return rx.hstack(
+    return rx.el.ul(
         *[
-            quick_action_button(icon, label, action)
-            for icon, label, action in QUICK_ACTIONS
+            quick_action_button(icon, intent, action)
+            for (icon, _, action), intent in zip(
+                QUICK_ACTIONS, ("Practice", "Explain", "Research", "Map"), strict=True
+            )
         ],
-        class_name="starter-prompts",
-        spacing="2",
-        wrap="wrap",
-        justify="center",
-        width="100%",
-    )
-
-
-def workspace_tab(icon_name: str, label: str, view: str, on_click) -> rx.Component:
-    """Primary workspace navigation item."""
-    is_active = AppState.active_view == view
-    return rx.button(
-        rx.hstack(
-            rx.icon(icon_name, size=20),
-            rx.text(label, font_size="0.98rem", font_weight="700"),
-            spacing="3",
-            align="center",
-        ),
-        on_click=on_click,
-        class_name=rx.cond(
-            is_active, "workspace-tab workspace-tab-active", "workspace-tab"
-        ),
+        class_name="sample-prompts",
+        aria_label="Example questions",
     )
 
 
 def workspace_tabs() -> rx.Component:
     """Top-level workspace navigation."""
-    return rx.vstack(
-        workspace_tab(
-            "message-square-text", WORKSPACE_STUDY_LABEL, "chat", AppState.open_chat
+    return rx.el.nav(
+        rx.el.button(
+            "Study",
+            on_click=AppState.open_chat,
+            aria_current=rx.cond(AppState.active_view == "chat", "page", "false"),
+            data_workspace="study",
         ),
-        workspace_tab("network", WORKSPACE_GRAPH_LABEL, "graph", AppState.open_graph),
-        spacing="2",
-        width="100%",
+        rx.el.button(
+            "Graph",
+            on_click=AppState.open_graph,
+            aria_current=rx.cond(AppState.active_view == "graph", "page", "false"),
+            data_workspace="graph",
+        ),
+        aria_label="Workspace",
+        class_name="practice-tabs",
     )
 
 
@@ -512,30 +288,23 @@ def sidebar_session_item(item: SessionHistoryItem) -> rx.Component:
     """Clickable current-tab session history item."""
     return rx.button(
         rx.hstack(
+            rx.icon("message-square", size=14, class_name="history-item-icon"),
             rx.vstack(
                 rx.text(item.title, class_name="sidebar-history-title"),
-                rx.text(item.meta, class_name="sidebar-history-meta"),
-                spacing="2",
+                rx.text(item.timestamp, class_name="sidebar-history-meta"),
+                spacing="1",
                 align="start",
                 min_width="0",
-            ),
-            rx.spacer(),
-            rx.cond(
-                AppState.selected_session_history_id == item.id,
-                rx.box(class_name="sidebar-history-dot"),
-                rx.fragment(),
             ),
             align="start",
             width="100%",
             min_width="0",
             class_name="sidebar-history-row",
         ),
-        on_click=lambda: AppState.select_session_history_item(item.id),
-        class_name=rx.cond(
-            AppState.selected_session_history_id == item.id,
-            "sidebar-history-item sidebar-history-item-active",
-            "sidebar-history-item",
-        ),
+        on_click=lambda: AppState.select_session_history_item(item.turn_id),
+        data_practice_action="history-link",
+        data_history_target=item.message_dom_id,
+        class_name="sidebar-history-item",
     )
 
 
@@ -543,27 +312,23 @@ def sidebar_map_item(item: RecentMapItem) -> rx.Component:
     """Clickable current-tab recent map item."""
     return rx.button(
         rx.hstack(
+            rx.icon("network", size=14, class_name="history-item-icon"),
             rx.vstack(
                 rx.text(item.title, class_name="sidebar-history-title"),
-                rx.text(item.meta, class_name="sidebar-history-meta"),
-                spacing="2",
+                rx.text(item.timestamp, class_name="sidebar-history-meta"),
+                spacing="1",
                 align="start",
                 min_width="0",
-            ),
-            rx.spacer(),
-            rx.cond(
-                AppState.selected_recent_map_id == item.id,
-                rx.box(class_name="sidebar-history-dot"),
-                rx.fragment(),
             ),
             align="start",
             width="100%",
             min_width="0",
             class_name="sidebar-history-row",
         ),
-        on_click=lambda: AppState.select_recent_map(item.id),
+        on_click=lambda: AppState.select_recent_map(item.artifact_id),
+        data_practice_action="history-link",
         class_name=rx.cond(
-            AppState.selected_recent_map_id == item.id,
+            AppState.selected_recent_map_id == item.artifact_id,
             "sidebar-history-item sidebar-history-item-active",
             "sidebar-history-item",
         ),
@@ -573,7 +338,6 @@ def sidebar_map_item(item: RecentMapItem) -> rx.Component:
 def sidebar_session_section() -> rx.Component:
     """Current browser-tab session history panel."""
     return rx.vstack(
-        rx.text("Session History", class_name="sidebar-section-title"),
         rx.cond(
             AppState.has_session_history,
             rx.vstack(
@@ -593,7 +357,7 @@ def sidebar_session_section() -> rx.Component:
 def sidebar_maps_section() -> rx.Component:
     """Current browser-tab recent maps panel."""
     return rx.vstack(
-        rx.text("Recent Maps", class_name="sidebar-section-title"),
+        rx.el.h3("Maps in this session", class_name="sidebar-section-title"),
         rx.cond(
             AppState.has_recent_maps,
             rx.vstack(
@@ -612,144 +376,290 @@ def sidebar_maps_section() -> rx.Component:
 
 def sidebar_history_panels() -> rx.Component:
     """Tab-scoped sidebar history panels."""
-    return rx.cond(
-        AppState.active_view == "graph",
-        sidebar_maps_section(),
+    return rx.el.div(
         sidebar_session_section(),
+        rx.cond(AppState.has_recent_maps, sidebar_maps_section()),
+        class_name="history-items",
     )
 
 
-def workspace_title():
-    """Title for the active workspace."""
-    return rx.cond(
-        AppState.active_view == "graph",
-        WORKSPACE_GRAPH_LABEL,
-        WORKSPACE_STUDY_LABEL,
-    )
-
-
-def workspace_subtitle():
-    """Subtitle for the active workspace."""
-    return rx.cond(
-        AppState.active_view == "graph",
-        WORKSPACE_GRAPH_SUBTITLE,
-        WORKSPACE_STUDY_SUBTITLE,
-    )
-
-
-def workspace_header() -> rx.Component:
-    """Header for the active workspace."""
-    return rx.hstack(
-        rx.vstack(
-            rx.text(
-                workspace_title(),
-                font_size="1.45rem",
-                font_weight="800",
-                color=COLORS["text_primary"],
-                font_family="var(--font-display)",
-                letter_spacing="0",
+def response_article(message: Message, turn: StudyTurn, last) -> rx.Component:
+    """Render one finalized response and its own source action."""
+    return rx.el.article(
+        reading_header(message.agent, message.timestamp),
+        reading_markdown(message.content),
+        rx.cond(last, rx.foreach(turn.maps, map_result)),
+        rx.el.div(
+            rx.el.button(
+                rx.icon("copy", size=14),
+                "Copy answer",
+                type="button",
+                data_practice_action="copy-answer",
             ),
-            rx.text(
-                workspace_subtitle(),
-                font_size="0.9rem",
-                font_weight="400",
-                color=COLORS["text_secondary"],
-                font_family="var(--font-body)",
+            rx.el.button(
+                rx.icon("panel-right", size=14),
+                "Sources & concepts",
+                type="button",
+                on_click=AppState.select_response_sources(message.response_id),
+                aria_pressed="false",
+                data_practice_action="open-sources",
+                data_source_selected=rx.cond(
+                    AppState.study_sources.key == message.response_id, "true", "false"
+                ),
             ),
-            spacing="1",
-            align="start",
+            rx.cond(last & (turn.outcome != "running"), execution_trigger(turn)),
+            class_name="answer-actions",
         ),
-        rx.spacer(),
-        padding="1rem 1.5rem",
-        width="100%",
-        border_bottom=f"1px solid {COLORS['border']}",
-        background="rgba(11, 26, 32, 0.96)",
-        class_name="desktop-main-header",
+        rx.cond(last & (turn.outcome != "running"), execution_details(turn)),
+        class_name="assistant-message",
+        id=message.dom_id,
+        key=message.dom_id,
+        data_response_id=message.response_id,
     )
 
 
-def message_bubble(message: Message) -> rx.Component:
-    """Chat message bubble - designed for use with rx.foreach."""
-    return rx.cond(
-        (message.role != "user") & (message.agent == "visualizer"),
-        rx.fragment(),
-        rx.box(
-            message_card(
+def execution_stage(stage: StudyStage, index) -> rx.Component:
+    return rx.el.li(
+        rx.el.span(index + 1, class_name="stage-number", aria_hidden="true"),
+        rx.el.div(
+            rx.el.strong(stage.agent),
+            rx.el.span(
+                rx.match(
+                    stage.outcome,
+                    ("running", "Running"),
+                    ("completed", "Completed"),
+                    ("failed", "Failed"),
+                    ("interrupted", "Interrupted"),
+                    ("cancelled", "Cancelled"),
+                    "Incomplete",
+                ),
+                class_name="stage-status",
+            ),
+            class_name="stage-label",
+        ),
+        rx.cond(
+            stage.duration != "",
+            rx.el.span(stage.duration, class_name="stage-duration"),
+        ),
+        data_outcome=stage.outcome,
+    )
+
+
+def execution_trigger(turn: StudyTurn) -> rx.Component:
+    return rx.el.button(
+        "Execution details",
+        rx.icon("chevron-right", size=14, class_name="disclosure-chevron"),
+        type="button",
+        aria_expanded="false",
+        aria_controls="execution-" + turn.prompt.dom_id,
+        data_practice_action="execution",
+        class_name="execution-trigger",
+    )
+
+
+def execution_details(turn: StudyTurn) -> rx.Component:
+    outcome = rx.match(
+        turn.outcome,
+        ("answer", "Answered"),
+        ("graph", "Map ready"),
+        ("out_of_scope", "Outside study scope"),
+        ("no_results", "No results"),
+        ("empty", "No response"),
+        ("error", "Failed"),
+        ("interrupted", "Interrupted"),
+        ("cancelled", "Cancelled"),
+        ("incomplete", "Incomplete"),
+        "Unavailable",
+    )
+    return rx.el.div(
+        rx.el.div(
+            rx.el.span(outcome, class_name="execution-badge"),
+            rx.cond(
+                turn.origin == "cache",
+                rx.el.span("Cached", class_name="execution-origin"),
+            ),
+            class_name="execution-status",
+        ),
+        rx.el.div(
+            rx.el.h3("Observed agent invocations"),
+            rx.cond(
+                turn.stages.length() > 0,
+                rx.el.ol(
+                    rx.foreach(turn.stages, execution_stage),
+                    class_name="agent-stages",
+                    role="list",
+                ),
+                rx.el.p(
+                    rx.match(
+                        turn.origin,
+                        ("cache", "Replayed from cache. No agents ran for this turn."),
+                        ("workflow", "No agent invocations were recorded."),
+                        "Execution details are unavailable for this turn.",
+                    ),
+                    class_name="panel-note",
+                ),
+            ),
+            class_name="execution-body",
+        ),
+        id="execution-" + turn.prompt.dom_id,
+        hidden=True,
+        role="region",
+        aria_label="Execution details",
+        data_outcome=turn.outcome,
+        class_name="execution",
+    )
+
+
+def map_result(item: RecentMapItem) -> rx.Component:
+    link = rx.el.button(
+        rx.icon("network", size=15, aria_hidden=True),
+        rx.el.span(item.title),
+        rx.icon("arrow-up-right", size=14, aria_hidden=True),
+        aria_label="Open map: " + item.title,
+        type="button",
+        on_click=AppState.select_recent_map(item.artifact_id),
+    )
+    return rx.el.div(
+        rx.cond(
+            item.retrieval_text != "",
+            rx.tooltip(
+                link,
+                content=item.retrieval_text,
+                class_name="map-request-tooltip",
+                align="start",
+                collision_padding=12,
+                hide_when_detached=True,
+            ),
+            link,
+        ),
+        rx.cond(item.timestamp != "", rx.el.time(item.timestamp)),
+        class_name="map-result",
+        key=item.artifact_id,
+    )
+
+
+def study_turn(turn: StudyTurn) -> rx.Component:
+    prompt = turn.prompt
+    return rx.el.div(
+        rx.el.div(
+            rx.el.span("You: ", class_name="sr-only"),
+            reading_markdown(prompt.content, class_name="user-content"),
+            class_name="user-message",
+            id=prompt.dom_id,
+            tab_index=-1,
+        ),
+        rx.foreach(
+            turn.responses,
+            lambda message, index: response_article(
+                message, turn, index == turn.responses.length() - 1
+            ),
+        ),
+        rx.cond(
+            turn.responses.length() == 0,
+            rx.fragment(
+                rx.foreach(turn.maps, map_result),
                 rx.cond(
-                    (message.role != "user") & (message.agent != ""),
-                    artifact_header(
-                        assistant_artifact_label(message.agent),
-                        message.timestamp,
-                        assistant_label_color(message.agent),
-                    ),
-                    rx.fragment(),
-                ),
-                rx.markdown(
-                    message.content,
-                    class_name="markdown-content",
-                ),
-                rx.text(
-                    message.timestamp,
-                    font_size="0.65rem",
-                    color=COLORS["text_muted"],
-                    align_self="flex-end",
-                    margin_top="0.25rem",
-                    display=rx.cond(
-                        (message.role == "user") | (message.agent == ""),
-                        "block",
-                        "none",
+                    turn.outcome != "running",
+                    rx.fragment(
+                        rx.el.div(execution_trigger(turn), class_name="answer-actions"),
+                        execution_details(turn),
                     ),
                 ),
-                class_name=message_class_name(message),
-                style=message_style(message),
             ),
-            width="100%",
-            display="flex",
-            justify_content=rx.cond(
-                message.role == "user",
-                "flex-end",
-                "flex-start",
+        ),
+        rx.cond(
+            turn.outcome == "running",
+            streaming_bubble(turn.origin),
+        ),
+        key=prompt.dom_id,
+        class_name="study-turn",
+    )
+
+
+def reading_header(agent, detail) -> rx.Component:
+    return rx.el.div(
+        rx.el.span(
+            rx.icon("book-open-text", size=15),
+            rx.match(
+                agent,
+                ("analyst", "Explanation"),
+                ("mentor", "Practice guidance"),
+                ("researcher", "Research"),
+                ("retriever", "Retrieved context"),
+                "Response",
             ),
-            id=message.dom_id,
-            class_name="message-row",
+            class_name="answer-kind",
+        ),
+        rx.el.span(detail),
+        class_name="answer-meta",
+    )
+
+
+def reading_code(text, language="python", **props) -> rx.Component:
+    return rx.cond(
+        language == "mermaid",
+        MermaidDiagram.create(source=text),
+        rx.el.div(
+            rx.el.div(
+                rx.el.span(rx.cond(language != "", language, "Code")),
+                rx.el.button(
+                    rx.icon("copy", size=13),
+                    "Copy",
+                    type="button",
+                    aria_label="Copy code",
+                    data_practice_action="copy-code",
+                ),
+                class_name="code-heading",
+            ),
+            rx.code_block(
+                text,
+                language=language,
+                theme=rx.code_block.themes.one_dark,
+                wrap_long_lines=False,
+                **props,
+            ),
+            class_name="code-block",
         ),
     )
 
 
-def streaming_bubble() -> rx.Component:
+def reading_markdown(
+    content, *, class_name: str = "markdown-content answer-body"
+) -> rx.Component:
+    return rx.markdown(
+        content,
+        class_name=class_name,
+        component_map={
+            "h1": rx.el.h1,
+            "h2": rx.el.h2,
+            "h3": rx.el.h3,
+            "h4": rx.el.h4,
+            "p": rx.el.p,
+            "code": rx.el.code,
+            "pre": reading_code,
+            "table": lambda text: rx.el.div(
+                rx.el.table(text),
+                class_name="table-scroll",
+                tab_index=0,
+                role="region",
+                aria_label="Table",
+            ),
+        },
+    )
+
+
+def streaming_bubble(origin) -> rx.Component:
     """Live streaming bubble that shows tokens as they arrive from analyst/mentor."""
     return rx.cond(
-        AppState.is_streaming,
-        rx.cond(
-            AppState.streaming_agent == "visualizer",
-            rx.fragment(),
-            rx.box(
-                message_card(
-                    artifact_header(
-                        assistant_artifact_label(AppState.streaming_agent),
-                        "",
-                        COLORS["accent_blue"],
-                        animated=True,
-                    ),
-                    rx.markdown(
-                        AppState.streaming_content + " ▍",
-                        class_name="markdown-content",
-                    ),
-                    class_name=rx.cond(
-                        AppState.streaming_agent == "analyst",
-                        "message-card analyst-message",
-                        "message-card mentor-message",
-                    ),
-                    style=rx.cond(
-                        AppState.streaming_agent == "analyst",
-                        ANALYST_MESSAGE_STYLE,
-                        ASSISTANT_ARTIFACT_STYLE,
-                    ),
-                ),
-                width="100%",
-                display="flex",
-                justify_content="flex-start",
+        AppState.is_streaming & (AppState.streaming_agent != "visualizer"),
+        rx.el.article(
+            reading_header(
+                AppState.streaming_agent,
+                rx.cond(origin == "cache", "Replaying…", "Writing…"),
             ),
+            reading_markdown(AppState.streaming_content),
+            class_name="assistant-message streaming-message",
+            data_response_id=AppState.streaming_response_id,
         ),
         rx.fragment(),
     )
@@ -760,313 +670,173 @@ def chat_messages() -> rx.Component:
     return rx.cond(
         AppState.has_messages | AppState.is_streaming | AppState.is_processing,
         rx.box(
-            rx.box(
-                rx.foreach(AppState.messages, message_bubble),
-                streaming_bubble(),
-                class_name="study-rail study-message-rail",
+            rx.el.div(
+                rx.foreach(AppState.study_turns, study_turn),
+                class_name="thread-inner",
             ),
             id="chat-messages",
             flex="1",
             overflow_y="auto",
             width="100%",
-            class_name="study-message-scroll",
+            tab_index=0,
+            role="region",
+            aria_label="Conversation",
+            class_name="practice-thread",
         ),
         rx.fragment(),
+    )
+
+
+def live_agent(agent: LiveAgent) -> rx.Component:
+    return rx.el.li(
+        rx.el.span(
+            rx.match(
+                agent.outcome,
+                ("completed", rx.icon("check", size=11)),
+                ("failed", rx.icon("x", size=11)),
+                ("interrupted", rx.icon("pause", size=11)),
+                ("cancelled", rx.icon("minus", size=11)),
+                ("incomplete", rx.icon("circle-alert", size=11)),
+                rx.fragment(),
+            ),
+            class_name="agent-marker",
+            aria_hidden=True,
+        ),
+        rx.el.span(agent.name),
+        rx.el.span(
+            rx.match(
+                agent.outcome,
+                ("running", "Active"),
+                ("completed", "Completed"),
+                ("failed", "Failed"),
+                ("interrupted", "Interrupted"),
+                ("cancelled", "Cancelled"),
+                ("incomplete", "Incomplete"),
+                "Inactive",
+            ),
+            class_name="sr-only",
+        ),
+        data_agent=agent.name.lower(),
+        data_outcome=agent.outcome,
     )
 
 
 def processing_indicator() -> rx.Component:
-    """Transparent inline status shown above the composer while processing."""
+    """Show one fixed set of agent slots for the current request."""
     return rx.cond(
         AppState.is_processing,
-        rx.hstack(
-            rx.hstack(
+        rx.el.div(
+            rx.el.div(
                 rx.icon(
                     "loader-circle",
-                    size=16,
-                    class_name="animate-spin",
-                    color=COLORS["accent_blue"],
+                    size=14,
+                    class_name="processing-spinner",
+                    aria_hidden=True,
                 ),
-                rx.text(
-                    CHAT_PROCESSING_LABEL,
-                    font_size="0.875rem",
-                    font_weight="700",
-                    color=COLORS["text_secondary"],
+                rx.el.strong(CHAT_PROCESSING_LABEL),
+                rx.el.span(
+                    rx.cond(
+                        AppState.processing_from_cache,
+                        "Replaying a cached response",
+                        workflow_status_label(),
+                    ),
+                    class_name="processing-detail",
                 ),
-                rx.text(
-                    workflow_status_label(),
-                    font_size="0.82rem",
-                    color=COLORS["text_secondary"],
-                    class_name="workflow-status-detail",
-                ),
-                class_name="processing-status-group",
-                spacing="2",
-                align="center",
-                min_width="0",
+                class_name="processing-status",
+                role="status",
             ),
-            agent_activity_strip(),
-            class_name="status-card composer-status-line",
-            spacing="4",
-            align="center",
-            justify="between",
-            width="100%",
-        ),
-        rx.fragment(),
-    )
-
-
-def bottom_status_area() -> rx.Component:
-    """Predictable notices and workflow status region above the composer."""
-    return rx.cond(
-        AppState.is_processing
-        | (AppState.show_graph_updated_notice & ~AppState.is_processing),
-        rx.box(
-            rx.vstack(
-                graph_updated_notice(),
-                processing_indicator(),
-                class_name="study-rail bottom-status-stack",
-                spacing="3",
-                width="100%",
+            rx.el.ul(
+                rx.foreach(AppState.live_agent_progress, live_agent),
+                class_name="live-agents",
+                aria_label="Agent progress",
+                role="list",
             ),
-            class_name="chat-status-rail",
-            width="100%",
+            class_name="composer-status-line",
         ),
-        rx.fragment(),
-    )
-
-
-def graph_updated_notice() -> rx.Component:
-    """Persistent inline notice shown after a graph update completes."""
-    return rx.cond(
-        AppState.show_graph_updated_notice & ~AppState.is_processing,
-        rx.box(
-            rx.hstack(
-                rx.icon("network", size=16, color=COLORS["text_secondary"]),
-                rx.text(
-                    GRAPH_UPDATED_NOTICE,
-                    font_size="0.875rem",
-                    font_weight="600",
-                    color=COLORS["text_secondary"],
-                ),
-                rx.button(
-                    GRAPH_UPDATED_ACTION,
-                    on_click=AppState.open_graph,
-                    class_name="graph-updated-action",
-                ),
-                spacing="2",
-                align="center",
-                width="100%",
-                min_width="0",
-            ),
-            class_name="graph-updated-notice status-card",
-            width="100%",
-        ),
-        rx.fragment(),
     )
 
 
 def composer_inner() -> rx.Component:
     """Aligned composer module for status, errors, input, and starter prompts."""
-    return rx.vstack(
-        submission_error_notice(),
-        rx.form(
-            rx.hstack(
-                rx.box(
-                    rx.text_area(
-                        id="chat-input",
-                        name="message",
-                        placeholder=CHAT_INPUT_PLACEHOLDER,
-                        value=AppState.current_input,
-                        on_change=AppState.set_input,
-                        disabled=AppState.is_processing,
-                        max_length=CHAT_MESSAGE_MAX_CHARS,
-                        rows="1",
-                        style={
-                            **INPUT_STYLE,
-                            "background": "transparent",
-                            "border": "0",
-                            "box_shadow": "none",
-                            "width": "100%",
-                            "min_height": "48px",
-                            "padding": "0.75rem 1rem",
-                            "resize": "none",
-                            "max_height": "120px",
-                            "overflow_y": "auto",
-                        },
-                    ),
-                    class_name="composer-textarea-shell",
-                    flex="1",
-                    min_width="0",
-                ),
-                rx.button(
-                    rx.cond(
-                        AppState.is_processing,
-                        rx.icon("loader-circle", size=20, class_name="animate-spin"),
-                        rx.icon("send", size=20),
-                    ),
-                    id="chat-send-btn",
-                    type="submit",
-                    disabled=AppState.is_processing | (AppState.current_input == ""),
-                    style=BUTTON_PRIMARY_STYLE,
-                ),
-                spacing="3",
-                width="100%",
-                align="center",
+    label = rx.cond(
+        AppState.has_messages, CHAT_FOLLOW_UP_PLACEHOLDER, CHAT_INPUT_PLACEHOLDER
+    )
+    return rx.form(
+        rx.el.label(label, html_for="chat-input", class_name="sr-only"),
+        rx.el.textarea(
+            id="chat-input",
+            name="message",
+            placeholder=rx.cond(
+                AppState.is_processing, CHAT_PROCESSING_PLACEHOLDER, label + "…"
             ),
-            on_submit=AppState.handle_form_submit,
-            reset_on_submit=False,
-            width="100%",
+            read_only=AppState.is_processing,
+            max_length=CHAT_MESSAGE_MAX_CHARS,
+            rows=1,
+            required=True,
         ),
-        rx.cond(
-            ~AppState.has_messages,
-            starter_prompt_row(),
-            rx.fragment(),
+        rx.el.div(
+            rx.cond(
+                AppState.has_messages,
+                rx.el.div(
+                    *[
+                        rx.el.button(
+                            text,
+                            type="button",
+                            data_draft=draft,
+                            disabled=AppState.is_processing,
+                        )
+                        for text, draft in STUDY_INTENTS
+                    ],
+                    class_name="intent-controls",
+                    role="group",
+                    aria_label="Start a question",
+                ),
+            ),
+            rx.el.button(
+                "Ask",
+                rx.icon("arrow-up", size=16),
+                id="chat-send-btn",
+                type="submit",
+                disabled=AppState.is_processing,
+                class_name="practice-primary",
+            ),
+            class_name="composer-bottom",
         ),
-        class_name="composer-inner",
-        spacing="3",
-        width="100%",
+        on_submit=AppState.handle_form_submit,
+        reset_on_submit=True,
+        class_name="practice-composer",
     )
 
 
 def chat_input() -> rx.Component:
     """Chat input area."""
     return rx.vstack(
-        rx.script("""
-(function() {
-    function initChatInput() {
-        var ta = document.getElementById('chat-input');
-        if (!ta || ta._chatInited) return;
-        ta._chatInited = true;
-
-        ta.addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-        });
-
-        function clearComposerDom() {
-            ta.value = '';
-            ta.style.height = '';
-        }
-
-        ta.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-                e.preventDefault();
-                e.stopPropagation();
-                var form = ta.closest('form');
-                var btn = document.getElementById('chat-send-btn');
-                if (form && btn && !btn.disabled) {
-                    form.requestSubmit();
-                    clearComposerDom();
-                }
-            }
-        }, true);
-
-        // Reset textarea height whenever the form is submitted (Enter key or send button)
-        var form = ta.closest('form');
-        if (form) {
-            form.addEventListener('submit', function() {
-                window.setTimeout(clearComposerDom, 0);
-            });
-        }
-    }
-
-    function initAutoScroll() {
-        var container = document.getElementById('chat-messages');
-        if (!container || container._autoScrollInited) return;
-        container._autoScrollInited = true;
-        new MutationObserver(function() {
-            if (Date.now() < (window.__chatHistoryScrollSuppressUntil || 0)) return;
-            container.scrollTop = container.scrollHeight;
-        }).observe(container, { childList: true, subtree: true });
-    }
-
-    function initHistoryScroll() {
-        var command = document.getElementById('chat-scroll-command');
-        if (!command || command._historyScrollInited) return;
-        command._historyScrollInited = true;
-
-        function runHistoryScroll() {
-            var raw = (command.textContent || '').trim();
-            if (!raw || raw === '0:') return;
-            if (window.__lastChatHistoryScrollCommand === raw) return;
-            window.__lastChatHistoryScrollCommand = raw;
-
-            var separator = raw.indexOf(':');
-            var targetId = separator >= 0 ? raw.slice(separator + 1) : raw;
-            if (!targetId) return;
-
-            window.setTimeout(function() {
-                var target = document.getElementById(targetId);
-                if (!target) return;
-                window.__chatHistoryScrollSuppressUntil = Date.now() + 1200;
-                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                target.classList.add('message-scroll-highlight');
-                window.setTimeout(function() {
-                    target.classList.remove('message-scroll-highlight');
-                }, 1400);
-            }, 80);
-        }
-
-        new MutationObserver(runHistoryScroll).observe(command, {
-            childList: true,
-            characterData: true,
-            subtree: true
-        });
-        runHistoryScroll();
-    }
-
-    // Run now and watch for DOM changes (Reflex hydration)
-    initChatInput();
-    initAutoScroll();
-    initHistoryScroll();
-    new MutationObserver(function() {
-        initChatInput();
-        initAutoScroll();
-        initHistoryScroll();
-    }).observe(document.body, { childList: true, subtree: true });
-})();
-"""),
         rx.box(
-            AppState.scroll_request_nonce.to_string()
-            + ":"
-            + AppState.scroll_target_message_dom_id,
-            id="chat-scroll-command",
-            display="none",
-        ),
-        rx.cond(
-            ~AppState.has_messages,
-            empty_session_intro(),
-            rx.fragment(),
-        ),
-        rx.box(
+            submission_error_notice(),
+            processing_indicator(),
             composer_inner(),
-            class_name="study-rail",
+            rx.cond(~AppState.has_messages, starter_prompt_row()),
+            class_name="composer-content",
         ),
         spacing="3",
         width="100%",
-        background=rx.cond(~AppState.has_messages, "transparent", COLORS["bg_card"]),
-        border_top=rx.cond(
-            ~AppState.has_messages, "none", f"1px solid {COLORS['border']}"
-        ),
-        class_name=rx.cond(
-            ~AppState.has_messages, "empty-session-composer", "chat-composer"
-        ),
+        class_name="composer-dock",
     )
 
 
-def graph_panel_body() -> rx.Component:
-    """Graph body with visualization, loading, empty, and error states."""
-    return rx.box(
+def graph_view() -> rx.Component:
+    """The graph host stays mounted while its workspace is hidden."""
+    active = AppState.active_view == "graph"
+    return rx.el.section(
         rx.cond(
             AppState.has_visualization,
-            rx.plotly(
-                data=AppState.plotly_figure,
-                config={
-                    "displayModeBar": "hover",
-                    "scrollZoom": True,
-                    "responsive": True,
-                },
-                class_name="graph-plot",
+            KnowledgeGraph.create(
+                graph=AppState.selected_graph,
+                active=active,
+                maps=AppState.recent_maps,
+                on_select_map=AppState.select_recent_map,
+                on_prepare=AppState.prepare_graph_explanation,
+                can_clear_session=True,
             ),
             rx.cond(
                 AppState.error_message != "",
@@ -1074,7 +844,7 @@ def graph_panel_body() -> rx.Component:
                     "circle-alert",
                     GRAPH_UNAVAILABLE_HEADING,
                     AppState.error_message,
-                    COLORS["accent_red"],
+                    "error",
                 ),
                 rx.cond(
                     AppState.is_processing
@@ -1086,155 +856,30 @@ def graph_panel_body() -> rx.Component:
                         "loader-circle",
                         GRAPH_LOADING_HEADING,
                         GRAPH_LOADING_SUBTEXT,
-                        COLORS["accent_blue"],
+                        "loading",
                         animated=True,
                     ),
                     state_notice(
                         "network",
                         GRAPH_EMPTY_HEADING,
                         GRAPH_EMPTY_SUBTEXT,
-                        COLORS["text_muted"],
                     ),
                 ),
             ),
         ),
-        class_name="graph-canvas",
-        width="100%",
-    )
-
-
-def visualization_panel() -> rx.Component:
-    """Panel for displaying knowledge graph visualization."""
-    return rx.cond(
-        AppState.show_visualization,
-        surface(
-            rx.vstack(
-                rx.hstack(
-                    section_header(VIZ_PANEL_TITLE, "network"),
-                    rx.hstack(
-                        rx.cond(
-                            AppState.plot_count > 1,
-                            rx.hstack(
-                                rx.icon_button(
-                                    rx.icon("chevron-left", size=14),
-                                    on_click=AppState.prev_plot,
-                                    size="1",
-                                    variant="ghost",
-                                    color_scheme="gray",
-                                ),
-                                rx.text(
-                                    AppState.current_plot_label,
-                                    font_size="0.75rem",
-                                    color=COLORS["text_secondary"],
-                                ),
-                                rx.icon_button(
-                                    rx.icon("chevron-right", size=14),
-                                    on_click=AppState.next_plot,
-                                    size="1",
-                                    variant="ghost",
-                                    color_scheme="gray",
-                                ),
-                                spacing="1",
-                                align="center",
-                            ),
-                            rx.fragment(),
-                        ),
-                        rx.icon_button(
-                            rx.icon("x", size=14),
-                            on_click=AppState.toggle_visualization,
-                            size="1",
-                            variant="ghost",
-                            color_scheme="gray",
-                        ),
-                        spacing="1",
-                        align="center",
-                    ),
-                    justify="between",
-                    width="100%",
-                ),
-                graph_panel_body(),
-                spacing="3",
-                width="100%",
-            ),
-            style={
-                "border_radius": "12px",
-                "padding": "1.5rem",
-                "margin": "1rem 1.5rem 1rem 1.5rem",
-                "width": "calc(100% - 3rem)",
-            },
-        ),
-        rx.fragment(),
-    )
-
-
-def graph_view() -> rx.Component:
-    """Dedicated graph workspace."""
-    return rx.box(
-        rx.vstack(
-            rx.hstack(
-                section_header(VIZ_PANEL_TITLE, "network"),
-                rx.hstack(
-                    rx.cond(
-                        AppState.plot_count > 1,
-                        rx.hstack(
-                            rx.icon_button(
-                                rx.icon("chevron-left", size=14),
-                                on_click=AppState.prev_plot,
-                                size="1",
-                                variant="ghost",
-                                color_scheme="gray",
-                            ),
-                            rx.text(
-                                AppState.current_plot_label,
-                                font_size="0.75rem",
-                                color=COLORS["text_secondary"],
-                            ),
-                            rx.icon_button(
-                                rx.icon("chevron-right", size=14),
-                                on_click=AppState.next_plot,
-                                size="1",
-                                variant="ghost",
-                                color_scheme="gray",
-                            ),
-                            spacing="1",
-                            align="center",
-                        ),
-                        rx.fragment(),
-                    ),
-                    spacing="1",
-                    align="center",
-                ),
-                class_name="graph-toolbar",
-                justify="between",
-                width="100%",
-            ),
-            graph_panel_body(),
-            class_name="graph-workspace-panel",
-            spacing="0",
-            width="100%",
-        ),
-        class_name="workspace-view graph-view",
+        hidden=~active,
+        class_name="practice-graph-workspace",
+        aria_label="Graph workspace",
     )
 
 
 def chat_view() -> rx.Component:
     """Dedicated chat workspace."""
-    return rx.vstack(
+    return rx.el.section(
         chat_messages(),
-        bottom_status_area(),
-        chat_input(),
-        class_name="workspace-view chat-view",
-        spacing="0",
-        width="100%",
-    )
-
-
-def workspace_body() -> rx.Component:
-    """Renders the selected primary workspace."""
-    return rx.cond(
-        AppState.active_view == "graph",
-        graph_view(),
-        chat_view(),
+        rx.el.div(chat_input(), class_name="study-dock"),
+        class_name="practice-conversation",
+        aria_label="Study session",
     )
 
 
@@ -1282,123 +927,336 @@ def context_panel() -> rx.Component:
     )
 
 
-def sidebar_actions() -> rx.Component:
-    """Shared session actions used by desktop and mobile shells."""
-    return rx.vstack(
-        icon_text_button(
-            "trash-2",
-            SIDEBAR_BTN_CLEAR_CHAT,
-            AppState.clear_chat,
-            style={
-                **BUTTON_SECONDARY_STYLE,
-                "width": "100%",
-                "justify_content": "center",
-            },
+def clear_session_button() -> rx.Component:
+    return rx.el.button(
+        rx.icon("trash-2", size=16),
+        rx.el.span("Clear session"),
+        type="button",
+        aria_label="Clear session",
+        aria_haspopup="dialog",
+        title="Clear session",
+        data_practice_action="clear",
+        class_name="clear-session",
+    )
+
+
+def practice_icon(name: str, label: str, action: str, **props) -> rx.Component:
+    return rx.el.button(
+        rx.icon(name, size=16),
+        type="button",
+        aria_label=label,
+        title=label,
+        class_name="practice-icon",
+        data_practice_action=action,
+        **props,
+    )
+
+
+def history_content(*, drawer: bool = False) -> rx.Component:
+    return rx.el.div(
+        rx.el.div(
+            rx.el.h2("Session history"),
+            practice_icon(
+                "x" if drawer else "panel-left",
+                "Close current-session history"
+                if drawer
+                else "Toggle current-session history",
+                "close" if drawer else "collapse-history",
+                **(
+                    {"auto_focus": True}
+                    if drawer
+                    else {"aria_expanded": "true", "aria_controls": "study-history"}
+                ),
+            ),
+            class_name="panel-heading",
         ),
-        spacing="2",
-        width="100%",
+        sidebar_history_panels(),
+        rx.el.div(clear_session_button(), class_name="history-foot"),
+        class_name="history-content",
+    )
+
+
+def source_row(source: StudySource, *, web: bool = False) -> rx.Component:
+    source_icon = rx.icon("globe" if web else "file-text", size=14)
+    source_info = rx.el.span(
+        rx.fragment(
+            rx.el.span(source.title),
+            rx.cond(source.path != "", rx.el.small(source.path)),
+        )
+        if web
+        else rx.cond(
+            source.is_untitled_note,
+            rx.cond(
+                source.summary != "",
+                rx.el.span(source.summary, class_name="source-preview"),
+                rx.el.span("Summary unavailable"),
+            ),
+            rx.el.span(source.title),
+        ),
+        class_name="source-label",
+    )
+    disclosure = rx.el.details(
+        rx.el.summary(
+            source_icon,
+            source_info,
+            rx.el.span("Summary", class_name="source-summary-label")
+            if not web
+            else rx.fragment(),
+            rx.icon("chevron-right", size=14, class_name="disclosure-chevron"),
+        ),
+        rx.el.div(
+            rx.cond(source.excerpt != "", rx.el.p(source.excerpt))
+            if web
+            else rx.el.p(
+                rx.cond(source.summary != "", source.summary, "Summary unavailable.")
+            ),
+            rx.cond(
+                source.url != "",
+                rx.el.a(
+                    "Open source",
+                    rx.icon("external-link", size=13),
+                    aria_label=rx.cond(
+                        source.is_untitled_note, "Open source", "Open " + source.title
+                    ),
+                    href=source.url,
+                    target="_blank",
+                    rel="noopener noreferrer",
+                ),
+            ),
+            class_name="source-body",
+        ),
+        class_name="source-note" if not web else "",
+    )
+    return rx.el.li(
+        rx.cond(
+            (source.excerpt != "") | (source.url != "")
+            if web
+            else ~source.is_untitled_note | (source.summary != "") | (source.url != ""),
+            disclosure,
+            rx.el.div(source_icon, source_info, class_name="source-static"),
+        )
+    )
+
+
+def sources_content(*, drawer: bool = False) -> rx.Component:
+    sources = AppState.study_sources
+    return rx.el.div(
+        rx.el.div(
+            rx.el.div(
+                rx.el.h2("Sources & concepts", tab_index=-1),
+                rx.cond(sources.title != "", rx.el.p(sources.title)),
+            ),
+            practice_icon(
+                "x" if drawer else "panel-right",
+                "Close sources and concepts",
+                "close" if drawer else "collapse-sources",
+                **(
+                    {"auto_focus": True}
+                    if drawer
+                    else {"aria_expanded": "true", "aria_controls": "study-sources"}
+                ),
+            ),
+            class_name="panel-heading sources-heading",
+        ),
+        rx.el.p(
+            "Source details are pending.",
+            class_name="panel-note source-selection-pending",
+            role="status",
+        ),
+        rx.el.div(
+            rx.cond(
+                (sources.status != "ready") & (sources.status != "graph"),
+                rx.el.p(
+                    rx.match(
+                        sources.status,
+                        ("pending", "Source details are pending."),
+                        ("empty", "No source details to display for this response."),
+                        (
+                            "relationship_notes_unavailable",
+                            "The Retriever supplied relationships, but their supporting note excerpts are unavailable.",
+                        ),
+                        (
+                            "unavailable",
+                            "Source details are unavailable for this response.",
+                        ),
+                        (
+                            "no_response",
+                            "This turn has no response with source details.",
+                        ),
+                        "Open sources below an answer to see its context.",
+                    ),
+                    class_name="panel-note",
+                    role="status",
+                ),
+                rx.cond(
+                    (sources.status == "graph")
+                    | ((sources.notes.length() > 0) & (sources.web.length() == 0)),
+                    rx.el.p(
+                        rx.cond(
+                            sources.status == "graph",
+                            "Source details for this graph concept.",
+                            "Sources supplied as context for this response.",
+                        ),
+                        class_name="panel-note",
+                    ),
+                ),
+            ),
+            rx.cond(
+                (sources.notes.length() + sources.relationship_notes.length()) > 0,
+                SourceList.create(
+                    rx.foreach(sources.notes, lambda source: source_row(source)),
+                    rx.foreach(
+                        sources.relationship_notes,
+                        lambda source: source_row(source),
+                    ),
+                    title=rx.cond(
+                        sources.status == "graph",
+                        "Knowledge graph sources",
+                        "Notes used as context",
+                    ),
+                ),
+            ),
+            rx.cond(
+                sources.web.length() > 0,
+                SourceList.create(
+                    rx.foreach(
+                        sources.web, lambda source: source_row(source, web=True)
+                    ),
+                    title=rx.cond(
+                        sources.status == "graph",
+                        "Knowledge graph sources",
+                        "Web sources",
+                    ),
+                ),
+            ),
+            key=sources.key,
+            class_name="sources-scroll",
+        ),
+        class_name="sources-content",
+        data_sources_key=sources.key,
+    )
+
+
+def practice_dialogs() -> rx.Component:
+    return rx.fragment(
+        rx.el.dialog(
+            history_content(drawer=True),
+            id="history-dialog",
+            aria_label="Current-session history",
+            class_name="practice-drawer history-drawer",
+        ),
+        rx.el.dialog(
+            sources_content(drawer=True),
+            id="sources-dialog",
+            aria_label="Sources and concepts",
+            class_name="practice-drawer sources-drawer",
+        ),
+        rx.el.dialog(
+            rx.el.h2("Clear this session?", id="clear-title"),
+            rx.el.p("This removes the current conversation and its knowledge graphs."),
+            rx.el.div(
+                rx.el.button(
+                    "Keep studying",
+                    type="button",
+                    class_name="practice-secondary",
+                    auto_focus=True,
+                    data_practice_action="close",
+                ),
+                rx.el.button(
+                    "Clear session",
+                    type="button",
+                    class_name="practice-primary",
+                    on_click=AppState.clear_chat,
+                    data_practice_action="confirm-clear",
+                ),
+                class_name="confirmation-actions",
+            ),
+            id="clear-dialog",
+            aria_labelledby="clear-title",
+            class_name="practice-confirm",
+        ),
     )
 
 
 def sidebar() -> rx.Component:
-    """Application sidebar."""
-    return rx.box(
-        rx.vstack(
-            logo(),
-            rx.box(
-                workspace_tabs(),
-                sidebar_history_panels(),
-                class_name="sidebar-scroll",
-                display="flex",
-                flex_direction="column",
-                gap="1.25rem",
-                width="100%",
-            ),
-            rx.spacer(),
-            sidebar_actions(),
-            spacing="5",
-            align="start",
-            height="100%",
-        ),
-        class_name="desktop-sidebar",
-        style={
-            "width": "292px",
-            "background": COLORS["bg_card"],
-            "border_right": f"1px solid {COLORS['border']}",
-            "height": "100vh",
-            "position": "fixed",
-            "left": "0",
-            "top": "0",
-            "padding": "1.5rem 1.125rem",
-            "display": "flex",
-            "flex_direction": "column",
-        },
+    return rx.el.aside(
+        history_content(),
+        id="study-history",
+        aria_label="Current-session history",
+        class_name="practice-history",
     )
 
 
-def mobile_shell_header() -> rx.Component:
-    """Mobile app shell header and collapsible controls."""
-    return rx.box(
-        rx.vstack(
-            rx.hstack(
-                logo(),
-                rx.text(
-                    APP_TAGLINE,
-                    font_size="0.85rem",
-                    font_weight="550",
-                    color=COLORS["accent_blue_lightest"],
-                    font_family="var(--font-mono)",
-                    text_align="right",
-                ),
-                justify="between",
-                align="center",
-                width="100%",
-                gap="1rem",
+def shell_header() -> rx.Component:
+    """Render workspace navigation at every width."""
+    return rx.el.header(
+        rx.el.div(
+            practice_icon(
+                "menu",
+                "Open current-session history",
+                "history",
+                aria_haspopup="dialog",
+                aria_controls="history-dialog",
             ),
-            rx.el.details(
-                rx.el.summary(
-                    section_header(
-                        "Workspace",
-                        "activity",
-                        font_size="0.875rem",
-                        font_weight="650",
-                    ),
-                    class_name="mobile-shell-summary",
-                ),
-                rx.vstack(
-                    workspace_tabs(),
-                    sidebar_history_panels(),
-                    sidebar_actions(),
-                    spacing="4",
-                    width="100%",
-                    padding_top="0.75rem",
-                ),
-                class_name="mobile-shell-details",
-            ),
-            spacing="3",
-            width="100%",
+            practice_brand(),
+            class_name="practice-header-brand",
         ),
-        class_name="mobile-shell-header",
+        workspace_tabs(),
+        rx.el.div(
+            practice_icon(
+                "panel-right",
+                "Open sources and concepts",
+                "open-sources-panel",
+                aria_expanded="false",
+            ),
+            practice_theme_button(),
+            class_name="practice-header-actions",
+        ),
+        class_name="practice-header",
     )
 
 
 def main_content() -> rx.Component:
     """Main content area."""
-    return rx.box(
-        rx.vstack(
-            mobile_shell_header(),
-            workspace_header(),
-            workspace_body(),
-            spacing="0",
-            height="100vh",
-            width="100%",
+    welcome = (AppState.active_view == "chat") & ~AppState.has_messages
+    study = (AppState.active_view == "chat") & AppState.has_messages
+    return rx.fragment(
+        rx.el.a("Skip to content", href="#main", class_name="practice-skip"),
+        rx.cond(welcome, practice_theme_button("welcome-theme"), shell_header()),
+        rx.el.main(
+            rx.cond(study, sidebar()),
+            rx.cond(
+                welcome,
+                rx.el.section(
+                    rx.el.div(
+                        empty_session_intro(),
+                        rx.el.div(
+                            chat_input(),
+                            class_name="welcome-entry",
+                        ),
+                        class_name="landing-layout",
+                    ),
+                    class_name="welcome",
+                    aria_label="Welcome",
+                ),
+                rx.cond(AppState.active_view == "chat", chat_view()),
+            ),
+            graph_view(),
+            rx.cond(
+                study,
+                rx.el.aside(
+                    sources_content(),
+                    id="study-sources",
+                    aria_label="Sources and concepts",
+                    class_name="practice-sources",
+                ),
+            ),
+            id="main",
+            tab_index=-1,
+            class_name="practice-main",
         ),
-        class_name="app-main-content",
-        style={
-            "margin_left": "292px",
-            "min_height": "100vh",
-            "background": COLORS["bg_dark"],
-            "display": "flex",
-            "flex_direction": "column",
-        },
+        practice_dialogs(),
+        rx.el.div(
+            id="practice-toast", role="status", class_name="practice-toast", hidden=True
+        ),
     )

@@ -15,13 +15,22 @@ from pathlib import Path
 from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from langchain_core.messages import ToolMessage
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from backend.utils.chat_limits import (
     EvaluationBudgetExceeded,
     EvaluationBudgetUnavailable,
     current_evaluation_budget,
 )
+from backend.workflows.presentation import GraphPayload, GraphToolResult
 
 SCHEMA_VERSION = "runtime-evaluation"
 EVIDENCE_ITEM_LIMIT = 10
@@ -2310,6 +2319,7 @@ def _tool_observation(run: dict[str, Any]) -> ToolObservation:
         else None
     )
     name = str(run.get("name") or "")
+    output = _tool_evaluation_output(name, output)
     safe_args = _redact_mapping(raw_args)
     return ToolObservation(
         run_id=str(run.get("_id") or ""),
@@ -2324,15 +2334,86 @@ def _tool_observation(run: dict[str, Any]) -> ToolObservation:
     )
 
 
+def _tool_evaluation_output(tool_name: str, output: Any) -> Any:
+    """Keep the established tool evidence view when outputs carry presentation metadata."""
+    if tool_name == "search_knowledge_base":
+        if isinstance(output, ToolMessage):
+            return output.content
+        if isinstance(output, dict):
+            if output.get("type") == "tool":
+                return output.get("content")
+            identifier = output.get("id")
+            if (
+                isinstance(identifier, list)
+                and identifier[-1:] == ["ToolMessage"]
+                and isinstance(output.get("kwargs"), dict)
+            ):
+                return output["kwargs"].get("content")
+    if tool_name == "get_subgraphs_to_visualize" and isinstance(output, dict):
+        if "graph" not in output:
+            return output
+        try:
+            result = GraphToolResult.model_validate(output)
+        except ValidationError:
+            return None
+        graph = result.graph
+        return (
+            [node.id for node in graph.nodes] if graph else [],
+            [(edge.source, edge.predicate, edge.target) for edge in graph.edges]
+            if graph
+            else [],
+            result.queries,
+        )
+    return output
+
+
+def _structured_graph_display(
+    graph: GraphPayload,
+) -> tuple[list[str], list[tuple[str, str, str]]]:
+    """Project the historical display view while keeping every edge in tool evidence."""
+    labels = {}
+    for node in graph.nodes:
+        label = " ".join(node.label.split())
+        labels[node.id] = label if len(label) <= 60 else label[:59] + "…"
+    endpoints = [node for edge in graph.edges for node in (edge.source, edge.target)]
+    node_ids = set(list(labels) + endpoints)
+    neighbors: dict[str, dict[str, str]] = defaultdict(dict)
+    for edge in graph.edges:
+        neighbors[edge.source][edge.target] = edge.predicate
+    display_predicates = {"CHILD": "HAS CHILD", "PARENT": "HAS PARENT"}
+    return (
+        [labels[node_id] for node_id in node_ids if labels[node_id]],
+        [
+            (
+                labels[source],
+                display_predicates.get(predicate, predicate),
+                labels[target],
+            )
+            for source in node_ids
+            for target, predicate in neighbors[source].items()
+            if labels[source] and labels[target]
+        ],
+    )
+
+
 def _graph_labels_from_artifacts(
     artifacts: Any,
 ) -> tuple[dict[str, str], list[tuple[str, str, str]]]:
-    """Extracts bounded display labels and relations from captured Plotly figures."""
+    """Extracts bounded display labels from structured or historical graph artifacts."""
     if not isinstance(artifacts, list):
         return {}, []
     labels: list[str] = []
     labeled_edges: list[tuple[str, str, str]] = []
     for artifact in artifacts:
+        if isinstance(artifact, dict) and "schema_version" in artifact:
+            try:
+                graph = GraphPayload.model_validate(artifact)
+            except ValidationError:
+                continue
+            graph_labels, graph_edges = _structured_graph_display(graph)
+            labels.extend(label[:200] for label in graph_labels)
+            labeled_edges.extend(graph_edges)
+            continue
         if not isinstance(artifact, dict) or not isinstance(artifact.get("data"), list):
             continue
         for trace in artifact["data"]:
@@ -2381,6 +2462,7 @@ def _graph_observation(
             if isinstance(run.get("outputs"), dict)
             else None
         )
+        output = _tool_evaluation_output("get_subgraphs_to_visualize", output)
         if not isinstance(output, (list, tuple)) or len(output) < 2:
             continue
         raw_nodes, raw_edges = output[0], output[1]

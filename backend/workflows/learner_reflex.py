@@ -1,11 +1,13 @@
 import threading
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import aclosing
 from dataclasses import dataclass
-from functools import lru_cache
+from time import monotonic
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langgraph.errors import GraphRecursionError
+from langgraph.errors import GraphInterrupt, GraphRecursionError
+from pydantic import ValidationError
 
 from backend.configs.constants import RECURSION_LIMIT, VISUALIZATION_EMPTY_CONTEXT
 from backend.configs.enums import WorkflowEventType
@@ -23,6 +25,7 @@ from backend.configs.observability import LangSmithSettings
 from backend.configs.paths import PathSettings
 from backend.configs.search import KnowledgeGraphSearchSettings, TavilySettings
 from backend.configs.storage import StorageSettings
+from backend.knowledge_graph.storage import open_document_store
 from backend.utils.chat_errors import (
     UserFacingChatError,
     WorkflowInitializationUnavailable,
@@ -33,7 +36,24 @@ from backend.utils.chat_limits import (
     set_current_chat_turn,
 )
 from backend.utils.helpers import logger
+from backend.workflows.agents.retrieval_evidence import resolve_note_chunks
 from backend.workflows.learner import LearnerWorkflow
+from backend.workflows.presentation import (
+    ExecutionStage,
+    ResponseEvidence,
+    StageOutcome,
+    TurnOutcome,
+)
+
+AGENT_NODES = {
+    "orchestrator",
+    "retriever",
+    "researcher",
+    "analyst",
+    "mentor",
+    "visualizer",
+}
+STREAMING_NODES = {"analyst", "mentor"}
 
 
 @dataclass
@@ -42,6 +62,36 @@ class WorkflowEvent:
 
     type: WorkflowEventType
     data: dict
+
+
+@dataclass
+class _StreamedResponse:
+    response_id: str
+    message_id: str | None = None
+
+
+def _stage_event(kind: WorkflowEventType, stage: ExecutionStage) -> WorkflowEvent:
+    return WorkflowEvent(kind, {"agent": stage.agent, "stage": stage})
+
+
+def _turn_outcome(state: dict, *, answer: bool, graph: bool) -> TurnOutcome:
+    if answer:
+        return "answer"
+    if graph:
+        return "graph"
+    if state.get("request_scope") == "out_of_scope":
+        return "out_of_scope"
+    context = str(state.get("context", ""))
+    if (
+        state.get("sources_exhausted")
+        or state.get("retrieval_status") == "no_results"
+        or VISUALIZATION_EMPTY_CONTEXT in context
+        or '"no_results": true' in context
+    ):
+        return "no_results"
+    if "Visualization failed" in context:
+        return "error"
+    return "empty"
 
 
 class ReflexLearnerWorkflow:
@@ -53,6 +103,16 @@ class ReflexLearnerWorkflow:
         """Initializes the lightweight wrapper; heavy workflow setup is lazy."""
         self._workflow = None
         self._graph = None
+        self._document_store = None
+        self._document_store_lock = threading.Lock()
+
+    def _get_document_store(self):
+        with self._document_store_lock:
+            if self._document_store is None:
+                self._document_store = open_document_store(
+                    StorageSettings().document_storage
+                )
+            return self._document_store
 
     def _ensure_initialized(self):
         """Ensures the workflow is initialized, thread-safe."""
@@ -75,6 +135,7 @@ class ReflexLearnerWorkflow:
                     storage_settings,
                     tavily_settings,
                     kg_search_settings,
+                    document_store_loader=self._get_document_store,
                 )
                 self._graph = self._workflow.run()
                 logger.info("ReflexLearnerWorkflow initialized successfully")
@@ -119,6 +180,17 @@ class ReflexLearnerWorkflow:
             if getattr(messages[index], "type", None) == "human":
                 return messages[index + 1 :]
         return messages
+
+    @staticmethod
+    def _response_event(content, agent: str, message=None) -> WorkflowEvent:
+        data = {"content": content, "agent": agent}
+        evidence = getattr(message, "additional_kwargs", {}).get("response_evidence")
+        if evidence is not None:
+            try:
+                data["evidence"] = ResponseEvidence.model_validate(evidence)
+            except ValidationError:
+                logger.warning("Invalid response evidence")
+        return WorkflowEvent(type=WorkflowEventType.RESPONSE, data=data)
 
     async def process_message(
         self,
@@ -198,10 +270,7 @@ class ReflexLearnerWorkflow:
                         )
                         if agent_name in ("analyst", "mentor") and msg.content:
                             response_emitted = True
-                            yield WorkflowEvent(
-                                type=WorkflowEventType.RESPONSE,
-                                data={"content": msg.content, "agent": agent_name},
-                            )
+                            yield self._response_event(msg.content, agent_name, msg)
 
                 if not response_emitted:
                     context = result.get("context", "")
@@ -318,10 +387,7 @@ class ReflexLearnerWorkflow:
                             )
                             if agent_name in ("analyst", "mentor") and msg.content:
                                 response_emitted = True
-                                yield WorkflowEvent(
-                                    type=WorkflowEventType.RESPONSE,
-                                    data={"content": msg.content, "agent": agent_name},
-                                )
+                                yield self._response_event(msg.content, agent_name, msg)
 
                 if not response_emitted:
                     context = final_state.get("context", "")
@@ -363,21 +429,12 @@ class ReflexLearnerWorkflow:
         session_id: str = "",
         session_summary: str = "",
         turn_context: ChatTurnContext | None = None,
+        execution_started_at: float | None = None,
     ) -> AsyncGenerator[WorkflowEvent, None]:
-        """Streams workflow execution with per-token updates for analyst/mentor responses.
-
-        Uses LangGraph's astream_events(version="v2") to intercept token chunks from
-        the LLM layer inside analyst and mentor nodes, yielding TOKEN events in real time.
-        All other event types (AGENT_START/END, CONTEXT_UPDATE, VISUALIZATION, RESPONSE)
-        are preserved with the same semantics as stream_with_status().
-        """
-        self._ensure_initialized()
-
+        """Streams observed node boundaries and reconciles model tokens with node outputs."""
         messages = self._convert_messages(message_history)
         messages.append(HumanMessage(content=user_message))
-
-        thread_id = str(uuid.uuid4())
-        configurable = {"thread_id": thread_id}
+        configurable = {"thread_id": str(uuid.uuid4())}
         if session_id:
             configurable["checkpoint_ns"] = session_id
         config = {"recursion_limit": recursion_limit, "configurable": configurable}
@@ -391,142 +448,339 @@ class ReflexLearnerWorkflow:
             "sources_exhausted": False,
         }
 
-        _AGENT_NODES = {
-            "orchestrator",
-            "retriever",
-            "researcher",
-            "analyst",
-            "mentor",
-            "visualizer",
+        identity = {
+            "session_id": turn_context.session_id
+            if turn_context
+            else str(uuid.uuid4()),
+            "turn_id": turn_context.turn_id if turn_context else str(uuid.uuid4()),
         }
-        _STREAMING_NODES = {"analyst", "mentor"}
+        started_at = (
+            monotonic() if execution_started_at is None else execution_started_at
+        )
+        active: dict[str, ExecutionStage] = {}
+        seen_runs: set[str] = set()
+        streams: dict[str, dict[str, _StreamedResponse]] = {}
+        emitted_ids: set[str] = set()
+        emitted_messages: list[BaseMessage] = []
+        root_id = None
+        final_state = None
+        interrupted = False
+        incomplete = False
+        failed = False
+        node_failed = False
 
-        accumulated: dict[str, str] = {}
-        final_state: dict = {}
+        def close_stage(stage: ExecutionStage, outcome: StageOutcome) -> WorkflowEvent:
+            return _stage_event(
+                WorkflowEventType.AGENT_END,
+                stage.model_copy(
+                    update={"end_offset": monotonic() - started_at, "outcome": outcome}
+                ),
+            )
 
+        def responses(
+            output: dict,
+            stage: ExecutionStage | None = None,
+        ) -> Iterator[WorkflowEvent]:
+            raw_messages = output.get("messages")
+            if not isinstance(raw_messages, list):
+                return
+            invocation_message_ids: set[str] = set()
+            for message in self._current_turn_messages(raw_messages):
+                if (
+                    not isinstance(message, AIMessage)
+                    or not isinstance(message.content, str)
+                    or not message.content
+                ):
+                    continue
+                agent = message.additional_kwargs.get("agent")
+                agent = agent.strip("[]").lower() if isinstance(agent, str) else ""
+                if agent not in STREAMING_NODES or (stage and agent != stage.agent):
+                    continue
+                known_ids = invocation_message_ids if stage else emitted_ids
+                if (message.id and message.id in known_ids) or (
+                    stage is None
+                    and any(earlier is message for earlier in emitted_messages)
+                ):
+                    continue
+                if message.id:
+                    invocation_message_ids.add(message.id)
+                    emitted_ids.add(message.id)
+                emitted_messages.append(message)
+                result = self._response_event(message.content, agent, message)
+                if stage:
+                    candidates = [
+                        stream.response_id
+                        for stream in streams.get(stage.invocation_id, {}).values()
+                        if message.id and stream.message_id == message.id
+                    ]
+                    result.data.update(
+                        invocation_id=stage.invocation_id,
+                        response_id=candidates[0]
+                        if len(candidates) == 1
+                        else str(uuid.uuid4()),
+                    )
+                yield result
+
+        error = None
+        terminal_outcome: TurnOutcome = "error"
+        stage_outcome: StageOutcome = "failed"
         turn_token = set_current_chat_turn(turn_context)
         try:
-            async for event in self._graph.astream_events(
+            self._ensure_initialized()
+            events = self._graph.astream_events(
                 initial_state, config=config, version="v2"
-            ):
-                event_type = event.get("event", "")
-                name = event.get("name", "")
-                metadata = event.get("metadata", {})
-                node = metadata.get("langgraph_node", "")
-
-                if (
-                    event_type == "on_chain_start"
-                    and name in _AGENT_NODES
-                    and name == node
-                ):
-                    yield WorkflowEvent(
-                        type=WorkflowEventType.AGENT_START, data={"agent": node}
-                    )
-
-                elif (
-                    event_type == "on_chain_end"
-                    and name in _AGENT_NODES
-                    and name == node
-                ):
-                    yield WorkflowEvent(
-                        type=WorkflowEventType.AGENT_END, data={"agent": node}
-                    )
-
-                elif event_type == "on_chat_model_stream" and node in _STREAMING_NODES:
-                    chunk = event.get("data", {}).get("chunk")
-                    if chunk is not None:
-                        content = chunk.content if hasattr(chunk, "content") else ""
-                        if content:
-                            accumulated[node] = accumulated.get(node, "") + content
-                            yield WorkflowEvent(
-                                type=WorkflowEventType.TOKEN,
-                                data={"chunk": content, "agent": node},
-                            )
-
-                elif event_type == "on_chain_end" and name == "LangGraph":
-                    output = event.get("data", {}).get("output")
-                    if isinstance(output, dict):
-                        final_state = output
-
-            # Yield final results from captured state
-            context = final_state.get("context", "")
-            if context:
-                yield WorkflowEvent(
-                    type=WorkflowEventType.CONTEXT_UPDATE, data={"context": context}
-                )
-
-            visual_artifacts = final_state.get("visual_artifacts", [])
-            response_emitted = bool(visual_artifacts)
-            if visual_artifacts:
-                yield WorkflowEvent(
-                    type=WorkflowEventType.VISUALIZATION,
-                    data={"artifacts": visual_artifacts},
-                )
-
-            if accumulated:
-                for agent_name, content in accumulated.items():
-                    if content:
-                        response_emitted = True
-                        yield WorkflowEvent(
-                            type=WorkflowEventType.RESPONSE,
-                            data={"content": content, "agent": agent_name},
-                        )
-            else:
-                result_messages = final_state.get("messages", [])
-                if isinstance(result_messages, list):
-                    for msg in self._current_turn_messages(result_messages):
-                        if (
-                            hasattr(msg, "content")
-                            and hasattr(msg, "type")
-                            and msg.type == "ai"
-                        ):
-                            agent_name = (
-                                msg.additional_kwargs.get("agent", "")
-                                .strip("[]")
-                                .lower()
-                            )
-                            if agent_name in _STREAMING_NODES and msg.content:
-                                response_emitted = True
-                                yield WorkflowEvent(
-                                    type=WorkflowEventType.RESPONSE,
-                                    data={"content": msg.content, "agent": agent_name},
-                                )
-
-            if not response_emitted:
-                fallback = self._get_fallback_message(final_state)
-                yield WorkflowEvent(
-                    type=WorkflowEventType.RESPONSE,
-                    data={"content": fallback, "agent": "system"},
-                )
-
-            yield WorkflowEvent(
-                type=WorkflowEventType.COMPLETE, data={"status": "success"}
             )
+            async with aclosing(events):
+                async for event in events:
+                    if not isinstance(event, dict):
+                        continue
+                    event_type = event.get("event")
+                    name = event.get("name")
+                    run_id = event.get("run_id")
+                    parents = event.get("parent_ids", [])
+                    metadata = event.get("metadata", {})
+                    data = event.get("data", {})
+                    if (
+                        not isinstance(parents, list)
+                        or not isinstance(metadata, dict)
+                        or not isinstance(data, dict)
+                    ):
+                        continue
+                    node = metadata.get("langgraph_node")
+                    if not parents and name == "LangGraph":
+                        if (
+                            root_id is None
+                            and event_type == "on_chain_start"
+                            and isinstance(run_id, str)
+                            and run_id
+                        ):
+                            root_id = run_id
+                        elif root_id is not None and run_id == root_id:
+                            if event_type == "on_chain_stream":
+                                chunk = data.get("chunk")
+                                if isinstance(chunk, dict) and "__interrupt__" in chunk:
+                                    interrupted = True
+                            elif event_type == "on_chain_end":
+                                output = data.get("output")
+                                if isinstance(output, dict) and output:
+                                    final_state = output
+                            elif event_type == "on_chain_error":
+                                failed = True
+                        continue
+                    if not isinstance(run_id, str) or not run_id:
+                        continue
+                    if (
+                        isinstance(name, str)
+                        and root_id is not None
+                        and name in AGENT_NODES
+                        and name == node
+                        and parents == [root_id]
+                    ):
+                        if event_type == "on_chain_start" and run_id not in seen_runs:
+                            stage = ExecutionStage(
+                                **identity,
+                                invocation_id=run_id,
+                                sequence=len(seen_runs),
+                                agent=name,
+                                start_offset=monotonic() - started_at,
+                            )
+                            seen_runs.add(run_id)
+                            active[run_id] = stage
+                            yield _stage_event(WorkflowEventType.AGENT_START, stage)
+                        elif (
+                            event_type in ("on_chain_end", "on_chain_error")
+                            and run_id in active
+                            and active[run_id].agent == node
+                        ):
+                            stage = active.pop(run_id)
+                            output = data.get("output")
+                            final_responses = []
+                            if event_type == "on_chain_error":
+                                boundary = close_stage(stage, "failed")
+                                failed = node_failed = True
+                            elif isinstance(output, dict):
+                                boundary = close_stage(stage, "completed")
+                                if node in STREAMING_NODES:
+                                    final_responses = list(responses(output, stage))
+                                    boundary.data["response_ids"] = [
+                                        result.data["response_id"]
+                                        for result in final_responses
+                                    ]
+                            else:
+                                boundary = close_stage(stage, "incomplete")
+                                incomplete = True
+                            streams.pop(run_id, None)
+                            yield boundary
+                            for result in final_responses:
+                                yield result
+                        continue
+                    if event_type not in ("on_chat_model_stream", "on_chat_model_end"):
+                        continue
+                    if not isinstance(node, str) or node not in STREAMING_NODES:
+                        continue
+                    stage = next(
+                        (
+                            active[parent]
+                            for parent in reversed(parents)
+                            if isinstance(parent, str) and parent in active
+                        ),
+                        None,
+                    )
+                    if stage is None or stage.agent != node:
+                        continue
+                    invocation_streams = streams.setdefault(stage.invocation_id, {})
+                    if event_type == "on_chat_model_end":
+                        message_id = getattr(data.get("output"), "id", None)
+                        if (
+                            run_id in invocation_streams
+                            and isinstance(message_id, str)
+                            and message_id
+                        ):
+                            invocation_streams[run_id].message_id = message_id
+                        continue
+                    chunk = data.get("chunk")
+                    content = getattr(chunk, "content", None)
+                    if not isinstance(content, str) or not content:
+                        continue
+                    stream = invocation_streams.get(run_id)
+                    if stream is None:
+                        stream = _StreamedResponse(
+                            str(uuid.uuid4()), getattr(chunk, "id", None)
+                        )
+                        invocation_streams[run_id] = stream
+                    yield WorkflowEvent(
+                        WorkflowEventType.TOKEN,
+                        {
+                            "chunk": content,
+                            "agent": node,
+                            "invocation_id": stage.invocation_id,
+                            "response_id": stream.response_id,
+                        },
+                    )
+
+            if interrupted or (final_state and "__interrupt__" in final_state):
+                terminal_outcome = stage_outcome = "interrupted"
+            elif not failed and (final_state is None or active or incomplete):
+                terminal_outcome = stage_outcome = "incomplete"
+            elif not failed:
+                context = final_state.get("context", "")
+                if context:
+                    yield WorkflowEvent(
+                        WorkflowEventType.CONTEXT_UPDATE, {"context": context}
+                    )
+                artifacts = final_state.get("visual_artifacts", [])
+                if artifacts:
+                    yield WorkflowEvent(
+                        WorkflowEventType.VISUALIZATION, {"artifacts": artifacts}
+                    )
+                for result in responses(final_state):
+                    yield result
+                outcome = _turn_outcome(
+                    final_state, answer=bool(emitted_messages), graph=bool(artifacts)
+                )
+                if not emitted_messages and not artifacts:
+                    yield self._response_event(
+                        self._get_fallback_message(final_state), "system"
+                    )
+                yield WorkflowEvent(
+                    WorkflowEventType.COMPLETE,
+                    {
+                        "status": "error" if outcome == "error" else "success",
+                        "outcome": outcome,
+                    },
+                )
+                return
 
         except UserFacingChatError as exc:
             logger.warning("Workflow token stream stopped", reason=exc.reason)
-            yield WorkflowEvent(
-                type=WorkflowEventType.ERROR,
-                data={"message": exc.user_message, "reason": exc.reason},
-            )
-
-        except GraphRecursionError as e:
-            logger.error(f"Workflow exceeded recursion limit: {e}")
-            yield WorkflowEvent(
-                type=WorkflowEventType.ERROR, data={"message": ERROR_RECURSION_LIMIT}
-            )
-
+            error = {"message": exc.user_message, "reason": exc.reason}
+        except GraphInterrupt:
+            terminal_outcome = stage_outcome = "interrupted"
+        except GraphRecursionError:
+            logger.warning("Workflow exceeded recursion limit")
+            error = {"message": ERROR_RECURSION_LIMIT, "reason": "recursion_limit"}
         except Exception as exc:
             logger.error("Workflow token stream error", error_type=type(exc).__name__)
-            yield WorkflowEvent(
-                type=WorkflowEventType.ERROR,
-                data={"message": ERROR_WORKFLOW_FAILED},
-            )
         finally:
             reset_current_chat_turn(turn_token)
 
+        if stage_outcome == "failed" and (len(active) > 1 or node_failed):
+            stage_outcome = "incomplete"
+        for stage in active.values():
+            yield close_stage(stage, stage_outcome)
+        yield WorkflowEvent(
+            WorkflowEventType.ERROR,
+            {
+                "message": ERROR_WORKFLOW_FAILED,
+                "reason": f"workflow_{terminal_outcome}",
+                **(error or {}),
+                "outcome": terminal_outcome,
+            },
+        )
 
-@lru_cache(maxsize=1)
+
+_workflow = ReflexLearnerWorkflow()
+
+
 def get_workflow() -> ReflexLearnerWorkflow:
     """Returns the process-local workflow wrapper."""
-    return ReflexLearnerWorkflow()
+    return _workflow
+
+
+def resolve_response_evidence(
+    evidence: ResponseEvidence | None,
+) -> ResponseEvidence | None:
+    """Resolve relationship references and backfill summaries for saved passages."""
+    if evidence is None:
+        return None
+    previewed_notes = [
+        source
+        for source in evidence.sources
+        if source.kind == "note"
+        and ((source.excerpt or "").strip() or source.supports_relationship)
+    ]
+    summarized_ids = {
+        source.chunk_id for source in previewed_notes if (source.summary or "").strip()
+    }
+    references = [
+        source.chunk_id
+        for source in evidence.sources
+        if source.kind == "note"
+        and source.chunk_id
+        and source.chunk_id not in summarized_ids
+    ]
+    if not references:
+        return evidence
+    try:
+        store = get_workflow()._get_document_store()
+        details = {
+            source.chunk_id: source
+            for source in resolve_note_chunks(
+                lambda chunk_id: store.get_document(chunk_id, raise_error=False),
+                references,
+            )
+            if source.excerpt or source.summary
+        }
+    except Exception as exc:
+        logger.warning(
+            "Response note previews unavailable", error_type=type(exc).__name__
+        )
+        return evidence
+    previewed_ids = {source.chunk_id for source in previewed_notes}
+    sources = []
+    for source in evidence.sources:
+        note = details.get(source.chunk_id) if source.kind == "note" else None
+        if note is not None:
+            if source.chunk_id not in previewed_ids:
+                continue
+            if (
+                (source.excerpt or "").strip() or source.supports_relationship
+            ) and note.summary:
+                source = source.model_copy(update={"summary": note.summary})
+        sources.append(source)
+    sources.extend(
+        note.model_copy(update={"supports_relationship": True})
+        for chunk_id, note in details.items()
+        if chunk_id not in previewed_ids
+    )
+    return evidence.model_copy(update={"sources": sources})

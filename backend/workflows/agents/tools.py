@@ -3,6 +3,7 @@ import json
 import random
 import re
 from typing import Annotated, Any, Literal
+from uuid import uuid4
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -22,6 +23,7 @@ from backend.utils.chat_errors import (
     WebSearchUnavailable,
 )
 from backend.utils.chat_limits import (
+    CONTEXT_TRUNCATION_MARKER,
     ChatLimitService,
     get_chat_limit_service,
     get_current_chat_turn,
@@ -30,11 +32,25 @@ from backend.utils.chat_limits import (
     truncate_text,
 )
 from backend.utils.helpers import get_logger
+from backend.workflows.agents.retrieval_access import RetrievalStoreAccess
 from backend.workflows.agents.retrieval_evidence import (
+    EvidenceSpan,
     QueryEvidenceResult,
+    RelationEvidence,
+    admitted_evidence,
     evidence_from_retrieved_node,
     format_search_results,
     format_visualization_results,
+    graph_sources,
+)
+from backend.workflows.presentation import (
+    GraphEdge,
+    GraphNode,
+    GraphPayload,
+    GraphToolResult,
+    graph_title,
+    note_source_id,
+    stored_string,
 )
 
 logger = get_logger(WORKFLOW_LOGGING)
@@ -220,7 +236,20 @@ def search_knowledge_base(
         max_context_chars or ChatLimitsSettings().retrieval_context_max_chars
     )
 
-    @tool("search_knowledge_base", args_schema=KnowledgeSearchInput)
+    def result_with_evidence(text: str, spans: list[EvidenceSpan]):
+        context = truncate_text(text, context_limit)
+        limit = (
+            len(context)
+            if context == text
+            else len(context.removesuffix(CONTEXT_TRUNCATION_MARKER))
+        )
+        return context, admitted_evidence(text, spans, limit).model_dump(mode="json")
+
+    @tool(
+        "search_knowledge_base",
+        args_schema=KnowledgeSearchInput,
+        response_format="content_and_artifact",
+    )
     def _search_knowledge_base(
         queries: list[str],
         topic_policy: str,
@@ -256,9 +285,10 @@ def search_knowledge_base(
             [SOURCE PATH] CV History > Classical Era > Feature Extraction
         """
         required_topics = required_topics or []
+        spans: list[EvidenceSpan] = []
         if analyst_pipeline is not None:
             try:
-                result = analyst_pipeline.search(queries)
+                result = analyst_pipeline.search(queries, spans=spans)
             except UserFacingChatError:
                 raise
             except Exception as exc:
@@ -270,11 +300,11 @@ def search_knowledge_base(
             if result != RETRIEVAL_NO_RESULTS and not retrieval_covers_required_topics(
                 result, required_topics
             ):
-                return RETRIEVAL_TOPIC_MISMATCH
-            return truncate_text(result, context_limit)
+                return RETRIEVAL_TOPIC_MISMATCH, None
+            return result_with_evidence(result, spans)
 
         if retriever is None:
-            return RETRIEVAL_NO_RESULTS
+            return RETRIEVAL_NO_RESULTS, None
 
         query_results: list[QueryEvidenceResult] = []
         saw_raw_nodes = False
@@ -324,19 +354,19 @@ def search_knowledge_base(
 
             query_results.append(QueryEvidenceResult(query=query, items=evidence_items))
 
-        formatted_result = format_search_results(query_results)
+        formatted_result = format_search_results(query_results, spans=spans)
         if (
             formatted_result == RETRIEVAL_NO_RESULTS
             and saw_raw_nodes
             and not saw_threshold_qualified_node
         ):
-            return RETRIEVAL_BELOW_THRESHOLD
+            return RETRIEVAL_BELOW_THRESHOLD, None
         if (
             formatted_result != RETRIEVAL_NO_RESULTS
             and not retrieval_covers_required_topics(formatted_result, required_topics)
         ):
-            return RETRIEVAL_TOPIC_MISMATCH
-        return truncate_text(formatted_result, context_limit)
+            return RETRIEVAL_TOPIC_MISMATCH, None
+        return result_with_evidence(formatted_result, spans)
 
     return _search_knowledge_base
 
@@ -444,7 +474,16 @@ def deep_web_research(
     return _deep_web_research
 
 
-def get_subgraphs_to_visualize(retriever: Any = None, visualizer_pipeline: Any = None):
+def get_subgraphs_to_visualize(
+    retriever: Any = None,
+    visualizer_pipeline: Any = None,
+    *,
+    structured: bool = False,
+    graph_access: RetrievalStoreAccess | None = None,
+):
+    if structured and visualizer_pipeline is None and graph_access is None:
+        raise ValueError("Structured graphs require access to the graph store")
+
     @tool("get_subgraphs_to_visualize", args_schema=QueryListInput)
     def _get_subgraphs_to_visualize(queries: list[str]):
         """Retrieves subgraphs for visualization based on multiple search queries.
@@ -473,6 +512,10 @@ def get_subgraphs_to_visualize(retriever: Any = None, visualizer_pipeline: Any =
         """
         if visualizer_pipeline is not None:
             try:
+                if structured:
+                    return visualizer_pipeline.structured_graph(queries).model_dump(
+                        mode="json"
+                    )
                 return visualizer_pipeline.visualize(queries)
             except UserFacingChatError:
                 raise
@@ -484,6 +527,10 @@ def get_subgraphs_to_visualize(retriever: Any = None, visualizer_pipeline: Any =
                 raise KnowledgeBaseUnavailable() from exc
 
         if retriever is None:
+            if structured:
+                return GraphToolResult(queries=queries, graph=None).model_dump(
+                    mode="json"
+                )
             return [], [], queries
 
         query_results: list[QueryEvidenceResult] = []
@@ -508,6 +555,91 @@ def get_subgraphs_to_visualize(retriever: Any = None, visualizer_pipeline: Any =
 
             query_results.append(QueryEvidenceResult(query=query, items=evidence_items))
 
-        return format_visualization_results(query_results)
+        if graph_access is None:
+            return format_visualization_results(query_results)
+
+        labels = {}
+        edges = {}
+        for result in query_results:
+            for evidence in result.items:
+                if not isinstance(evidence, RelationEvidence):
+                    if (
+                        evidence.metadata.node_id
+                        and not evidence.derived_from_relation_node
+                    ):
+                        labels.setdefault(
+                            evidence.metadata.node_id, evidence.metadata.node_id
+                        )
+                    continue
+                triplet = evidence.as_triplet()
+                if triplet is None:
+                    continue
+                subject, predicate, obj = triplet
+                source = evidence.subject_id or subject
+                target = evidence.object_id or obj
+                labels.setdefault(source, subject)
+                labels.setdefault(target, obj)
+                key = (source, predicate, target)
+                if key not in edges:
+                    edges[key] = GraphEdge.from_relationship(
+                        *key, relation_id=evidence.relation_id, synthetic=False
+                    )
+                edge = edges[key]
+                edge.relation_id = edge.relation_id or evidence.relation_id
+                edge.evidence_source_ids = list(
+                    dict.fromkeys(
+                        [
+                            *edge.evidence_source_ids,
+                            *(
+                                note_source_id(chunk)
+                                for chunk in evidence.evidence_chunk_ids
+                            ),
+                        ]
+                    )
+                )
+
+        graph = None
+        if labels:
+            stored_nodes = []
+            if graph_access.graph_store is not None:
+                try:
+                    stored_nodes = list(graph_access.graph_store.get(ids=list(labels)))
+                except Exception as exc:
+                    logger.warning(
+                        "Graph node details unavailable", error_type=type(exc).__name__
+                    )
+            by_id = {graph_access.node_id(node): node for node in stored_nodes}
+            node_records = []
+            for node_id, retrieved_label in labels.items():
+                node = by_id.get(node_id)
+                properties = getattr(node, "properties", {}) or {}
+                text = next(
+                    (
+                        line.lstrip("#").strip()
+                        for line in graph_access.node_text(node).splitlines()
+                        if line.lstrip("#").strip()
+                    ),
+                    "",
+                )
+                node_records.append(
+                    GraphNode(
+                        id=node_id,
+                        label=text or graph_access.node_label(node) or retrieved_label,
+                        type=stored_string(getattr(node, "label", None)),
+                        description=stored_string(properties.get("description")),
+                        source_ids=[
+                            note_source_id(chunk)
+                            for chunk in graph_access.node_source_chunk_ids(node)
+                        ],
+                    )
+                )
+            graph = GraphPayload(
+                artifact_id=str(uuid4()),
+                title=graph_title(queries),
+                nodes=node_records,
+                sources=graph_sources(graph_access, node_records),
+                edges=list(edges.values()),
+            )
+        return GraphToolResult(queries=queries, graph=graph).model_dump(mode="json")
 
     return _get_subgraphs_to_visualize

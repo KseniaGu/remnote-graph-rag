@@ -547,7 +547,7 @@ ignored in `data/evaluation`.
 | Retrieval | `--analyst-reranker-mode config` | Measure configured reranking rather than the locked disabled baseline |
 | Retrieval | `--case-id ID` | Target a known regression; repeat for multiple cases |
 | Retrieval | `--no-fail-on-threshold` | Preserve a zero exit code while still recording failed cases |
-| Retrieval | `--render-html` | Produce local graph render artifacts; not needed for scoring |
+| Retrieval | `--render-html` | Produce local Plotly graph export artifacts independently of the interactive Reflex renderer |
 | Any evaluator | `--evaluation-root PATH` | Keep an experiment completely separate from the canonical history |
 | Any evaluator | `--output-dir PATH` | Debug-only explicit destination; use a unique directory and keep it under the selected root's `runs/` if it must aggregate |
 | Offline | `--trace-export PATH` | Select an exact LangSmith export |

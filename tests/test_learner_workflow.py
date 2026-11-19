@@ -1,5 +1,6 @@
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import StateGraph
@@ -20,6 +21,7 @@ from backend.configs.search import KnowledgeGraphSearchSettings
 from backend.workflows.agents.schemas import ResearchResult, RoutingDecision, State
 from backend.workflows.learner import LearnerWorkflow
 from backend.workflows.learner_reflex import ReflexLearnerWorkflow
+from backend.workflows.presentation import GraphNode, GraphPayload, GraphToolResult
 
 
 class FakeNode:
@@ -68,7 +70,7 @@ class FakeAnalystPipeline:
         self.reranker_settings = reranker_settings
         LAST_FAKE_ANALYST_PIPELINE = self
 
-    def search(self, queries: list[str]) -> str:
+    def search(self, queries: list[str], *, spans=None) -> str:
         return f"optimized analyst: {queries[0]}"
 
 
@@ -76,10 +78,16 @@ class FakeVisualizerPipeline:
     def __init__(self, indexer) -> None:
         self.indexer = indexer
 
-    def visualize(
-        self, queries: list[str]
-    ) -> tuple[list[str], list[tuple[str, str, str]], list[str]]:
-        return ["optimized_node"], [("A", "REL", "B")], queries
+    def structured_graph(self, queries):
+        return GraphToolResult(
+            queries=queries,
+            graph=GraphPayload(
+                artifact_id=str(uuid4()),
+                title="BERT",
+                nodes=[GraphNode(id="concept-bert", label="BERT")],
+                edges=[],
+            ),
+        )
 
 
 class FakePromptEngine:
@@ -503,11 +511,13 @@ def test_deterministic_route_ends_after_empty_visualization_signal() -> None:
 
 def test_visualizer_node_returns_terminal_empty_signal_for_empty_graph_result() -> None:
     workflow = object.__new__(LearnerWorkflow)
-    state = State(context='{"get_subgraphs_to_visualize": [[], [], ["BERT"]]}')
+    state = State(
+        context='{"get_subgraphs_to_visualize": {"queries": ["BERT"], "graph": null}}'
+    )
 
     result = asyncio.run(workflow.visualizer_node(state))
 
-    assert result["visual_artifacts"] == []
+    assert "visual_artifacts" not in result
     assert result["context"] == VISUALIZATION_EMPTY_CONTEXT
 
 
@@ -555,11 +565,9 @@ def test_visualizer_tool_uses_optimized_visualizer_pipeline_by_default() -> None
     ):
         tool = workflow._build_visualizer_tool()
 
-    assert tool.invoke({"queries": ["BERT"]}) == (
-        ["optimized_node"],
-        [("A", "REL", "B")],
-        ["BERT"],
-    )
+    result = GraphToolResult.model_validate(tool.invoke({"queries": ["BERT"]}))
+    assert result.graph.nodes[0].label == "BERT"
+    assert result.queries == ["BERT"]
     assert indexer.get_retriever_calls == []
 
 
@@ -574,12 +582,35 @@ def test_visualizer_tool_can_use_legacy_vector_context_retriever() -> None:
     workflow = make_workflow(indexer)
 
     tool = workflow._build_visualizer_tool()
-    nodes, triplets, queries = tool.invoke({"queries": ["graph"]})
-
-    assert nodes == ["A", "B"]
-    assert triplets == [("A", "REL", "B")]
-    assert queries == ["graph"]
+    result = GraphToolResult.model_validate(tool.invoke({"queries": ["graph"]}))
+    assert [node.id for node in result.graph.nodes] == ["A", "B"]
+    assert [
+        (edge.source, edge.predicate, edge.target) for edge in result.graph.edges
+    ] == [("A", "REL", "B")]
+    assert result.queries == ["graph"]
     assert indexer.get_retriever_calls == [settings.visualizer_retriever_params]
+
+
+def test_legacy_visualizer_preserves_topology_when_node_details_are_unavailable():
+    from types import SimpleNamespace
+
+    settings = KnowledgeGraphSearchSettings(
+        visualizer_retrieval_mode="legacy_vector_context"
+    )
+    retriever = FakeRetriever(
+        {"graph": [FakeNodeWithScore(FakeNode("A -> REL -> B"), 0.95)]}
+    )
+    indexer = FakeIndexer(settings, retriever)
+
+    def get(**kwargs):
+        raise OSError("Metadata store unavailable")
+
+    indexer.index = SimpleNamespace(property_graph_store=SimpleNamespace(get=get))
+    tool = make_workflow(indexer)._build_visualizer_tool()
+    result = GraphToolResult.model_validate(tool.invoke({"queries": ["graph"]}))
+    assert [node.label for node in result.graph.nodes] == ["A", "B"]
+    assert result.graph.edges[0].predicate == "REL"
+    assert result.graph.sources == []
 
 
 def test_init_agents_handles_researcher_composite_model_settings() -> None:

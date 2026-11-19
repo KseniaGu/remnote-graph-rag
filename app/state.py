@@ -1,35 +1,56 @@
 import asyncio
 import re
 import uuid
+from collections.abc import Callable
+from contextlib import aclosing, asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
+from threading import Event
+from time import monotonic
 from typing import Any
 
-import plotly.graph_objects as go
 import reflex as rx
 from pydantic import BaseModel
 
 from app.strings import AGENT_DESCRIPTIONS, QUICK_ACTION_CACHE_POLICIES, QUICK_ACTIONS
 from backend.configs.chat_limits import ChatLimitsSettings
 from backend.configs.constants import (
-    CACHED_AGENT_REPLAY_LATENCY,
     CACHED_TOKENS_REPLAY_LATENCY,
     DEFAULT_RECENT_MESSAGE_LIMIT,
     RECURSION_LIMIT,
 )
 from backend.configs.enums import WorkflowEventType
-from backend.configs.messages import ERROR_MESSAGE_TOO_LONG
+from backend.configs.messages import ERROR_MESSAGE_TOO_LONG, ERROR_WORKFLOW_FAILED
+from backend.utils.async_tasks import complete_on_cancel
 from backend.utils.cache import get_quick_action_cache, normalize_quick_action_prompt
 from backend.utils.chat_errors import UserFacingChatError
 from backend.utils.chat_limits import (
     ChatAdmission,
+    VisitorActiveTurnExceeded,
     WorkflowTimeoutExceeded,
     get_chat_limit_service,
 )
 from backend.utils.helpers import logger
 from backend.utils.session_memory import get_session_memory_store
-from backend.workflows.learner_reflex import get_workflow
+from backend.workflows.learner_reflex import get_workflow, resolve_response_evidence
+from backend.workflows.presentation import (
+    MAX_RECENT_MAPS,
+    CachedTurn,
+    ExecutionStage,
+    GraphArtifact,
+    GraphNode,
+    GraphPayload,
+    Message,
+    ResponseSource,
+    SessionSnapshot,
+    StageOutcome,
+    TurnExecution,
+    TurnIdentity,
+    TurnOutcome,
+    validated_web_url,
+)
 
-MAX_SIDEBAR_HISTORY_ITEMS = 10
+MAX_SESSION_HISTORY_ITEMS = 10
 SIDEBAR_TITLE_MAX_CHARS = 48
 
 
@@ -162,24 +183,6 @@ def _sidebar_title(text: str, max_chars: int = SIDEBAR_TITLE_MAX_CHARS) -> str:
     return f"{title[: max_chars - 3].rstrip()}..."
 
 
-def _extract_map_title(
-    artifact: dict[str, Any], fallback_prompt: str, position: int
-) -> str:
-    """Extracts the best Recent Maps title from a Plotly artifact."""
-    raw_title = (
-        artifact.get("layout", {}).get("title", "")
-        if isinstance(artifact, dict)
-        else ""
-    )
-    if isinstance(raw_title, dict):
-        raw_title = raw_title.get("text", "")
-    if isinstance(raw_title, str) and raw_title.strip():
-        return _sidebar_title(raw_title)
-    if fallback_prompt.strip():
-        return _sidebar_title(fallback_prompt)
-    return f"Knowledge Map {position}"
-
-
 def _build_quick_action_policy_map() -> dict[str, dict[str, Any]]:
     policy_map: dict[str, dict[str, Any]] = {}
     quick_action_prompts = {action for _, _, action in QUICK_ACTIONS}
@@ -216,42 +219,16 @@ def _canonical_visitor_id(value: str) -> str:
         return ""
 
 
+@asynccontextmanager
 async def _events_with_timeout(events, timeout_seconds: float):
-    """Yields workflow events under one wall-clock timeout."""
-    try:
-        async with asyncio.timeout(timeout_seconds):
-            async for event in events:
-                yield event
-    finally:
-        close = getattr(events, "aclose", None)
-        if close is not None:
-            await close()
+    """Keep the wall-clock timeout and stream cleanup in the consuming task."""
+    async with asyncio.timeout(timeout_seconds), aclosing(events):
+        yield events
 
 
 def _submitted_message_from_form(form_data: dict) -> str:
     """Returns the exact submitted composer value, normalized for processing."""
     return str(form_data.get("message", "")).strip()
-
-
-def _model_payload(model: BaseModel) -> dict[str, Any]:
-    return model.model_dump()
-
-
-def _message_to_memory_payload(message: "Message") -> dict[str, str]:
-    return {
-        "role": message.role,
-        "content": message.content,
-        "agent": message.agent,
-        "timestamp": message.timestamp,
-        "dom_id": message.dom_id,
-    }
-
-
-def _message_from_memory_payload(message: dict[str, Any]) -> "Message":
-    payload = dict(message)
-    if payload.get("role") != "user":
-        payload["content"] = _normalize_math_delimiters(str(payload.get("content", "")))
-    return Message(**payload)
 
 
 def _cached_response_chunks(content: str, chunk_size: int = 24) -> list[str]:
@@ -261,170 +238,111 @@ def _cached_response_chunks(content: str, chunk_size: int = 24) -> list[str]:
     return [content[i : i + chunk_size] for i in range(0, len(content), chunk_size)]
 
 
-async def _persist_session_snapshot(
-    session_id: str,
-    messages: list[dict[str, str]],
-    session_history: list[dict[str, Any]] | None = None,
-    recent_maps: list[dict[str, Any]] | None = None,
-    visual_artifacts: list[dict[str, Any]] | None = None,
-) -> None:
-    if not session_id:
-        return
-    try:
-        await asyncio.to_thread(
-            lambda: get_session_memory_store().replace_messages(
-                session_id,
-                messages,
-                session_history=session_history,
-                recent_maps=recent_maps,
-                visual_artifacts=visual_artifacts,
-            )
-        )
-    except Exception as e:
-        logger.warning(f"Persisting session snapshot failed: {e}")
-        pass
+@dataclass
+class _ActiveRequest:
+    session_id: str
+    nonce: str
+    task: asyncio.Task
+    invalidated: Event = field(default_factory=Event)
+
+    def cancel(self) -> None:
+        self.invalidated.set()
+        if not self.task.cancelling():
+            self.task.cancel()
 
 
-class Message(BaseModel):
-    """A chat message."""
-
-    content: str
-    role: str  # "user" or "assistant"
-    agent: str = ""  # Agent name for assistant messages
-    timestamp: str = ""
-    dom_id: str = ""
+_active_requests: dict[str, _ActiveRequest] = {}
 
 
 class SessionHistoryItem(BaseModel):
-    """Sidebar metadata for one user turn in the current browser tab session."""
+    """Sidebar link to the user message that opened a turn."""
 
-    id: str
+    turn_id: str
     title: str
-    meta: str
-    message_index: int
     timestamp: str
-    message_dom_id: str = ""
+    message_dom_id: str
 
 
 class RecentMapItem(BaseModel):
-    """Sidebar metadata for one generated graph in the current browser tab session."""
+    """Sidebar link to a retained graph artifact."""
 
-    id: str
+    artifact_id: str
     title: str
-    meta: str
-    artifact_index: int
     timestamp: str
+    retrieval_text: str = ""
 
 
-def _message_dom_id(position: int) -> str:
-    """Builds a stable fallback DOM id for restored messages."""
-    return f"message-{position}"
-
-
-def _restore_ui_navigation_targets(
-    messages: list[Message],
-    session_history: list[SessionHistoryItem],
-) -> tuple[list[Message], list[SessionHistoryItem]]:
-    """Backfills message DOM ids and legacy history targets after session hydration."""
-    restored_messages = [
-        message
-        if message.dom_id
-        else message.model_copy(update={"dom_id": _message_dom_id(index)})
-        for index, message in enumerate(messages)
-    ]
-    restored_history = []
-    for item in session_history:
-        message_dom_id = item.message_dom_id
-        if not message_dom_id and 0 <= item.message_index < len(restored_messages):
-            message_dom_id = restored_messages[item.message_index].dom_id
-        restored_history.append(
-            item.model_copy(update={"message_dom_id": message_dom_id})
-        )
-    return restored_messages, restored_history
-
-
-def _session_history_selection_state(
-    item_id: str,
-    session_history: list[SessionHistoryItem],
-    current_nonce: int,
-) -> dict[str, str | int] | None:
-    """Returns state updates for navigating to a current-session history item."""
-    for item in session_history:
-        if item.id != item_id:
-            continue
-        target_dom_id = item.message_dom_id or _message_dom_id(item.message_index)
-        return {
-            "selected_session_history_id": item.id,
-            "scroll_target_message_dom_id": target_dom_id,
-            "scroll_request_nonce": current_nonce + 1,
-        }
-    return None
-
-
-def _recent_map_selection_state(
-    item_id: str,
-    item: RecentMapItem,
-    visual_artifact_count: int,
-) -> dict[str, str | int] | None:
-    """Returns state updates for navigating to a valid recent map item."""
-    if item.id != item_id or not 0 <= item.artifact_index < visual_artifact_count:
-        return None
-    return {
-        "selected_recent_map_id": item.id,
-        "selected_plot_index": item.artifact_index,
-    }
-
-
-def _merge_recent_map_items(
-    visual_artifacts: list[dict[str, Any]],
-    recent_maps: list[RecentMapItem],
-    new_artifacts: list[dict[str, Any]],
-    fallback_prompt: str,
-    timestamp: str | None = None,
-) -> tuple[list[dict[str, Any]], list[RecentMapItem], int, str]:
-    """Appends graph artifacts while keeping recent-map indexes aligned after trimming."""
-    combined_artifacts = visual_artifacts + new_artifacts
-    dropped_count = max(0, len(combined_artifacts) - MAX_SIDEBAR_HISTORY_ITEMS)
-    kept_artifacts = combined_artifacts[dropped_count:]
-
-    adjusted_maps = [
-        item.model_copy(update={"artifact_index": item.artifact_index - dropped_count})
-        for item in recent_maps
-        if item.artifact_index >= dropped_count
-    ]
-
-    map_timestamp = timestamp or datetime.now().strftime("%H:%M")
-    start_index = len(visual_artifacts)
-    new_items = []
-    for offset, artifact in enumerate(new_artifacts):
-        artifact_index = start_index + offset - dropped_count
-        if artifact_index < 0:
-            continue
-        new_items.append(
-            RecentMapItem(
-                id=str(uuid.uuid4()),
-                title=_extract_map_title(artifact, fallback_prompt, artifact_index + 1),
-                meta=map_timestamp,
-                artifact_index=artifact_index,
-                timestamp=map_timestamp,
-            )
-        )
-
-    merged_maps = (adjusted_maps + new_items)[-MAX_SIDEBAR_HISTORY_ITEMS:]
-    merged_maps = [
-        item for item in merged_maps if 0 <= item.artifact_index < len(kept_artifacts)
-    ]
-    selected_plot_index = len(kept_artifacts) - 1 if kept_artifacts else 0
-    selected_recent_map_id = new_items[-1].id if new_items else ""
-    return kept_artifacts, merged_maps, selected_plot_index, selected_recent_map_id
-
-
-class AgentStatus(BaseModel):
-    """Status of an agent in the workflow."""
-
+@dataclass
+class LiveAgent:
     name: str
-    is_active: bool = False
-    last_action: str = ""
+    outcome: str
+
+
+@dataclass
+class StudyStage:
+    agent: str
+    outcome: StageOutcome
+    duration: str
+
+
+@dataclass
+class StudyTurn:
+    prompt: Message
+    responses: list[Message] = field(default_factory=list)
+    maps: list[RecentMapItem] = field(default_factory=list)
+    outcome: str = ""
+    origin: str = ""
+    stages: list[StudyStage] = field(default_factory=list)
+
+
+@dataclass
+class StudySource:
+    title: str
+    path: str
+    excerpt: str
+    url: str
+    summary: str = ""
+    is_untitled_note: bool = False
+
+
+@dataclass
+class StudySources:
+    key: str = ""
+    title: str = ""
+    status: str = ""
+    notes: list[StudySource] = field(default_factory=list)
+    relationship_notes: list[StudySource] = field(default_factory=list)
+    web: list[StudySource] = field(default_factory=list)
+
+
+def _study_source(source: ResponseSource, *, note_number: int = 1) -> StudySource:
+    web = source.kind == "web"
+    path = (
+        " / ".join(part.strip() for part in source.path if part.strip()) if web else ""
+    )
+    excerpt = (source.excerpt or "").strip() if web else ""
+    title = (source.title or "").strip()
+    return StudySource(
+        title or ("Untitled web source" if web else f"Note {note_number}"),
+        path,
+        excerpt,
+        validated_web_url(source.url) or "",
+        (source.summary or "").strip(),
+        is_untitled_note=not web and not title,
+    )
+
+
+def _with_note_previews(message: Message) -> Message:
+    evidence = resolve_response_evidence(message.evidence)
+    if evidence is message.evidence:
+        return message
+    return message.model_copy(update={"evidence": evidence})
+
+
+def _stage_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    return "<0.01 s" if 0 < seconds < 0.01 else f"{seconds:.2f} s"
 
 
 class AppState(rx.State):
@@ -438,12 +356,15 @@ class AppState(rx.State):
     # Agent status tracking
     active_agent: str = ""
     agent_history: list[str] = []
+    executions: list[TurnExecution] = []
+    _processing_turn_id: str = ""
 
     # Visualization state
-    visual_artifacts: list[dict[str, Any]] = []
-    selected_plot_index: int = 0
-    show_visualization: bool = False
-    show_graph_updated_notice: bool = False
+    _visual_artifacts: list[GraphArtifact] = []
+    graph_draft: str = ""
+    graph_draft_nonce: int = 0
+    graph_source_nonce: int = 0
+    _selected_graph_source: tuple[str, str, str] | None = None
 
     # Context state (for debugging/display)
     current_context: str = ""
@@ -455,18 +376,21 @@ class AppState(rx.State):
     # Session state
     session_started: bool = False
     session_id: str = rx.SessionStorage("", name="ai_practice_session_id")
-    session_history: list[SessionHistoryItem] = []
-    recent_maps: list[RecentMapItem] = []
     selected_session_history_id: str = ""
+    selected_source_response_id: str = ""
     visitor_id: str = rx.LocalStorage("", name="ai_practice_visitor_id", sync=True)
     selected_recent_map_id: str = ""
     scroll_target_message_dom_id: str = ""
     scroll_request_nonce: int = 0
     error_message: str = ""
+    _bound_session_id: str = ""
+    _hydrated_session_id: str = ""
+    _request_nonce: str = ""
 
     # Streaming state
     streaming_content: str = ""
     streaming_agent: str = ""
+    streaming_response_id: str = ""
 
     @rx.var
     def is_streaming(self) -> bool:
@@ -481,7 +405,33 @@ class AppState(rx.State):
     @rx.var
     def has_visualization(self) -> bool:
         """Checks if there are any visualizations to display."""
-        return len(self.visual_artifacts) > 0
+        return len(self._visual_artifacts) > 0
+
+    @rx.var
+    def session_history(self) -> list[SessionHistoryItem]:
+        """Builds recent turn links from the committed prompt records."""
+        return [
+            SessionHistoryItem(
+                turn_id=message.turn_id,
+                title=_sidebar_title(message.content),
+                timestamp=message.timestamp,
+                message_dom_id=message.dom_id,
+            )
+            for message in self.messages
+            if message.role == "user"
+        ][-MAX_SESSION_HISTORY_ITEMS:]
+
+    @rx.var
+    def recent_maps(self) -> list[RecentMapItem]:
+        """Builds map links from the retained artifacts in display order."""
+        return [
+            RecentMapItem(
+                artifact_id=artifact.artifact_id,
+                title=artifact.title.strip() or "Untitled map",
+                timestamp=artifact.timestamp,
+            )
+            for artifact in self._visual_artifacts
+        ]
 
     @rx.var
     def has_session_history(self) -> bool:
@@ -494,111 +444,305 @@ class AppState(rx.State):
         return len(self.recent_maps) > 0
 
     @rx.var
-    def plot_count(self) -> int:
-        """Total number of plots generated in this session."""
-        return len(self.visual_artifacts)
+    def selected_map_index(self) -> int:
+        return next(
+            (
+                index
+                for index, graph in enumerate(self._visual_artifacts)
+                if graph.artifact_id == self.selected_recent_map_id
+            ),
+            -1,
+        )
 
     @rx.var
-    def current_plot_label(self) -> str:
-        """Human-readable label for the current plot position."""
-        if not self.visual_artifacts:
-            return ""
-        return f"{self.selected_plot_index + 1} / {len(self.visual_artifacts)}"
+    def selected_graph(self) -> GraphArtifact | None:
+        if self.selected_map_index >= 0:
+            return self._visual_artifacts[self.selected_map_index]
+        return None
 
-    @rx.var(cache=True)
-    def plotly_figure(self) -> go.Figure:
-        """Convert the currently selected visual artifact to a Plotly Figure.
-
-        Cached so it only recalculates when visual_artifacts or selected_plot_index
-        changes, preventing Plotly re-renders on unrelated state updates.
-        """
-        if self.visual_artifacts and 0 <= self.selected_plot_index < len(
-            self.visual_artifacts
-        ):
-            fig = go.Figure(self.visual_artifacts[self.selected_plot_index])
-            fig.update_layout(
-                autosize=True,
-                margin={"l": 24, "r": 24, "t": 42, "b": 24},
-            )
-            return fig
-        return go.Figure()
+    @property
+    def _processing_execution(self) -> TurnExecution | None:
+        if self.is_processing and self.executions:
+            report = self.executions[-1]
+            if report.turn_id == self._processing_turn_id:
+                return report
+        return None
 
     @rx.var
-    def agent_status_list(self) -> list[dict]:
-        """Get list of agent statuses for display."""
-        agents = [
-            "orchestrator",
-            "retriever",
-            "researcher",
-            "analyst",
-            "mentor",
-            "visualizer",
-        ]
+    def processing_from_cache(self) -> bool:
+        report = self._processing_execution
+        return report is not None and report.origin == "cache"
+
+    @rx.var
+    def live_agent_progress(self) -> list[LiveAgent]:
+        """Summarize the observed invocations without changing the execution log."""
+        report = self._processing_execution
+        outcomes: dict[str, StageOutcome] = {}
+        running: set[str] = set()
+        if report is not None:
+            for stage in report.stages:
+                outcomes[stage.agent] = stage.outcome
+                if stage.outcome == "running":
+                    running.add(stage.agent)
         return [
-            {
-                "name": agent,
-                "is_active": agent == self.active_agent,
-                "was_used": agent in self.agent_history,
-                "description": AGENT_DESCRIPTIONS.get(agent, ""),
-            }
-            for agent in agents
-        ]
-
-    def _append_session_history_item(
-        self,
-        user_message: str,
-        meta: str,
-        message_index: int,
-        message_dom_id: str,
-    ) -> None:
-        item = SessionHistoryItem(
-            id=str(uuid.uuid4()),
-            title=_sidebar_title(user_message),
-            meta=meta,
-            message_index=message_index,
-            message_dom_id=message_dom_id,
-            timestamp=meta,
-        )
-        self.session_history = ([*self.session_history, item])[
-            -MAX_SIDEBAR_HISTORY_ITEMS:
-        ]
-        self.selected_session_history_id = item.id
-
-    def _append_recent_map_items(
-        self, artifacts: list[dict[str, Any]], fallback_prompt: str
-    ) -> None:
-        if not artifacts:
-            return
-
-        visual_artifacts, recent_maps, selected_plot_index, selected_recent_map_id = (
-            _merge_recent_map_items(
-                self.visual_artifacts,
-                self.recent_maps,
-                artifacts,
-                fallback_prompt,
+            LiveAgent(
+                name.capitalize(),
+                "running" if name in running else outcomes.get(name, "inactive"),
             )
+            for name in AGENT_DESCRIPTIONS
+        ]
+
+    @rx.var
+    def study_turns(self) -> list[StudyTurn]:
+        """Group visible responses, retained maps and observed execution by turn."""
+        turns: dict[tuple[str, str], StudyTurn] = {}
+        for message in self.messages:
+            key = (message.session_id, message.turn_id)
+            if message.role == "user":
+                turns[key] = StudyTurn(prompt=message)
+            elif message.agent != "visualizer" and key in turns:
+                turns[key].responses.append(message)
+        for report in self.executions:
+            turn = turns.get((report.session_id, report.turn_id))
+            if turn is not None:
+                turn.outcome = report.outcome
+                turn.origin = report.origin
+                turn.stages = [
+                    StudyStage(
+                        agent=stage.agent.capitalize(),
+                        outcome=stage.outcome,
+                        duration=_stage_duration(stage.duration_seconds),
+                    )
+                    for stage in report.stages
+                ]
+        for artifact in self._visual_artifacts:
+            turn = turns.get((artifact.session_id, artifact.turn_id))
+            if turn is not None:
+                turn.maps.append(
+                    RecentMapItem(
+                        artifact_id=artifact.artifact_id,
+                        title=artifact.title.strip() or "Untitled map",
+                        timestamp=artifact.timestamp,
+                        retrieval_text=" & ".join(artifact.retrieval_queries),
+                    )
+                )
+        return list(turns.values())
+
+    @rx.var
+    def study_sources(self) -> StudySources:
+        """Resolve an explicit response or the selected turn's latest response."""
+        if self._selected_graph_source:
+            artifact_id, concept_id, source_id = self._selected_graph_source
+            graph = next(
+                (
+                    item
+                    for item in self._visual_artifacts
+                    if item.artifact_id == artifact_id
+                    and item.session_id == self.session_id
+                ),
+                None,
+            )
+            if graph:
+                concept = next(node for node in graph.nodes if node.id == concept_id)
+                source = next(
+                    item for item in graph.sources if item.source_id == source_id
+                )
+                result = StudySources(
+                    key=artifact_id,
+                    title=f"{concept.label} · {graph.title}",
+                    status="graph",
+                )
+                (result.notes if source.kind == "note" else result.web).append(
+                    _study_source(source)
+                )
+                return result
+        turns = self.study_turns
+        if not turns:
+            return StudySources()
+        turn = next(
+            (
+                turn
+                for turn in turns
+                if turn.prompt.turn_id == self.selected_session_history_id
+            ),
+            turns[-1],
         )
-        self.visual_artifacts = visual_artifacts
-        self.recent_maps = recent_maps
-        self.selected_plot_index = selected_plot_index
-        self.selected_recent_map_id = (
-            selected_recent_map_id or self.selected_recent_map_id
+        response = next(
+            (
+                response
+                for response in turn.responses
+                if response.response_id == self.selected_source_response_id
+            ),
+            None,
+        )
+        if response is None:
+            if turn.outcome == "running" and (
+                not turn.responses
+                or (
+                    turn.prompt.dom_id == turns[-1].prompt.dom_id
+                    and self.streaming_response_id
+                )
+            ):
+                return StudySources(
+                    key=turn.prompt.turn_id,
+                    title=_sidebar_title(turn.prompt.content),
+                    status="pending",
+                )
+            if turn.responses:
+                response = turn.responses[-1]
+            else:
+                return StudySources(
+                    key=turn.prompt.turn_id,
+                    title=_sidebar_title(turn.prompt.content),
+                    status="no_response",
+                )
+
+        title = _sidebar_title(turn.prompt.content)
+        if len(turn.responses) > 1:
+            position = turn.responses.index(response) + 1
+            title = f"{title} · Response {position} of {len(turn.responses)}"
+        evidence = response.evidence
+        result = StudySources(
+            key=response.response_id or "",
+            title=title,
+            status="unavailable" if evidence is None else "ready",
+        )
+        if evidence is not None:
+            for source in sorted(
+                evidence.sources, key=lambda row: row.supports_relationship
+            ):
+                if source.kind == "web":
+                    result.web.append(_study_source(source))
+                elif (source.excerpt or "").strip() or (
+                    source.supports_relationship and source.summary
+                ):
+                    notes = (
+                        result.relationship_notes
+                        if source.supports_relationship
+                        else result.notes
+                    )
+                    note_number = len(result.notes) + len(result.relationship_notes) + 1
+                    notes.append(_study_source(source, note_number=note_number))
+            if not result.notes and not result.relationship_notes and not result.web:
+                result.status = (
+                    "relationship_notes_unavailable"
+                    if evidence.has_relationship_context
+                    or any(source.kind == "note" for source in evidence.sources)
+                    else "empty"
+                )
+        return result
+
+    @rx.event
+    def select_response_sources(self, response_id: str):
+        """Pin sources to a visible assistant response in the current session."""
+        for message in self.messages:
+            if (
+                message.session_id == self.session_id
+                and message.role == "assistant"
+                and message.agent != "visualizer"
+                and message.response_id == response_id
+            ):
+                self.selected_session_history_id = message.turn_id
+                self.selected_source_response_id = response_id
+                self._selected_graph_source = None
+                return
+
+    def _append_maps(self, artifacts: list[GraphArtifact]) -> None:
+        if artifacts:
+            self._visual_artifacts = [*self._visual_artifacts, *artifacts][
+                -MAX_RECENT_MAPS:
+            ]
+            if self.selected_map_index < 0:
+                self.selected_recent_map_id = artifacts[-1].artifact_id
+
+    def _owns_request(self, request: _ActiveRequest) -> bool:
+        return (
+            self.session_id == request.session_id
+            and self._request_nonce == request.nonce
+            and self.is_processing
+            and not request.invalidated.is_set()
         )
 
-    async def _persist_current_session_snapshot(self, session_id: str) -> None:
-        async with self:
-            messages = [_message_to_memory_payload(msg) for msg in self.messages]
-            session_history = [_model_payload(item) for item in self.session_history]
-            recent_maps = [_model_payload(item) for item in self.recent_maps]
-            visual_artifacts = self.visual_artifacts[-MAX_SIDEBAR_HISTORY_ITEMS:]
+    async def _write_for_request(
+        self, request: _ActiveRequest, write: Callable
+    ) -> None:
+        """Skip queued writes after invalidation and drain writes already in progress."""
 
-        await _persist_session_snapshot(
-            session_id,
-            messages,
-            session_history=session_history,
-            recent_maps=recent_maps,
-            visual_artifacts=visual_artifacts,
-        )
+        def guarded_write():
+            if not request.invalidated.is_set():
+                write()
+
+        await complete_on_cancel(asyncio.to_thread(guarded_write))
+
+    async def _persist_current_session_snapshot(self, request: _ActiveRequest) -> None:
+        try:
+            async with self:
+                if (
+                    not self._owns_request(request)
+                    or self._hydrated_session_id != request.session_id
+                ):
+                    return
+                snapshot = SessionSnapshot(
+                    session_id=request.session_id,
+                    messages=[
+                        message.model_copy(deep=True) for message in self.messages
+                    ],
+                    artifacts=[
+                        artifact.model_copy() for artifact in self._visual_artifacts
+                    ],
+                    executions=[
+                        report.model_copy(deep=True) for report in self.executions
+                    ],
+                )
+            await self._write_for_request(
+                request, lambda: get_session_memory_store().replace_snapshot(snapshot)
+            )
+        except Exception as exc:
+            logger.warning(
+                "Persisting session snapshot failed", error_type=type(exc).__name__
+            )
+
+    async def _load_session_snapshot(
+        self, session_id: str
+    ) -> tuple[bool, SessionSnapshot | None]:
+        def load():
+            snapshot = get_session_memory_store().get(
+                session_id, require_available=True
+            )
+            if snapshot is not None and snapshot.session_id == session_id:
+                snapshot = snapshot.model_copy(
+                    update={
+                        "messages": [
+                            _with_note_previews(message)
+                            for message in snapshot.messages
+                        ]
+                    }
+                )
+            return snapshot
+
+        try:
+            snapshot = await asyncio.to_thread(load)
+        except Exception as exc:
+            logger.warning(
+                "Loading session snapshot failed", error_type=type(exc).__name__
+            )
+            return False, None
+        return True, snapshot
+
+    def _restore_snapshot(
+        self, session_id: str, snapshot: SessionSnapshot | None
+    ) -> None:
+        self._hydrated_session_id = session_id
+        if snapshot is None or snapshot.session_id != session_id:
+            return
+        self.messages = snapshot.messages
+        self.executions = snapshot.executions
+        user_turns = [
+            message.turn_id for message in snapshot.messages if message.role == "user"
+        ]
+        self.selected_session_history_id = user_turns[-1] if user_turns else ""
+        self.selected_source_response_id = ""
+        self._append_maps(snapshot.artifacts)
 
     @rx.event(background=True)
     async def initialize_session(self):
@@ -608,82 +752,35 @@ class AppState(rx.State):
             if not canonical_visitor_id:
                 canonical_visitor_id = str(uuid.uuid4())
             self.visitor_id = canonical_visitor_id
-            canonical_session_id = _canonical_visitor_id(self.session_id)
-            self.session_id = canonical_session_id or str(uuid.uuid4())
-            if not canonical_session_id:
+            if not self._bind_session():
                 return
             session_id = self.session_id
-            should_hydrate = (
-                not self.messages and not self.session_history and not self.recent_maps
-            )
+            nonce = self._request_nonce
+            if (
+                self.messages
+                or self.is_processing
+                or self._hydrated_session_id == session_id
+            ):
+                return
 
-        if not should_hydrate:
-            return
-
-        try:
-            doc = await asyncio.to_thread(
-                lambda: get_session_memory_store().get(session_id)
-            )
-        except Exception as e:
-            logger.warning(f"Loading session snapshot failed: {e}")
-            return
-        if not doc:
-            return
-
-        try:
-            messages = [
-                _message_from_memory_payload(message)
-                for message in doc.get("messages", [])
-                if isinstance(message, dict)
-            ]
-            session_history = [
-                SessionHistoryItem(**item)
-                for item in doc.get("session_history", [])
-                if isinstance(item, dict)
-            ][-MAX_SIDEBAR_HISTORY_ITEMS:]
-            visual_artifacts = doc.get("visual_artifacts", [])
-            visual_artifacts = (
-                visual_artifacts if isinstance(visual_artifacts, list) else []
-            )
-            visual_artifacts = visual_artifacts[-MAX_SIDEBAR_HISTORY_ITEMS:]
-            recent_maps = [
-                RecentMapItem(**item)
-                for item in doc.get("recent_maps", [])
-                if isinstance(item, dict)
-            ][-MAX_SIDEBAR_HISTORY_ITEMS:]
-        except Exception as e:
-            logger.warning(f"Hydrating session snapshot failed: {e}")
+        # A fresh Reflex client may reconnect to a conversation still finishing.
+        active = _active_requests.get(session_id)
+        if active:
+            await asyncio.gather(asyncio.shield(active.task), return_exceptions=True)
+        available, snapshot = await self._load_session_snapshot(session_id)
+        if not available:
             return
 
         async with self:
             if (
                 self.session_id != session_id
+                or self._request_nonce != nonce
+                or self.is_processing
                 or self.messages
-                or self.session_history
-                or self.recent_maps
+                or self._hydrated_session_id == session_id
             ):
                 return
-            messages, session_history = _restore_ui_navigation_targets(
-                messages, session_history
-            )
-            self.messages = messages
-            self.session_history = session_history
-            self.visual_artifacts = visual_artifacts
-            self.recent_maps = [
-                item
-                for item in recent_maps
-                if 0 <= item.artifact_index < len(self.visual_artifacts)
-            ]
-            self.selected_session_history_id = (
-                self.session_history[-1].id if self.session_history else ""
-            )
-            self.selected_recent_map_id = (
-                self.recent_maps[-1].id if self.recent_maps else ""
-            )
-            self.selected_plot_index = (
-                self.recent_maps[-1].artifact_index if self.recent_maps else 0
-            )
-            self.show_visualization = bool(self.visual_artifacts)
+            self._restore_snapshot(session_id, snapshot)
 
     def set_input(self, value: str):
         """Updates the current input value."""
@@ -691,480 +788,649 @@ class AppState(rx.State):
             return
         self.current_input = value
 
-    def handle_form_submit(self, form_data: dict):
+    @rx.event(background=True)
+    async def handle_form_submit(self, form_data: dict):
         """Handles chat form submission using the current DOM value to avoid WebSocket sync race conditions."""
-        value = _submitted_message_from_form(form_data)
-        if not value or self.is_processing:
-            return
-        self.current_input = ""
-        self.is_processing = True
-        return AppState.process_submitted_message(value, True)
+        await self._process_message(_submitted_message_from_form(form_data))
 
     def toggle_context_panel(self):
         """Toggles the context panel visibility."""
         self.show_context_panel = not self.show_context_panel
 
-    def set_active_view(self, view: str):
-        """Sets the active workspace view."""
-        if view in {"chat", "graph"}:
-            self.active_view = view
-
     def open_chat(self):
-        """Shows the chat workspace."""
+        """Shows the Study workspace."""
         self.active_view = "chat"
 
     def open_graph(self):
         """Shows the graph workspace."""
         self.active_view = "graph"
-        self.show_visualization = True
-        self.show_graph_updated_notice = False
-
-    def toggle_visualization(self):
-        """Toggles between chat and graph workspaces."""
-        if self.active_view == "graph":
-            self.active_view = "chat"
-        else:
-            self.active_view = "graph"
-            self.show_visualization = True
-
-    def next_plot(self):
-        """Navigates to the next plot in the history."""
-        if self.selected_plot_index < len(self.visual_artifacts) - 1:
-            self.selected_plot_index += 1
-
-    def prev_plot(self):
-        """Navigates to the previous plot in the history."""
-        if self.selected_plot_index > 0:
-            self.selected_plot_index -= 1
 
     def select_session_history_item(self, item_id: str):
         """Selects a current-tab session history item."""
-        selection = _session_history_selection_state(
-            item_id,
-            self.session_history,
-            self.scroll_request_nonce,
-        )
-        if selection is None:
-            return
-        self.selected_session_history_id = str(selection["selected_session_history_id"])
-        self.scroll_target_message_dom_id = str(
-            selection["scroll_target_message_dom_id"]
-        )
-        self.scroll_request_nonce = int(selection["scroll_request_nonce"])
-        self.active_view = "chat"
+        for item in self.session_history:
+            if item.turn_id == item_id:
+                self.selected_session_history_id = item.turn_id
+                self.selected_source_response_id = ""
+                self._selected_graph_source = None
+                self.scroll_target_message_dom_id = item.message_dom_id
+                self.scroll_request_nonce += 1
+                self.active_view = "chat"
+                return
 
     def select_recent_map(self, item_id: str):
-        """Selects a generated map from the current browser-tab map history."""
-        for item in self.recent_maps:
-            selection = _recent_map_selection_state(
-                item_id,
-                item,
-                len(self.visual_artifacts),
+        """Opens a retained map owned by the current conversation."""
+        if any(
+            artifact.artifact_id == item_id and artifact.session_id == self.session_id
+            for artifact in self._visual_artifacts
+        ):
+            self.selected_recent_map_id = item_id
+            self.open_graph()
+
+    def _active_graph_concept(
+        self, artifact_id: str, concept_id: str
+    ) -> GraphNode | None:
+        graph = self.selected_graph
+        if (
+            self.active_view == "graph"
+            and graph is not None
+            and graph.session_id == self.session_id
+            and graph.artifact_id == artifact_id
+        ):
+            return next((node for node in graph.nodes if node.id == concept_id), None)
+        return None
+
+    @rx.event
+    def prepare_graph_explanation(self, artifact_id: str, concept_id: str):
+        """Prepare an editable Study draft for a concept in the active map."""
+        concept = self._active_graph_concept(artifact_id, concept_id)
+        if concept:
+            suffix = "." if not concept.label.endswith((".", "?", "!")) else ""
+            self.graph_draft = f"Explain {concept.label}{suffix}"[
+                :CHAT_MESSAGE_MAX_CHARS
+            ]
+            self.graph_draft_nonce += 1
+            self.open_chat()
+
+    @rx.event
+    def show_graph_source(self, artifact_id: str, concept_id: str, source_id: str):
+        concept = self._active_graph_concept(artifact_id, concept_id)
+        if (
+            concept
+            and source_id in concept.source_ids
+            and any(
+                source.source_id == source_id for source in self.selected_graph.sources
             )
-            if selection is None:
-                continue
-            self.selected_recent_map_id = str(selection["selected_recent_map_id"])
-            self.selected_plot_index = int(selection["selected_plot_index"])
-            self.active_view = "graph"
-            self.show_visualization = True
-            self.show_graph_updated_notice = False
-            return
+        ):
+            self._selected_graph_source = (artifact_id, concept_id, source_id)
+            self.graph_source_nonce += 1
+            self.open_chat()
+
+    def _reset_stream(self) -> None:
+        self.streaming_content = ""
+        self.streaming_agent = ""
+        self.streaming_response_id = ""
+
+    def _reset_conversation(self) -> None:
+        self.messages = []
+        self.current_input = ""
+        self.agent_history = []
+        self.active_agent = ""
+        self.executions = []
+        self._processing_turn_id = ""
+        self._visual_artifacts = []
+        self.current_context = ""
+        self.selected_session_history_id = ""
+        self.selected_source_response_id = ""
+        self.selected_recent_map_id = ""
+        self.scroll_target_message_dom_id = ""
+        self.scroll_request_nonce = 0
+        self.graph_draft = ""
+        self._selected_graph_source = None
+        self.active_view = "chat"
+        self.error_message = ""
+        self.is_processing = False
+        self._hydrated_session_id = ""
+        self._request_nonce = ""
+        self._reset_stream()
 
     @rx.event(background=True)
     async def clear_chat(self):
-        """Clears the chat history."""
+        """Rotates the conversation before draining writes and retiring the old snapshot."""
         async with self:
             old_session_id = self.session_id
-            self.messages = []
-            self.agent_history = []
+            request = _active_requests.get(old_session_id)
+            if request:
+                request.cancel()
+            self._reset_conversation()
             self.session_id = str(uuid.uuid4())
-            # self.current_context = "" # It's hidden now
-            self.visual_artifacts = []
-            self.session_history = []
-            self.recent_maps = []
-            self.selected_session_history_id = ""
-            self.selected_recent_map_id = ""
-            self.scroll_target_message_dom_id = ""
-            self.scroll_request_nonce = 0
-            self.selected_plot_index = 0
-            self.show_visualization = False
-            self.show_graph_updated_notice = False
-            self.active_view = "chat"
-            self.error_message = ""
+            self._bound_session_id = self._hydrated_session_id = self.session_id
 
         if old_session_id:
             try:
-                await asyncio.to_thread(
-                    lambda: get_session_memory_store().delete(old_session_id)
+                await complete_on_cancel(self._retire_session(old_session_id, request))
+            except Exception as exc:
+                logger.warning(
+                    "Deleting session snapshot failed", error_type=type(exc).__name__
                 )
-            except Exception as e:
-                logger.warning(f"Deleting session snapshot failed: {e}")
+
+    async def _retire_session(
+        self, session_id: str, request: _ActiveRequest | None
+    ) -> None:
+        if request:
+            await asyncio.gather(request.task, return_exceptions=True)
+        await asyncio.to_thread(lambda: get_session_memory_store().delete(session_id))
 
     def clear_error(self):
         """Clears the error message."""
         self.error_message = ""
 
-    async def _replay_cached_agent_history(self, agent_history: list[str]) -> None:
-        """Replays cached agent activity into the sidebar without running the workflow."""
-        for agent_name in agent_history:
-            if not agent_name:
-                continue
+    async def _stream_cached_response(
+        self, request: _ActiveRequest, response: Message
+    ) -> None:
+        """Streams a remapped cached response through the live token UI."""
+        for chunk in _cached_response_chunks(response.content):
             async with self:
-                self.active_agent = agent_name
-                if agent_name not in self.agent_history:
-                    self.agent_history = [*self.agent_history, agent_name]
-            await asyncio.sleep(CACHED_AGENT_REPLAY_LATENCY)
-        async with self:
-            self.active_agent = ""
-
-    async def _stream_cached_response(self, response: dict[str, str]) -> None:
-        """Streams a cached assistant response through the same UI state as live tokens."""
-        agent_name = response.get("agent", "cache")
-        content = response.get("content", "")
-        rendered_content = _normalize_math_delimiters(content)
-
-        async with self:
-            self.active_agent = agent_name if agent_name != "system" else ""
-            self.streaming_agent = agent_name
-            self.streaming_content = ""
-            if (
-                agent_name
-                and agent_name != "system"
-                and agent_name not in self.agent_history
-            ):
-                self.agent_history = [*self.agent_history, agent_name]
-
-        for chunk in _cached_response_chunks(rendered_content):
-            async with self:
-                self.streaming_content = self.streaming_content + chunk
+                if not self._owns_request(request):
+                    return
+                self.streaming_response_id = response.response_id or ""
+                self.streaming_agent = response.agent
+                self.streaming_content += chunk
             await asyncio.sleep(CACHED_TOKENS_REPLAY_LATENCY)
 
+        response = await asyncio.to_thread(_with_note_previews, response)
         async with self:
-            self.active_agent = ""
-            self.streaming_content = ""
-            self.streaming_agent = ""
-            self.messages = [
-                *self.messages,
-                Message(
-                    content=rendered_content,
-                    role="assistant",
-                    agent=agent_name,
-                    timestamp=datetime.now().strftime("%H:%M"),
-                    dom_id=f"message-{uuid.uuid4().hex}",
-                ),
-            ]
+            if self._owns_request(request):
+                self._reset_stream()
+                self.messages = [*self.messages, response]
+
+    def _bind_session(self) -> bool:
+        canonical_session_id = _canonical_visitor_id(self.session_id)
+        session_id = canonical_session_id or str(uuid.uuid4())
+        if self._bound_session_id and self._bound_session_id != session_id:
+            old_request = _active_requests.get(self._bound_session_id)
+            if old_request and old_request.nonce == self._request_nonce:
+                old_request.cancel()
+            self._reset_conversation()
+        self.session_id = self._bound_session_id = session_id
+        if not canonical_session_id:
+            self._hydrated_session_id = session_id
+        return bool(canonical_session_id)
 
     @rx.event(background=True)
     async def send_message(self):
         """Processes the current composer value for non-form callers."""
-        async with self:
-            if not self.current_input.strip() or self.is_processing:
-                return
-            user_message = self.current_input.strip()
-            self.current_input = ""
-            self.is_processing = True
-        await self._process_message(user_message)
+        await self._process_message(None)
 
-    @rx.event(background=True)
-    async def process_submitted_message(
-        self, user_message: str, submit_reserved: bool = False
-    ):
-        """Processes a submitted form value without depending on composer state timing."""
-        user_message = user_message.strip()
-        if not user_message:
-            return
-        async with self:
-            if self.is_processing and not submit_reserved:
-                return
-            self.current_input = ""
-            self.is_processing = True
-        await self._process_message(user_message)
-
-    async def _process_message(self, user_message: str):
-        """Sends a captured user message through the workflow."""
-        if len(user_message) > CHAT_MESSAGE_MAX_CHARS:
-            async with self:
-                self.error_message = ERROR_MESSAGE_TOO_LONG
-                self.is_processing = False
-            return
-
-        async with self:
-            existing_message_count = len(self.messages)
-        quick_action_policy = _get_quick_action_cache_policy(user_message)
-        should_cache_quick_action = (
-            existing_message_count == 0 and quick_action_policy is not None
-        )
-        cache_prompt = (
-            str(quick_action_policy.get("prompt", user_message))
-            if quick_action_policy
-            else user_message
-        )
-        graph_updated_this_run = False
-        limit_service = get_chat_limit_service()
+    async def _process_message(self, user_message: str | None):
+        """Own admission, mutation, persistence and cleanup for one request."""
+        request: _ActiveRequest | None = None
         admission: ChatAdmission | None = None
-        turn_status = "success"
-        cached = None
-
-        async with self:
-            canonical_session_id = _canonical_visitor_id(self.session_id)
-            if not canonical_session_id:
-                canonical_session_id = str(uuid.uuid4())
-            self.session_id = canonical_session_id
-            session_id = self.session_id
-            visitor_id = _canonical_visitor_id(self.visitor_id)
-            if not visitor_id:
-                visitor_id = str(uuid.uuid4())
-                self.visitor_id = visitor_id
-
-        if should_cache_quick_action:
-            try:
-                cached = await asyncio.to_thread(
-                    lambda: get_quick_action_cache().get(cache_prompt)
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Quick-action cache lookup failed",
-                    error_type=type(exc).__name__,
-                )
-
+        execution: TurnExecution | None = None
+        execution_started_at = monotonic()
+        outcome: TurnOutcome = "incomplete"
+        status = "workflow_incomplete"
+        limit_service = None
         try:
-            if cached:
-                admission = await limit_service.admit_cached_turn(
-                    visitor_id, session_id
-                )
-            else:
-                admission = await limit_service.admit_expensive_turn(
-                    visitor_id, session_id
-                )
-        except UserFacingChatError as exc:
             async with self:
-                self.error_message = exc.user_message
-                self.is_processing = False
-            logger.info("Chat turn rejected", reason=exc.reason)
-            return
-
-        async with self:
-            self.is_processing = True
-            self.error_message = ""
-            self.agent_history = []
-            self.show_graph_updated_notice = False
-            timestamp = datetime.now().strftime("%H:%M")
-            message_index = len(self.messages)
-            message_dom_id = f"message-{uuid.uuid4().hex}"
-
-            # Add user message
-            self.messages = [
-                *self.messages,
-                Message(
-                    content=user_message,
-                    role="user",
-                    timestamp=timestamp,
-                    dom_id=message_dom_id,
-                ),
-            ]
-            self._append_session_history_item(
-                user_message, timestamp, message_index, message_dom_id
-            )
-
-        try:
-            if should_cache_quick_action:
-                if cached:
-                    cached_responses = cached.get("responses", [])
-                    cached_visual_artifacts = cached.get("visual_artifacts", [])
-                    cached_agent_history = cached.get("agent_history", [])
-                    if not cached_agent_history:
-                        cached_agent_history = [
-                            response.get("agent", "")
-                            for response in cached_responses
-                            if response.get("agent")
-                        ]
-                        if cached_visual_artifacts:
-                            cached_agent_history.append("visualizer")
-                    await self._replay_cached_agent_history(cached_agent_history)
-                    async with self:
-                        if cached_visual_artifacts:
-                            self._append_recent_map_items(
-                                cached_visual_artifacts, user_message
-                            )
-                            self.show_visualization = True
-                            graph_updated_this_run = True
-                    for response in cached_responses:
-                        await self._stream_cached_response(response)
-                    await self._persist_current_session_snapshot(session_id)
+                if user_message is None:
+                    user_message = self.current_input.strip()
+                if not user_message:
                     return
+                self._bind_session()
+                if self.is_processing:
+                    return
+                session_id = self.session_id
+                if session_id in _active_requests:
+                    self.error_message = VisitorActiveTurnExceeded.user_message
+                    return
+                self.current_input = ""
+                if len(user_message) > CHAT_MESSAGE_MAX_CHARS:
+                    self.error_message = ERROR_MESSAGE_TOO_LONG
+                    return
+                task = asyncio.current_task()
+                assert task is not None
+                self.is_processing = True
+                self._processing_turn_id = ""
+                self._request_nonce = str(uuid.uuid4())
+                request = _ActiveRequest(session_id, self._request_nonce, task)
+                _active_requests[session_id] = request
+                visitor_id = _canonical_visitor_id(self.visitor_id) or str(uuid.uuid4())
+                self.visitor_id = visitor_id
+                needs_hydration = (
+                    not self.messages and self._hydrated_session_id != session_id
+                )
+            if needs_hydration:
+                available, snapshot = await self._load_session_snapshot(session_id)
+            async with self:
+                if not self._owns_request(request):
+                    return
+                if needs_hydration and available:
+                    self._restore_snapshot(session_id, snapshot)
+                known_empty = (
+                    self._hydrated_session_id == session_id and not self.messages
+                )
+                message_history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in self.messages[-DEFAULT_RECENT_MESSAGE_LIMIT:]
+                ]
+            policy = (
+                _get_quick_action_cache_policy(user_message) if known_empty else None
+            )
+            limit_service = get_chat_limit_service()
+            cached = None
+            if policy:
+                cache_prompt = str(policy.get("prompt", user_message))
+                try:
+                    cached = await asyncio.to_thread(
+                        lambda: get_quick_action_cache().get(cache_prompt)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Quick-action cache lookup failed",
+                        error_type=type(exc).__name__,
+                    )
+            async with self:
+                if not self._owns_request(request):
+                    return
+            admit = (
+                limit_service.admit_cached_turn
+                if cached
+                else limit_service.admit_expensive_turn
+            )
+            admission = await admit(visitor_id, session_id)
+            turn = TurnIdentity(
+                session_id=session_id, turn_id=admission.context.turn_id
+            )
+            identity = turn.model_dump()
 
-            workflow = get_workflow()
+            async with self:
+                if not self._owns_request(request):
+                    status = "cancelled"
+                    return
+                timestamp = datetime.now().strftime("%H:%M")
+                self.error_message = ""
+                self.agent_history = []
+                self.messages = [
+                    *self.messages,
+                    Message(
+                        **identity,
+                        content=user_message,
+                        role="user",
+                        agent="",
+                        timestamp=timestamp,
+                        dom_id=f"message-{uuid.uuid4().hex}",
+                    ),
+                ]
+                self.selected_session_history_id = turn.turn_id
+                self.selected_source_response_id = ""
+                self._selected_graph_source = None
+                execution = TurnExecution(
+                    **identity, origin="cache" if cached else "workflow"
+                )
+                self._processing_turn_id = turn.turn_id
+                self.executions = [*self.executions, execution]
 
-            # Prepare message history
-            recent_messages = self.messages[:-1][-DEFAULT_RECENT_MESSAGE_LIMIT:]
-            message_history = [
-                {"role": msg.role, "content": msg.content} for msg in recent_messages
-            ]
-            cache_responses: list[dict[str, str]] = []
-            cache_visual_artifacts: list[dict[str, Any]] = []
-            cache_context = ""
-            cache_error = False
+            if cached:
+                replay = cached.replay(turn, timestamp)
+                async with self:
+                    if not self._owns_request(request):
+                        return
+                    self.agent_history = replay.agent_history
+                    self._append_maps(replay.artifacts)
+                for response in replay.responses:
+                    await self._stream_cached_response(request, response)
+                outcome = "answer" if replay.responses else "graph"
+                status = "success"
+                return
+
             try:
                 session_summary = await asyncio.to_thread(
                     lambda: get_session_memory_store().get_prompt_summary(
                         session_id, user_message
                     )
                 )
-            except Exception as e:
-                logger.warning(f"Loading session summary failed: {e}")
+            except Exception as exc:
+                logger.warning(
+                    "Loading session summary failed", error_type=type(exc).__name__
+                )
                 session_summary = ""
-
-            # Stream through workflow with per-token updates
-            async for event in _events_with_timeout(
-                workflow.stream_with_tokens(
-                    user_message=user_message,
-                    message_history=message_history,
-                    recursion_limit=RECURSION_LIMIT,
-                    session_id=session_id,
-                    session_summary=session_summary,
-                    turn_context=admission.context,
-                ),
+            async with self:
+                if not self._owns_request(request):
+                    return
+            execution_started_at = monotonic()
+            events = get_workflow().stream_with_tokens(
+                user_message=user_message,
+                message_history=message_history,
+                recursion_limit=RECURSION_LIMIT,
+                session_id=session_id,
+                session_summary=session_summary,
+                turn_context=admission.context,
+                execution_started_at=execution_started_at,
+            )
+            artifacts: list[GraphArtifact] = []
+            outcome, status = await self._consume_workflow(
+                request,
+                admission,
+                events,
+                user_message,
+                artifacts,
                 limit_service.settings.workflow_timeout_seconds,
-            ):
-                async with self:
-                    if event.type == WorkflowEventType.AGENT_START:
-                        self.active_agent = event.data["agent"]
-                        admission.context.agents.add(event.data["agent"])
-                        if event.data["agent"] not in self.agent_history:
-                            self.agent_history = [
-                                *self.agent_history,
-                                event.data["agent"],
-                            ]
+            )
+            await self._resolve_turn_note_previews(request, turn.turn_id)
+            if policy and outcome in ("answer", "graph"):
+                await self._cache_completed_turn(
+                    request, turn, policy, cache_prompt, artifacts
+                )
 
-                    elif event.type == WorkflowEventType.AGENT_END:
-                        self.active_agent = ""
+        except asyncio.CancelledError:
+            status = outcome = "cancelled"
+            raise
+        except TimeoutError:
+            status = WorkflowTimeoutExceeded.reason
+            outcome = "interrupted"
+            await self._set_request_error(request, WorkflowTimeoutExceeded.user_message)
+        except UserFacingChatError as exc:
+            status, outcome = exc.reason, "error"
+            await self._set_request_error(request, exc.user_message)
+            if admission is None:
+                logger.info("Chat turn rejected", reason=exc.reason)
+        except Exception as exc:
+            status, outcome = "workflow_error", "error"
+            logger.error(
+                "Chat request processing failed", error_type=type(exc).__name__
+            )
+            if request:
+                await self._set_request_error(request, ERROR_WORKFLOW_FAILED)
+        finally:
+            if request is not None:
+                try:
+                    if execution is not None:
+                        async with self:
+                            if self._owns_request(request):
+                                self._finish_execution(
+                                    outcome, monotonic() - execution_started_at
+                                )
+                        await self._persist_current_session_snapshot(request)
+                finally:
+                    try:
+                        if admission is not None:
+                            await complete_on_cancel(
+                                limit_service.finish_turn(admission, status)
+                            )
+                    finally:
+                        try:
+                            async with self:
+                                if _active_requests.get(session_id) is request:
+                                    del _active_requests[session_id]
+                                if self._owns_request(request):
+                                    self.is_processing = False
+                                    self._processing_turn_id = ""
+                                    self.active_agent = ""
+                                    self._reset_stream()
+                        finally:
+                            if _active_requests.get(session_id) is request:
+                                del _active_requests[session_id]
+
+    async def _set_request_error(self, request: _ActiveRequest, message: str) -> None:
+        async with self:
+            if self._owns_request(request):
+                self.error_message = message
+
+    async def _resolve_turn_note_previews(
+        self, request: _ActiveRequest, turn_id: str
+    ) -> None:
+        async with self:
+            if not self._owns_request(request):
+                return
+            responses = [
+                message
+                for message in self.messages
+                if message.turn_id == turn_id and message.evidence is not None
+            ]
+        if not responses:
+            return
+        resolved = await asyncio.to_thread(
+            lambda: {
+                message.response_id: _with_note_previews(message)
+                for message in responses
+            }
+        )
+        async with self:
+            if self._owns_request(request):
+                self.messages = [
+                    resolved.get(message.response_id, message)
+                    for message in self.messages
+                ]
+
+    def _finish_execution(self, outcome: TurnOutcome, end_offset: float) -> None:
+        report = self.executions[-1]
+        unfinished: StageOutcome = {
+            "error": "failed",
+            "interrupted": "interrupted",
+            "cancelled": "cancelled",
+        }.get(outcome, "incomplete")
+        stages = [
+            stage.model_copy(update={"end_offset": end_offset, "outcome": unfinished})
+            if stage.outcome == "running"
+            else stage
+            for stage in report.stages
+        ]
+        self.executions = [
+            *self.executions[:-1],
+            report.model_copy(update={"outcome": outcome, "stages": stages}),
+        ]
+
+    def _record_stage(self, stage: ExecutionStage) -> None:
+        report = self.executions[-1]
+        if stage.session_id != report.session_id or stage.turn_id != report.turn_id:
+            return
+        stages = list(report.stages)
+        if stage.sequence == len(stages) and stage.outcome == "running":
+            stages.append(stage)
+        elif (
+            stage.sequence < len(stages)
+            and stages[stage.sequence].invocation_id == stage.invocation_id
+            and stages[stage.sequence].outcome == "running"
+            and stage.outcome != "running"
+        ):
+            stages[stage.sequence] = stage
+        else:
+            return
+        self.executions = [
+            *self.executions[:-1],
+            report.model_copy(update={"stages": stages}),
+        ]
+
+    async def _consume_workflow(
+        self,
+        request: _ActiveRequest,
+        admission: ChatAdmission,
+        events,
+        user_message: str,
+        artifacts: list[GraphArtifact],
+        timeout_seconds: float,
+    ) -> tuple[TurnOutcome, str]:
+        identity = {
+            "session_id": request.session_id,
+            "turn_id": admission.context.turn_id,
+        }
+        pending: dict[str, tuple[str, str]] = {}
+        finalized: set[str] = set()
+        async with _events_with_timeout(events, timeout_seconds) as stream:
+            async for event in stream:
+                async with self:
+                    if not self._owns_request(request):
+                        return "cancelled", "cancelled"
+                    if event.type in (
+                        WorkflowEventType.AGENT_START,
+                        WorkflowEventType.AGENT_END,
+                    ):
+                        agent = event.data["agent"]
+                        stage = event.data.get("stage")
+                        if stage is not None:
+                            self._record_stage(stage)
+                        if event.type == WorkflowEventType.AGENT_START:
+                            self.active_agent = agent
+                            admission.context.agents.add(agent)
+                            if agent not in self.agent_history:
+                                self.agent_history = [*self.agent_history, agent]
+                        else:
+                            self.active_agent = next(
+                                (
+                                    item.agent
+                                    for item in reversed(self.executions[-1].stages)
+                                    if item.outcome == "running"
+                                ),
+                                "",
+                            )
+                            if stage is not None:
+                                retained = set(event.data.get("response_ids", ()))
+                                if (
+                                    pending.get(self.streaming_response_id, ("", ""))[0]
+                                    == stage.invocation_id
+                                    and self.streaming_response_id not in retained
+                                ):
+                                    self._reset_stream()
+                                pending = {
+                                    key: item
+                                    for key, item in pending.items()
+                                    if item[0] != stage.invocation_id or key in retained
+                                }
 
                     elif event.type == WorkflowEventType.TOKEN:
-                        agent_name = event.data.get("agent", "")
-                        self.streaming_agent = agent_name
-                        self.streaming_content = (
-                            self.streaming_content + event.data["chunk"]
-                        )
-
-                    # Context is hidden for now
-                    # elif event.type == WorkflowEventType.CONTEXT_UPDATE:
-                    #     raw = (event.data["context"]
-                    #            .replace("[RESEARCH_COMPLETE]", "")
-                    #            .replace("Visual artifact generated", "")
-                    #            .replace("Visualization failed", "")
-                    #            .strip())
-                    #     try:
-                    #         import json as _json
-                    #         parsed = _json.loads(raw)
-                    #         self.current_context = _json.dumps(parsed, ensure_ascii=False, indent=2)
-                    #     except Exception:
-                    #         self.current_context = raw
+                        response_id = event.data["response_id"]
+                        if response_id not in finalized:
+                            _, content = pending.get(response_id, ("", ""))
+                            content += event.data["chunk"]
+                            pending[response_id] = (
+                                event.data.get("invocation_id", ""),
+                                content,
+                            )
+                            self.streaming_response_id = response_id
+                            self.streaming_agent = event.data["agent"]
+                            self.streaming_content = content
 
                     elif event.type == WorkflowEventType.VISUALIZATION:
-                        artifacts = event.data["artifacts"]
-                        cache_visual_artifacts.extend(artifacts)
-                        self._append_recent_map_items(artifacts, user_message)
-                        self.show_visualization = True
-                        graph_updated_this_run = True
+                        retained_ids = {
+                            artifact.artifact_id
+                            for artifact in [*self._visual_artifacts, *artifacts]
+                        }
+                        new_artifacts = []
+                        timestamp = datetime.now().strftime("%H:%M")
+                        for raw in event.data["artifacts"]:
+                            try:
+                                payload = GraphPayload.model_validate(raw)
+                                graph = GraphArtifact(
+                                    **payload.model_dump(),
+                                    **identity,
+                                    timestamp=timestamp,
+                                )
+                            except (TypeError, ValueError):
+                                logger.warning("Ignoring an invalid graph artifact")
+                                continue
+                            if graph.artifact_id not in retained_ids:
+                                retained_ids.add(graph.artifact_id)
+                                new_artifacts.append(graph)
+                        if not new_artifacts and not artifacts:
+                            self.error_message = (
+                                "The knowledge map could not be displayed."
+                            )
+                        artifacts.extend(new_artifacts)
+                        self._append_maps(new_artifacts)
 
                     elif event.type == WorkflowEventType.RESPONSE:
-                        agent_name = event.data.get("agent", "")
-                        content = event.data["content"]
-                        if agent_name != "system":
-                            cache_responses.append(
-                                {"content": content, "agent": agent_name}
-                            )
-                        self.streaming_content = ""
-                        self.streaming_agent = ""
-                        self.messages = [
-                            *self.messages,
-                            Message(
-                                content=_normalize_math_delimiters(content),
-                                role="assistant",
-                                agent=agent_name,
-                                timestamp=datetime.now().strftime("%H:%M"),
-                                dom_id=f"message-{uuid.uuid4().hex}",
-                            ),
-                        ]
+                        response_id = event.data.get("response_id") or str(uuid.uuid4())
+                        if response_id in finalized:
+                            continue
+                        finalized.add(response_id)
+                        pending.pop(response_id, None)
+                        if self.streaming_response_id == response_id:
+                            self._reset_stream()
+                        response = Message(
+                            **identity,
+                            response_id=response_id,
+                            invocation_id=event.data.get("invocation_id"),
+                            content=_normalize_math_delimiters(event.data["content"]),
+                            evidence=event.data.get("evidence"),
+                            role="assistant",
+                            agent=event.data.get("agent", ""),
+                            timestamp=datetime.now().strftime("%H:%M"),
+                            dom_id=f"message-{uuid.uuid4().hex}",
+                        )
+                        self.messages = [*self.messages, response]
 
                     elif event.type == WorkflowEventType.ERROR:
-                        cache_error = True
-                        turn_status = event.data.get("reason", "workflow_error")
                         self.error_message = event.data.get(
-                            "message", "Unknown error occurred"
+                            "message", ERROR_WORKFLOW_FAILED
+                        )
+                        return event.data.get("outcome", "error"), event.data.get(
+                            "reason", "workflow_error"
                         )
 
-                    elif event.type == WorkflowEventType.CONTEXT_UPDATE:
-                        cache_context = event.data.get("context", "")
-
-            if should_cache_quick_action and not cache_error:
-                async with self:
-                    cache_agent_history = list(self.agent_history)
-                ttl_seconds = (
-                    quick_action_policy.get("ttl_seconds")
-                    if quick_action_policy
-                    else None
-                )
-                try:
-                    ttl_seconds = int(ttl_seconds) if ttl_seconds is not None else None
-                except (TypeError, ValueError):
-                    ttl_seconds = None
-                responses_to_cache = (
-                    cache_responses
-                    if bool(quick_action_policy.get("cache_responses", True))
-                    else []
-                )
-                artifacts_to_cache = (
-                    cache_visual_artifacts
-                    if bool(quick_action_policy.get("cache_visual_artifacts", True))
-                    else []
-                )
-                try:
-                    await asyncio.to_thread(
-                        lambda: get_quick_action_cache().set(
-                            cache_prompt,
-                            responses_to_cache,
-                            artifacts_to_cache,
-                            cache_context,
-                            agent_history=cache_agent_history,
-                            ttl_seconds=ttl_seconds,
+                    elif event.type == WorkflowEventType.COMPLETE:
+                        outcome = event.data["outcome"]
+                        if outcome == "graph" and not artifacts:
+                            self.error_message = (
+                                "The knowledge map could not be displayed."
+                            )
+                            return "error", "workflow_error"
+                        return (
+                            outcome,
+                            "workflow_error" if outcome == "error" else "success",
                         )
-                    )
-                except Exception as e:
-                    logger.warning(f"Quick-action cache persistence failed: {e}")
-                    pass
 
-            await self._persist_current_session_snapshot(session_id)
+        await self._set_request_error(request, ERROR_WORKFLOW_FAILED)
+        return "incomplete", "workflow_incomplete"
 
-        except TimeoutError:
-            turn_status = WorkflowTimeoutExceeded.reason
-            async with self:
-                self.error_message = WorkflowTimeoutExceeded.user_message
-            await self._persist_current_session_snapshot(session_id)
-        except UserFacingChatError as exc:
-            turn_status = exc.reason
-            async with self:
-                self.error_message = exc.user_message
-            await self._persist_current_session_snapshot(session_id)
-        except Exception as exc:
-            turn_status = "workflow_error"
-            logger.error(
-                "Chat request processing failed",
-                error_type=type(exc).__name__,
+    async def _cache_completed_turn(
+        self,
+        request: _ActiveRequest,
+        turn: TurnIdentity,
+        policy: dict,
+        cache_prompt: str,
+        artifacts: list[GraphArtifact],
+    ) -> None:
+        async with self:
+            if not self._owns_request(request):
+                return
+            responses = (
+                [
+                    msg.model_copy(deep=True, update={"invocation_id": None})
+                    for msg in self.messages
+                    if msg.turn_id == turn.turn_id
+                    and msg.role == "assistant"
+                    and msg.agent != "system"
+                ]
+                if policy.get("cache_responses", True)
+                else []
             )
-            async with self:
-                self.error_message = "I encountered an error while processing your request. Please try again."
-            await self._persist_current_session_snapshot(session_id)
-        finally:
-            if admission is not None:
-                await limit_service.finish_turn(admission, turn_status)
-            async with self:
-                self.is_processing = False
-                self.active_agent = ""
-                self.streaming_content = ""
-                self.streaming_agent = ""
-                if graph_updated_this_run and self.active_view == "chat":
-                    self.show_graph_updated_notice = True
+            cache_artifacts = (
+                artifacts if policy.get("cache_visual_artifacts", True) else []
+            )
+            if not responses and not cache_artifacts:
+                return
+            cached = CachedTurn(
+                **turn.model_dump(),
+                responses=responses,
+                artifacts=cache_artifacts,
+                agent_history=list(self.agent_history),
+            )
+        try:
+            ttl = policy.get("ttl_seconds")
+            ttl_seconds = int(ttl) if ttl is not None else None
+        except (TypeError, ValueError):
+            ttl_seconds = None
+        try:
+            await self._write_for_request(
+                request,
+                lambda: get_quick_action_cache().set(
+                    cache_prompt, cached, ttl_seconds=ttl_seconds
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Quick-action cache persistence failed", error_type=type(exc).__name__
+            )
 
 
 class SidebarState(rx.State):

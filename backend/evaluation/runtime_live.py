@@ -28,6 +28,7 @@ from backend.evaluation.runtime_evaluation import (
     _merge_bounded_evidence,
     _provider_response_fields,
     _redact_mapping,
+    _tool_evaluation_output,
 )
 from backend.utils.chat_limits import (
     ChatTurnContext,
@@ -324,7 +325,7 @@ async def run_controlled_live_scenario(
                 observation.status = (
                     "success" if event_type == "on_tool_end" else "error"
                 )
-                output = data.get("output")
+                output = _tool_evaluation_output(name, data.get("output"))
                 observation.evidence_ids = sorted(_find_evidence_ids(output))
                 observation.bounded_evidence = _bounded_evidence_from_tool_output(
                     output,
@@ -722,6 +723,7 @@ def _write_live_exception(
 
 
 def _live_graph_observation(raw_output: Any, artifacts: Any) -> GraphObservation:
+    raw_output = _tool_evaluation_output("get_subgraphs_to_visualize", raw_output)
     artifact_count = len(artifacts) if isinstance(artifacts, list) else 0
     artifact_labels, artifact_edges = _graph_labels_from_artifacts(artifacts)
     if not isinstance(raw_output, (list, tuple)) or len(raw_output) < 2:

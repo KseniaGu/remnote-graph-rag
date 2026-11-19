@@ -43,9 +43,11 @@ class FakeGraph:
     async def astream_events(self, initial, config, version):
         if self.error:
             raise self.error
+        yield {"event": "on_chain_start", "name": "LangGraph", "run_id": "root"}
         yield {
             "event": "on_chain_end",
             "name": "LangGraph",
+            "run_id": "root",
             "data": {"output": self.state(initial)},
         }
 

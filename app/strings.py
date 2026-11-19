@@ -41,12 +41,19 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Chat area
 # ---------------------------------------------------------------------------
-CHAT_EMPTY_HEADING = "Start from a concept"
-CHAT_EMPTY_SUBTEXT = (
-    "Ask a question, request interview practice, or map relationships from your notes."
+CHAT_EMPTY_HEADING = "Study your AI"
+CHAT_EMPTY_HEADING_SECOND_LINE = "research notes."
+CHAT_EMPTY_SUBTEXT = "Explore your notes. Make the connections."
+CHAT_INPUT_PLACEHOLDER = "Ask about your notes"
+CHAT_FOLLOW_UP_PLACEHOLDER = "Ask a follow-up"
+STUDY_INTENTS = (
+    ("Explain", "Explain "),
+    ("Quiz me", "Quiz me on "),
+    ("Research", "Research "),
+    ("Map it", "Map the concepts around "),
 )
-CHAT_INPUT_PLACEHOLDER = "Ask your knowledge base..."
 CHAT_PROCESSING_LABEL = "Processing"
+CHAT_PROCESSING_PLACEHOLDER = "Response in progress…"
 
 # ---------------------------------------------------------------------------
 # Quick action buttons: list of (icon_name, button_label, prefilled_action)
@@ -115,9 +122,6 @@ QUICK_ACTION_CACHE_POLICIES: list[dict[str, object]] = [
 # ---------------------------------------------------------------------------
 # Visualization panel
 # ---------------------------------------------------------------------------
-VIZ_PANEL_TITLE = "Knowledge Graph"
-GRAPH_UPDATED_NOTICE = "Knowledge graph updated from this session"
-GRAPH_UPDATED_ACTION = "View graph"
 GRAPH_UNAVAILABLE_HEADING = "Knowledge graph unavailable"
 GRAPH_LOADING_HEADING = "Preparing knowledge graph"
 GRAPH_LOADING_SUBTEXT = "Searching graph data and arranging the visualization."

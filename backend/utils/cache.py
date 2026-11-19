@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
+from pydantic import ValidationError
 from pymongo import MongoClient
 
 from backend.configs.constants import (
@@ -11,6 +12,8 @@ from backend.configs.constants import (
     DEFAULT_TTL_SECONDS,
 )
 from backend.utils.helpers import logger
+from backend.utils.session_memory import make_bson_safe
+from backend.workflows.presentation import CachedTurn
 
 
 def normalize_quick_action_prompt(prompt: str) -> str:
@@ -70,7 +73,7 @@ class QuickActionAnswerCache:
             self._collection.create_index("expires_at", expireAfterSeconds=0)
         self._indexes_ready = True
 
-    def get(self, prompt: str) -> dict[str, Any] | None:
+    def get(self, prompt: str) -> CachedTurn | None:
         """Returns cached response payload for a prompt, or None on miss/error."""
         key = normalize_quick_action_prompt(prompt)
         now = datetime.now(UTC)
@@ -83,34 +86,31 @@ class QuickActionAnswerCache:
             logger.warning(f"Quick-action cache read failed: {e}")
             return None
 
-        if not doc:
+        if not doc or doc.get("schema_version") != CACHE_SCHEMA_VERSION:
             return None
 
         expires_at = doc.get("expires_at")
         if expires_at is not None:
+            if not isinstance(expires_at, datetime):
+                return None
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=UTC)
             if expires_at <= now:
                 return None
 
-        return {
-            "responses": doc.get("responses", []),
-            "visual_artifacts": doc.get("visual_artifacts", []),
-            "agent_history": doc.get("agent_history", []),
-            "context": doc.get("context", ""),
-        }
+        try:
+            return CachedTurn.model_validate(doc.get("presentation"))
+        except ValidationError:
+            return None
 
     def set(
         self,
         prompt: str,
-        responses: list[dict[str, str]],
-        visual_artifacts: list[dict[str, Any]],
-        context: str = "",
-        agent_history: list[str] | None = None,
+        turn: CachedTurn,
         ttl_seconds: int | None = None,
     ) -> bool:
         """Stores a quick-action answer. Returns False if MongoDB is unavailable."""
-        if not responses and not visual_artifacts:
+        if not turn.responses and not turn.artifacts:
             return False
 
         key = normalize_quick_action_prompt(prompt)
@@ -124,10 +124,7 @@ class QuickActionAnswerCache:
             "_id": key,
             "schema_version": CACHE_SCHEMA_VERSION,
             "prompt": prompt,
-            "responses": responses,
-            "visual_artifacts": visual_artifacts,
-            "agent_history": agent_history or [],
-            "context": context,
+            "presentation": make_bson_safe(turn.model_dump()),
             "updated_at": now,
         }
         if effective_ttl is not None:
