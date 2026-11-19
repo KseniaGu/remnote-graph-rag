@@ -5,6 +5,8 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.workflows.presentation import ResponseEvidence
+
 
 class ResearchResult(BaseModel):
     """Structured output from web research containing findings with source attribution."""
@@ -52,13 +54,14 @@ class State(BaseModel):
         default="",
         description="The grounding context retrieved from the knowledge base.",
     )
+    context_evidence: ResponseEvidence | None = None
     session_summary: str = Field(
         default="",
         description="Compact summary of older browser-session messages, injected only when useful.",
     )
     visual_artifacts: Annotated[list[dict[str, Any]], lambda _old, new: new] = Field(
         default_factory=list,
-        description="List of Plotly figures serialized as dictionaries, one per visualization request",
+        description="Versioned structured graph payloads produced during this turn",
     )
     next_step: Literal[
         "retriever", "researcher", "analyst", "mentor", "visualizer", "__end__"

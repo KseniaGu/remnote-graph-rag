@@ -25,6 +25,7 @@ from backend.configs.messages import (
     ERROR_WORKFLOW_TIMEOUT,
 )
 from backend.configs.storage import StorageSettings
+from backend.utils.async_tasks import complete_on_cancel
 from backend.utils.chat_errors import UserFacingChatError
 from backend.utils.helpers import logger
 
@@ -200,11 +201,14 @@ def is_transient_provider_error(exc: BaseException) -> bool:
     )
 
 
+CONTEXT_TRUNCATION_MARKER = "\n\n[Additional context truncated by the application.]"
+
+
 def truncate_text(text: str, max_chars: int) -> str:
     """Truncates ordered context while marking the omitted tail."""
     if len(text) <= max_chars:
         return text
-    marker = "\n\n[Additional context truncated by the application.]"
+    marker = CONTEXT_TRUNCATION_MARKER
     return text[: max(0, max_chars - len(marker))].rstrip() + marker
 
 
@@ -447,46 +451,75 @@ class ChatLimitService:
         return None
 
     async def _acquire_global_slot(
-        self, context: ChatTurnContext, wait_seconds: float
-    ) -> int:
+        self, admission: ChatAdmission, wait_seconds: float
+    ) -> None:
+        def acquire_slot():
+            admission.global_slot = self._try_acquire_global_slot(
+                admission.context, datetime.now(UTC)
+            )
+
         loop = asyncio.get_running_loop()
         deadline = loop.time() + wait_seconds
         while True:
-            slot = await asyncio.to_thread(
-                self._try_acquire_global_slot, context, datetime.now(UTC)
-            )
-            if slot is not None:
-                return slot
+            await complete_on_cancel(asyncio.to_thread(acquire_slot))
+            if admission.global_slot is not None:
+                return
             remaining = deadline - loop.time()
             if remaining <= 0:
                 raise GlobalChatBusy
             await asyncio.sleep(min(self.settings.global_queue_poll_seconds, remaining))
 
-    def _release(self, admission: ChatAdmission) -> None:
+    def _release(
+        self, admission: ChatAdmission, *, include_unconfirmed: bool = False
+    ) -> None:
         if not self.settings.shared_quotas_enabled:
             return
-        try:
-            state, _ = self._get_collections()
-            if admission.global_slot is not None:
-                state.update_one(
-                    {
-                        "_id": f"workflow_slot:{admission.global_slot}",
-                        "lease_id": admission.context.turn_id,
-                    },
-                    {"$unset": {"lease_id": "", "visitor_id": "", "lease_until": ""}},
+        updates = []
+        slot_key = None
+        if admission.global_slot is not None:
+            slot_key = f"workflow_slot:{admission.global_slot}"
+        elif include_unconfirmed and not admission.context.cache_hit:
+            slot_key = {
+                "$in": [
+                    f"workflow_slot:{slot}"
+                    for slot in range(self.settings.global_active_workflows)
+                ]
+            }
+        if slot_key is not None:
+            updates.append(
+                (
+                    slot_key,
+                    "lease_id",
+                    {"lease_id": "", "visitor_id": "", "lease_until": ""},
                 )
-            if admission.visitor_lease_acquired:
-                state.update_one(
-                    {
-                        "_id": f"visitor_state:{admission.context.visitor_id}",
-                        "active_turn_id": admission.context.turn_id,
-                    },
-                    {"$unset": {"active_turn_id": "", "active_until": ""}},
-                )
-        except (ChatLimitError, PyMongoError) as exc:
-            logger.error(
-                "Chat quota lease release failed", error_type=type(exc).__name__
             )
+        if admission.visitor_lease_acquired or include_unconfirmed:
+            updates.append(
+                (
+                    f"visitor_state:{admission.context.visitor_id}",
+                    "active_turn_id",
+                    {"active_turn_id": "", "active_until": ""},
+                )
+            )
+        for key, owner, fields in updates:
+            try:
+                state, _ = self._get_collections()
+                state.update_one(
+                    {"_id": key, owner: admission.context.turn_id}, {"$unset": fields}
+                )
+            except (ChatLimitError, PyMongoError) as exc:
+                logger.error(
+                    "Chat quota lease release failed", error_type=type(exc).__name__
+                )
+
+    def _acquire_admission_visitor(self, admission: ChatAdmission) -> None:
+        self._acquire_visitor_lease(admission.context, datetime.now(UTC))
+        admission.visitor_lease_acquired = True
+
+    async def _reserve_admission_visitor(self, admission: ChatAdmission) -> None:
+        await complete_on_cancel(
+            asyncio.to_thread(self._acquire_admission_visitor, admission)
+        )
 
     async def admit_cached_turn(
         self, visitor_id: str, session_id: str
@@ -498,8 +531,19 @@ class ChatLimitService:
         admission = ChatAdmission(context=context)
         if not self.settings.shared_quotas_enabled:
             return admission
-        await asyncio.to_thread(self._acquire_visitor_lease, context, datetime.now(UTC))
-        admission.visitor_lease_acquired = True
+        try:
+            await self._reserve_admission_visitor(admission)
+        except (Exception, asyncio.CancelledError) as exc:
+            await complete_on_cancel(
+                asyncio.to_thread(
+                    self._release,
+                    admission,
+                    include_unconfirmed=isinstance(
+                        exc, (QuotaStorageUnavailable, asyncio.CancelledError)
+                    ),
+                )
+            )
+            raise
         return admission
 
     async def admit_expensive_turn(
@@ -511,32 +555,39 @@ class ChatLimitService:
         if not self.settings.shared_quotas_enabled:
             return admission
         try:
-            await asyncio.to_thread(
-                self._acquire_visitor_lease, context, datetime.now(UTC)
-            )
-            admission.visitor_lease_acquired = True
-            admission.global_slot = await self._acquire_global_slot(
-                context,
+            await self._reserve_admission_visitor(admission)
+            await self._acquire_global_slot(
+                admission,
                 self.settings.global_queue_wait_seconds
                 if wait_seconds is None
                 else wait_seconds,
             )
             now = datetime.now(UTC)
             day, _ = self._period_keys(now)
-            count = await asyncio.to_thread(
-                self._conditional_increment,
-                f"visitor_day:{visitor_id}:{day}",
-                "visitor_day",
-                self.settings.visitor_turns_per_day,
-                now,
-                context.turn_id,
+            count = await complete_on_cancel(
+                asyncio.to_thread(
+                    self._conditional_increment,
+                    f"visitor_day:{visitor_id}:{day}",
+                    "visitor_day",
+                    self.settings.visitor_turns_per_day,
+                    now,
+                    context.turn_id,
+                )
             )
             if count is None:
                 raise VisitorDailyLimitExceeded
             admission.daily_turn_counted = True
             return admission
-        except Exception:
-            await asyncio.to_thread(self._release, admission)
+        except (Exception, asyncio.CancelledError) as exc:
+            await complete_on_cancel(
+                asyncio.to_thread(
+                    self._release,
+                    admission,
+                    include_unconfirmed=isinstance(
+                        exc, (QuotaStorageUnavailable, asyncio.CancelledError)
+                    ),
+                )
+            )
             raise
 
     def begin_llm_call(self, context: ChatTurnContext | None, role: str) -> None:
@@ -721,7 +772,8 @@ class ChatLimitService:
                 logger.error(
                     "Chat usage event write failed", error_type=type(exc).__name__
                 )
-            await asyncio.to_thread(self._release, admission)
+            finally:
+                await complete_on_cancel(asyncio.to_thread(self._release, admission))
         logger.info(
             "Chat turn completed",
             turn_id=admission.context.turn_id,

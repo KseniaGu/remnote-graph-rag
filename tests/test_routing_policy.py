@@ -1,11 +1,14 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage
+from langchain_ollama import ChatOllama
 from pydantic import ValidationError
 
+from backend.configs.enums import ModelRoleType
 from backend.utils.chat_errors import AIResponseInvalid
 from backend.workflows.agents.schemas import RoutingDecision, State
 from backend.workflows.agents.tools import KnowledgeSearchInput
@@ -23,6 +26,65 @@ def test_routing_json_envelope_is_normalized():
     result = LearnerWorkflow._normalize_routing_decision(envelope)
     assert result.request_scope == "out_of_scope"
     assert result.next_step == "__end__"
+
+
+@pytest.mark.parametrize(
+    ("content", "valid"),
+    [
+        (
+            '{"request_scope":"in_scope","next_step":"retriever","reasoning":"Technical follow-up."}',
+            True,
+        ),
+        (
+            '{"request_scope":"ambiguous","request_scope":"in_scope","next_step":"retriever","reasoning":"Duplicate."}',
+            False,
+        ),
+        (
+            '{"request_scope":"in_scope","next_step":"invalid","reasoning":"Invalid route."}',
+            False,
+        ),
+    ],
+)
+def test_ollama_routing_validates_raw_json_even_when_the_adapter_parses_it(
+    content, valid
+):
+    def respond(request):
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen3.5:4b-mlx",
+                "message": {"role": "assistant", "content": content},
+                "done": True,
+            },
+        )
+
+    model = ChatOllama(
+        model="qwen3.5:4b-mlx",
+        async_client_kwargs={"transport": httpx.MockTransport(respond)},
+    )
+    workflow = LearnerWorkflow.__new__(LearnerWorkflow)
+    workflow.orchestrator = model.with_structured_output(
+        RoutingDecision, include_raw=True
+    )
+    workflow.models_settings = SimpleNamespace(
+        orchestrator=SimpleNamespace(provider="ollama")
+    )
+    workflow.chat_limit_service = SimpleNamespace(
+        begin_llm_call=Mock(),
+        reserve_llm_attempt=AsyncMock(),
+        record_model_usage=Mock(),
+    )
+
+    async def route():
+        return await workflow.call_model(
+            [("human", "Explain ALiBi")], ModelRoleType.orchestrator
+        )
+
+    if valid:
+        assert asyncio.run(route()).next_step == "retriever"
+    else:
+        with pytest.raises(AIResponseInvalid):
+            asyncio.run(route())
 
 
 def test_unresolved_routing_raises():
@@ -72,7 +134,7 @@ def test_invalid_retrieval_policy_fails_before_tools():
     workflow.call_tools.assert_not_awaited()
 
 
-def _run_adapter_graph(message):
+def _run_adapter_graph(message, *, use_workflow_configuration=False):
     import json
     from unittest.mock import Mock, patch
 
@@ -81,6 +143,13 @@ def _run_adapter_graph(message):
     from langchain_openrouter import ChatOpenRouter
     from langgraph.graph import StateGraph
     from openrouter import OpenRouter
+
+    from backend.configs.chat_limits import ChatLimitsSettings
+    from backend.configs.models import ModelSettings
+    from backend.workflows.agents.tools import (
+        get_subgraphs_to_visualize,
+        search_knowledge_base,
+    )
 
     requests = []
 
@@ -112,18 +181,32 @@ def _run_adapter_graph(message):
     )
     model = ChatOpenRouter(model="test", api_key="dummy", client=client, max_retries=0)
     workflow = LearnerWorkflow.__new__(LearnerWorkflow)
-    workflow.orchestrator = model.with_structured_output(
-        RoutingDecision, include_raw=True
-    )
-    workflow.models_settings = SimpleNamespace(
-        orchestrator=SimpleNamespace(provider="openrouter")
-    )
     workflow.chat_limit_service = SimpleNamespace(
+        settings=ChatLimitsSettings(_env_file=None),
         begin_llm_call=Mock(),
         reserve_llm_attempt=AsyncMock(),
         record_model_usage=Mock(),
         claim_retry=Mock(return_value=False),
     )
+    if use_workflow_configuration:
+        workflow.models_settings = ModelSettings()
+        workflow.prompt_engine = Mock()
+        workflow.prompt_engine.render.return_value = ("", {})
+        workflow.search_engine = object()
+        workflow._build_kb_search_tool = search_knowledge_base
+        workflow._build_visualizer_tool = get_subgraphs_to_visualize
+        with patch(
+            "backend.workflows.learner.AgentsFactory.get_llm_by_role",
+            return_value=model,
+        ):
+            workflow._init_agents()
+    else:
+        workflow.orchestrator = model.with_structured_output(
+            RoutingDecision, include_raw=True
+        )
+        workflow.models_settings = SimpleNamespace(
+            orchestrator=SimpleNamespace(provider="openrouter")
+        )
     workflow.create_messages_to_pass = Mock(return_value=[("human", "cats")])
     workflow.call_tools = AsyncMock()
     workflow.workflow = StateGraph(State)
@@ -140,6 +223,18 @@ def _run_adapter_graph(message):
             result = "invalid"
     workflow.call_tools.assert_not_awaited()
     assert len(requests) == 1
+    if use_workflow_configuration:
+        body = requests[0]
+        assert body.get("response_format", {}).get("type") == "json_schema"
+        schema = body["response_format"]["json_schema"]
+        assert schema["strict"] is True
+        assert set(schema["schema"]["required"]) == {
+            "request_scope",
+            "next_step",
+            "reasoning",
+        }
+        assert body["provider"]["require_parameters"] is True
+        assert not body.get("tools")
     assert workflow.chat_limit_service.record_model_usage.call_count == 1
     assert (
         workflow.chat_limit_service.record_model_usage.call_args.args[1].usage_metadata[
@@ -148,6 +243,39 @@ def _run_adapter_graph(message):
         == 16
     )
     return result
+
+
+@pytest.mark.parametrize(
+    ("content", "valid"),
+    [
+        (
+            '{"request_scope":"out_of_scope","next_step":"__end__","reasoning":"unrelated"}',
+            True,
+        ),
+        (
+            '{"request_scope":"in_scope","request_scope":"out_of_scope","next_step":"__end__","reasoning":"duplicate"}',
+            False,
+        ),
+        (
+            '{"request_scope":"out_of_scope","next_step":"__end__","reasoning":"extra","extra":1}',
+            False,
+        ),
+        ("I cannot supply a routing decision.", False),
+    ],
+)
+def test_openrouter_workflow_requests_and_validates_a_strict_routing_schema(
+    content, valid
+):
+    result = _run_adapter_graph(
+        {"role": "assistant", "content": content}, use_workflow_configuration=True
+    )
+    if valid:
+        assert (
+            result["request_scope"] == "out_of_scope"
+            and result["next_step"] == "__end__"
+        )
+    else:
+        assert result == "invalid"
 
 
 @pytest.mark.parametrize(
@@ -361,7 +489,7 @@ def test_development_topic_cases_both_retrieval_paths(
     from backend.workflows.agents.tools import search_knowledge_base
 
     class Pipeline:
-        def search(self, queries):
+        def search(self, queries, *, spans=None):
             return f"RETRIEVER RESULTS:\n\nQUERY: {queries[0]}\n[SOURCE] (Score: 0.90) {evidence}"
 
     tool = (

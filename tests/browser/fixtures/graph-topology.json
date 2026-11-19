@@ -1,0 +1,92 @@
+{
+  "kvGraph": {
+    "nodes": [
+      {"id":"sdpa","label":"Scaled dot-product attention","family":"technique"},
+      {"id":"flash","label":"FlashAttention","family":"technique"},
+      {"id":"mha","label":"Multi-head attention","family":"technique"},
+      {"id":"mqa","label":"Multi-query attention","family":"technique"},
+      {"id":"gqa","label":"Grouped-query attention","family":"technique"},
+      {"id":"gqa_paper","label":"GQA (Ainslie et al., 2023)","family":"artifact"},
+      {"id":"llama2","label":"Llama 2 70B","family":"technique"},
+      {"id":"ar","label":"Autoregressive decoding","family":"idea"},
+      {"id":"prefill","label":"Prefill phase","family":"idea"},
+      {"id":"decode","label":"Decode phase","family":"idea"},
+      {"id":"kv","label":"KV cache","family":"technique"},
+      {"id":"seqlen","label":"Sequence length","family":"technique"},
+      {"id":"tpot","label":"Time per output token","family":"measure"},
+      {"id":"membw","label":"Memory bandwidth","family":"idea"},
+      {"id":"kvquant","label":"KV cache quantization","family":"technique"},
+      {"id":"batch","label":"Continuous batching","family":"technique"},
+      {"id":"paged","label":"PagedAttention","family":"technique"},
+      {"id":"vllm","label":"vLLM","family":"artifact"}
+    ],
+    "edges": [
+      {"source":"kv","label":"stores keys and values for","target":"ar"},
+      {"source":"ar","label":"has phase","target":"prefill"},
+      {"source":"ar","label":"has phase","target":"decode"},
+      {"source":"prefill","label":"populates","target":"kv"},
+      {"source":"decode","label":"reads","target":"kv"},
+      {"source":"kv","label":"grows linearly with","target":"seqlen"},
+      {"source":"decode","label":"is bound by","target":"membw"},
+      {"source":"decode","label":"is measured by","target":"tpot"},
+      {"source":"mha","label":"computes","target":"sdpa"},
+      {"source":"mqa","label":"is a variant of","target":"mha"},
+      {"source":"gqa","label":"is a variant of","target":"mha"},
+      {"source":"gqa","label":"interpolates toward","target":"mqa"},
+      {"source":"gqa","label":"shrinks","target":"kv"},
+      {"source":"mqa","label":"shrinks","target":"kv"},
+      {"source":"gqa_paper","label":"introduces","target":"gqa"},
+      {"source":"llama2","label":"uses","target":"gqa"},
+      {"source":"paged","label":"allocates in blocks","target":"kv"},
+      {"source":"vllm","label":"implements","target":"paged"},
+      {"source":"vllm","label":"uses","target":"batch"},
+      {"source":"batch","label":"amortizes","target":"membw"},
+      {"source":"kvquant","label":"compresses","target":"kv"},
+      {"source":"kvquant","label":"relieves","target":"membw"},
+      {"source":"flash","label":"reduces memory traffic of","target":"sdpa"}
+    ]
+  },
+  "overviewGraph": {
+    "nodes": [
+      {"id":"transformer","label":"Transformer","family":"technique"},
+      {"id":"selfattn","label":"Self-attention","family":"technique"},
+      {"id":"mha","label":"Multi-head attention","family":"technique"},
+      {"id":"posenc","label":"Positional encoding","family":"idea"},
+      {"id":"rope","label":"RoPE","family":"technique"},
+      {"id":"ffn","label":"Feed-forward network","family":"technique"},
+      {"id":"layernorm","label":"Layer normalization","family":"technique"},
+      {"id":"residual","label":"Residual connection","family":"technique"},
+      {"id":"aiayn","label":"Attention Is All You Need","family":"artifact"},
+      {"id":"encdec","label":"Encoder-decoder","family":"idea"},
+      {"id":"deconly","label":"Decoder-only","family":"idea"},
+      {"id":"bert","label":"BERT","family":"technique"},
+      {"id":"gpt2","label":"GPT-2","family":"technique"},
+      {"id":"mlm","label":"Masked language modeling","family":"idea"},
+      {"id":"ntp","label":"Next-token prediction","family":"idea"},
+      {"id":"ppl","label":"Perplexity","family":"measure"}
+    ],
+    "edges": [
+      {"source":"transformer","label":"is built from","target":"selfattn"},
+      {"source":"selfattn","label":"is extended by","target":"mha"},
+      {"source":"transformer","label":"adds","target":"posenc"},
+      {"source":"rope","label":"is a form of","target":"posenc"},
+      {"source":"transformer","label":"is built from","target":"ffn"},
+      {"source":"transformer","label":"uses","target":"layernorm"},
+      {"source":"transformer","label":"uses","target":"residual"},
+      {"source":"aiayn","label":"introduces","target":"transformer"},
+      {"source":"transformer","label":"has variant","target":"encdec"},
+      {"source":"transformer","label":"has variant","target":"deconly"},
+      {"source":"bert","label":"is trained with","target":"mlm"},
+      {"source":"bert","label":"is an encoder from","target":"encdec"},
+      {"source":"gpt2","label":"is a","target":"deconly"},
+      {"source":"gpt2","label":"is trained with","target":"ntp"},
+      {"source":"ntp","label":"is evaluated by","target":"ppl"}
+    ]
+  },
+  "sources": [
+    {"title":"KV cache","path":"AI Research / Efficient inference"},
+    {"title":"Multi-query and grouped-query attention","path":"AI Research / Transformers / Attention"},
+    {"title":"GQA (Ainslie et al., 2023)","path":"AI Research / Papers"},
+    {"title":"Memory-bound decoding","path":"AI Research / Efficient inference / Serving"}
+  ]
+}

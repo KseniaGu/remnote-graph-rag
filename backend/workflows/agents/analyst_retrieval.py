@@ -20,14 +20,17 @@ from backend.workflows.agents.retrieval_access import (
     RetrievalStoreAccess,
 )
 from backend.workflows.agents.retrieval_evidence import (
+    EvidenceSpan,
     NormalizedMetadata,
     normalize_metadata,
+    note_source,
 )
 
 logger = get_logger(WORKFLOW_LOGGING)
 
 
 DENIED_ANALYST_RELATIONS = {"MENTIONS", "PARENT", "CHILD"}
+TRUNCATED_LINE_SUFFIX = " ...[truncated]"
 
 
 @dataclass
@@ -63,6 +66,7 @@ class RelationCandidate:
     retrieval_usefulness: float | None = None
     evidence_chunk_ids: list[str] = field(default_factory=list)
     evidence_spans: list[str] = field(default_factory=list)
+    concept_ids: tuple[str, ...] = ()
 
 
 class SentenceTransformerReranker:
@@ -247,8 +251,11 @@ class AnalystRetrievalPipeline:
     def health_report(self):
         return self.access.health_report
 
-    def search(self, queries: list[str]) -> str:
+    def search(
+        self, queries: list[str], *, spans: list[EvidenceSpan] | None = None
+    ) -> str:
         formatted_blocks: list[str] = []
+        block_start = len("RETRIEVER RESULTS:\n\n")
         remaining_chars = max(
             0, self.settings.analyst_context_max_chars - len("RETRIEVER RESULTS:\n\n")
         )
@@ -267,6 +274,7 @@ class AnalystRetrievalPipeline:
                     )
             remaining_results = max(1, len(results) - idx)
             block_budget = max(0, remaining_chars // remaining_results)
+            block_spans: list[EvidenceSpan] | None = [] if spans is not None else None
             block = self._format_query_result(
                 result["query"],
                 result["sources"],
@@ -275,9 +283,16 @@ class AnalystRetrievalPipeline:
                 relation_sources=result.get("relation_sources"),
                 source_id_by_chunk=source_id_by_chunk,
                 emitted_source_ids=emitted_source_ids,
+                spans=block_spans,
             )
             if block:
+                if spans is not None and block_spans:
+                    for span in block_spans:
+                        span.start += block_start
+                        span.end += block_start
+                    spans.extend(block_spans)
                 formatted_blocks.append(block)
+                block_start += len(block) + 2
                 emitted_source_ids.update(
                     source.node_id for source in result["sources"]
                 )
@@ -718,6 +733,11 @@ class AnalystRetrievalPipeline:
             retrieval_usefulness=retrieval_usefulness,
             evidence_chunk_ids=grounded_evidence_chunk_ids or evidence_chunk_ids,
             evidence_spans=evidence_spans,
+            concept_ids=tuple(
+                node_id
+                for node in (subject_node, object_node)
+                if (node_id := self._node_id(node))
+            ),
         )
 
     def _rerank_relations(
@@ -1069,6 +1089,7 @@ class AnalystRetrievalPipeline:
         relation_sources: list[SourceCandidate] | None = None,
         source_id_by_chunk: dict[str, str] | None = None,
         emitted_source_ids: set[str] | None = None,
+        spans: list[EvidenceSpan] | None = None,
     ) -> str:
         if char_budget <= 0 or (not sources and not relations):
             return ""
@@ -1082,6 +1103,7 @@ class AnalystRetrievalPipeline:
             source.node_id: source for source in (relation_sources or sources)
         }
         lines = [f"QUERY: {query}"]
+        line_start = len(lines[0]) + 1
 
         for source in sources:
             if source.node_id in emitted_source_ids:
@@ -1092,13 +1114,32 @@ class AnalystRetrievalPipeline:
             source_label = (
                 f"; Source: {source.metadata.source}" if source.metadata.source else ""
             )
-            lines.append(
-                f"[SOURCE] [{source_id}] (Score: {source.score:.2f}; Chunk: {source.node_id}{source_label}) "
-                f"{self._clean(source_text)}"
-            )
+            prefix = f"[SOURCE] [{source_id}] (Score: {source.score:.2f}; Chunk: {source.node_id}{source_label}) "
+            line = prefix + self._clean(source_text)
+            lines.append(line)
+            if spans is not None:
+                spans.append(
+                    EvidenceSpan(
+                        line_start + len(prefix),
+                        line_start + len(line),
+                        source=note_source(
+                            source.metadata,
+                            source.node_id,
+                            retrieval_score=source.score,
+                        ),
+                        concept_ids=tuple(
+                            node_id
+                            for node in source.mentioned_concepts
+                            if (node_id := self._node_id(node))
+                        ),
+                    )
+                )
+            line_start += len(line) + 1
             path = self._display_metadata_path(source.metadata)
             if path:
-                lines.append(f"[SOURCE PATH] [{source_id}] {self._clean(path)}")
+                line = f"[SOURCE PATH] [{source_id}] {self._clean(path)}"
+                lines.append(line)
+                line_start += len(line) + 1
 
         for idx, relation in enumerate(relations, start=1):
             evidence_ids = [
@@ -1128,12 +1169,31 @@ class AnalystRetrievalPipeline:
                 if relation.confidence is not None
                 else ""
             )
-            lines.append(
+            line = (
                 f"[RELATION] [R{idx}] {self._clean(relation.subject)} -> {relation.predicate} -> "
                 f"{self._clean(relation.object)} (Score: {relation.score:.2f}; {evidence_display}{confidence_display})"
             )
+            lines.append(line)
+            if spans is not None:
+                spans.append(
+                    EvidenceSpan(
+                        line_start,
+                        line_start + len(line),
+                        related_sources=tuple(
+                            note_source(
+                                candidate.metadata
+                                if (candidate := relation_source_by_chunk.get(chunk_id))
+                                else None,
+                                chunk_id,
+                            )
+                            for chunk_id in relation.evidence_chunk_ids
+                        ),
+                        concept_ids=relation.concept_ids,
+                    )
+                )
+            line_start += len(line) + 1
 
-        return self._fit_lines(lines, char_budget)
+        return self._fit_lines(lines, char_budget, spans=spans)
 
     def _format_source_payload(self, source: SourceCandidate, display_text: str) -> str:
         truncated = len(display_text) > MAX_SOURCE_CHARS
@@ -1511,7 +1571,13 @@ class AnalystRetrievalPipeline:
             deduped.append(relation)
         return deduped
 
-    def _fit_lines(self, lines: list[str], char_budget: int) -> str:
+    def _fit_lines(
+        self,
+        lines: list[str],
+        char_budget: int,
+        *,
+        spans: list[EvidenceSpan] | None = None,
+    ) -> str:
         fitted: list[str] = []
         used = 0
         for line in lines:
@@ -1519,13 +1585,24 @@ class AnalystRetrievalPipeline:
             if used + line_len > char_budget:
                 remaining = char_budget - used - (1 if fitted else 0)
                 if line.startswith("[SOURCE]") and remaining > 120:
-                    fitted.append(self._truncate_to_length(line, remaining))
-                    used = char_budget
+                    clipped = self._truncate_to_length(line, remaining)
+                    used += (1 if fitted else 0) + len(
+                        clipped.removesuffix(TRUNCATED_LINE_SUFFIX)
+                    )
+                    fitted.append(clipped)
                 break
             fitted.append(line)
             used += line_len
         if len(fitted) <= 1:
             return ""
+        if spans is not None:
+            spans[:] = [
+                span
+                for span in spans
+                if span.start < used and (span.source is not None or span.end <= used)
+            ]
+            for span in spans:
+                span.end = min(span.end, used)
         return "\n".join(fitted)
 
     def _rerank_text(self, candidate: SourceCandidate, query: str = "") -> str:
@@ -1810,7 +1887,7 @@ class AnalystRetrievalPipeline:
     def _truncate_to_length(text: str, limit: int) -> str:
         if len(text) <= limit:
             return text
-        suffix = " ...[truncated]"
+        suffix = TRUNCATED_LINE_SUFFIX
         if limit <= len(suffix):
             return text[:limit]
         return text[: limit - len(suffix)].rstrip() + suffix

@@ -249,11 +249,6 @@ body {
     line-height: 1.55;
 }
 
-*:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-}
-
 ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -477,13 +472,6 @@ body {
     }
 }
 
-.graph-view {
-    display: flex;
-    min-height: 0;
-    overflow: hidden;
-    padding: 1.25rem var(--workspace-gutter) 1.5rem;
-}
-
 .composer-inner {
     width: 100%;
 }
@@ -520,140 +508,6 @@ body {
     border-color: transparent !important;
     box-shadow: none !important;
     outline: none !important;
-}
-
-.graph-updated-notice {
-    color: var(--color-text-secondary);
-    display: flex;
-    justify-content: flex-start;
-}
-
-.chat-status-rail {
-    background: transparent;
-    padding: 0 var(--workspace-gutter) 0.9rem;
-}
-
-.bottom-status-stack {
-    align-items: flex-start;
-}
-
-.composer-status-line {
-    align-items: center;
-    background: transparent;
-    color: var(--color-text-secondary);
-    min-height: 1.35rem;
-    overflow: visible;
-    width: 100%;
-}
-
-.composer-status-divider {
-    display: none;
-}
-
-.status-card {
-    background: transparent;
-    max-width: 100%;
-    width: 100%;
-}
-
-.agent-activity-list {
-    align-items: center;
-    border-left: 1px solid rgba(167, 186, 196, 0.24);
-    justify-content: flex-end;
-    margin-left: auto;
-    min-width: 0;
-    padding-left: 0.95rem;
-    row-gap: 0.35rem;
-}
-
-.processing-status-group {
-    flex-shrink: 0;
-}
-
-.workflow-status-detail {
-    min-width: 0;
-}
-
-.agent-activity-row {
-    min-height: 1.25rem;
-}
-
-.agent-activity-row span {
-    white-space: nowrap;
-}
-
-.graph-updated-action {
-    background: transparent;
-    border: 0;
-    color: var(--color-accent-soft);
-    cursor: pointer;
-    font-size: 0.8rem;
-    font-weight: 700;
-    padding: 0;
-    white-space: nowrap;
-    transition: var(--control-transition);
-}
-
-.graph-updated-action:hover {
-    color: var(--color-text-primary);
-}
-
-.graph-workspace-panel {
-    background: linear-gradient(180deg, rgba(11, 26, 32, 0.98), rgba(7, 22, 27, 0.98));
-    border: var(--border-default);
-    border-radius: var(--radius-surface);
-    box-shadow: inset 0 1px 0 rgba(243, 251, 255, 0.04), 0 24px 70px rgba(0, 0, 0, 0.24);
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    width: 100%;
-}
-
-.graph-toolbar {
-    background: rgba(11, 26, 32, 0.92);
-    border-bottom: var(--border-default);
-    flex: 0 0 auto;
-    min-height: 56px;
-    padding: var(--surface-header-padding);
-}
-
-.graph-toolbar button {
-    border-radius: var(--radius-control);
-    color: var(--color-text-secondary);
-    transition: var(--control-transition);
-}
-
-.graph-toolbar button:hover {
-    background: var(--color-surface-hover);
-    color: var(--color-text-primary);
-}
-
-.graph-canvas {
-    background:
-        radial-gradient(circle at 50% 46%, rgba(25, 215, 202, 0.09), transparent 28rem),
-        linear-gradient(180deg, #08171c 0%, #061216 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-}
-
-.graph-plot,
-.graph-plot > div,
-.graph-plot .js-plotly-plot,
-.graph-plot .plot-container,
-.graph-plot .svg-container {
-    height: 100% !important;
-    width: 100% !important;
-}
-
-.graph-plot {
-    align-self: stretch;
-    flex: 1;
 }
 
 .workspace-tab {
@@ -709,13 +563,6 @@ body {
     font-weight: 700;
     letter-spacing: 0;
     text-transform: uppercase;
-}
-
-.sidebar-history-list {
-    border: var(--border-default);
-    border-radius: var(--radius-surface);
-    overflow: hidden;
-    width: 100%;
 }
 
 .sidebar-history-item {
@@ -932,10 +779,6 @@ body {
         min-height: 100dvh;
     }
 
-    .graph-view {
-        padding: var(--workspace-gutter);
-    }
-
     .empty-session-composer {
         justify-content: flex-start;
         padding-top: 3.25rem;
@@ -968,24 +811,5 @@ body {
         min-height: 62px;
     }
 
-    .composer-status-line {
-        align-items: flex-start !important;
-        flex-direction: column !important;
-    }
-
-    .agent-activity-list {
-        border-left: 0;
-        justify-content: flex-start;
-        margin-left: 0;
-        padding-left: 0;
-    }
-
-    .processing-status-group {
-        flex-wrap: wrap;
-    }
-
-    .composer-status-divider {
-        display: none;
-    }
 }
 """

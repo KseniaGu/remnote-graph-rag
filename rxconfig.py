@@ -4,6 +4,7 @@ from reflex.plugins.sitemap import SitemapPlugin
 config = rx.Config(
     app_name="app",
     assets_folder="app/assets",
+    show_built_with_reflex=False,
     plugins=[SitemapPlugin()],
     title="AI Practice | Graph RAG",
     description="Practice AI with your personal knowledge graph",

@@ -1,95 +1,51 @@
 import reflex as rx
 from starlette.responses import JSONResponse
 
-from app.components import main_content, sidebar
+from app.components import main_content
+from app.practice_components import PracticeShell
 from app.state import AppState
 from app.strings import APP_PAGE_TITLE
-from app.styles import COLORS, GLOBAL_STYLES
+from app.styles import GLOBAL_STYLES
+from app.ui.knowledge_graph import GRAPH_STYLESHEET
 from backend.configs.constants import FAVICON_URL
 
 
 def index() -> rx.Component:
     """The main page of the application."""
-    return rx.box(
+    return PracticeShell.create(
         rx.html(f"<style>{GLOBAL_STYLES}</style>"),
-        rx.script("""
-(function() {
-    function renderMermaid() {
-        if (typeof mermaid === 'undefined') return;
-        document.querySelectorAll('pre code.language-mermaid:not([data-mermaid-done])').forEach(function(block) {
-            block.setAttribute('data-mermaid-done', '1');
-            var source = block.textContent || block.innerText;
-            var wrapper = document.createElement('div');
-            wrapper.className = 'mermaid-wrapper';
-            var div = document.createElement('div');
-            div.className = 'mermaid';
-            div.textContent = source;
-            wrapper.appendChild(div);
-            var pre = block.closest('pre');
-            if (pre) pre.replaceWith(wrapper);
-            mermaid.run({ nodes: [div] });
-        });
-    }
-
-    function initMermaid() {
-        if (typeof mermaid === 'undefined') { setTimeout(initMermaid, 200); return; }
-        mermaid.initialize({
-            startOnLoad: false,
-            theme: 'dark',
-            themeVariables: {
-                darkMode: true,
-                background: '#061216',
-                mainBkg: '#10242b',
-                primaryColor: '#10242b',
-                primaryTextColor: '#f3fbff',
-                primaryBorderColor: '#24434d',
-                lineColor: '#7f99a4',
-                secondaryColor: '#0d1d23',
-                tertiaryColor: '#061216',
-                edgeLabelBackground: '#10242b',
-                fontSize: '14px'
-            },
-            securityLevel: 'loose'
-        });
-        renderMermaid();
-        new MutationObserver(function(mutations) {
-            if (mutations.some(function(m) { return m.addedNodes.length > 0; })) {
-                setTimeout(renderMermaid, 150);
-            }
-        }).observe(document.body, { childList: true, subtree: true });
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initMermaid);
-    } else {
-        initMermaid();
-    }
-})();
-"""),
-        sidebar(),
         main_content(),
-        style={
-            "min_height": "100vh",
-            "background": COLORS["bg_dark"],
-        },
+        screen=rx.cond(
+            AppState.active_view == "graph",
+            "graph",
+            rx.cond(AppState.has_messages, "study", "welcome"),
+        ),
+        scroll_nonce=AppState.scroll_request_nonce,
+        scroll_target=AppState.scroll_target_message_dom_id,
+        graph_draft=AppState.graph_draft,
+        graph_draft_nonce=AppState.graph_draft_nonce,
+        graph_source_nonce=AppState.graph_source_nonce,
     )
 
 
 # Create the app
 app = rx.App(
     theme=rx.theme(
-        appearance="dark",
-        has_background=True,
+        has_background=False,
         radius="medium",
-        accent_color="sky",
+        accent_color="indigo",
     ),
-    stylesheets=[
-        "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
-        "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap",
-        "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
-    ],
+    stylesheets=["/practice.css", GRAPH_STYLESHEET],
     head_components=[
-        rx.el.script(src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"),
+        rx.el.meta(
+            name="viewport",
+            content="width=device-width, initial-scale=1, viewport-fit=cover",
+        ),
+        rx.el.script(
+            data_practice_mermaid="true",
+            src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js",
+            defer=True,
+        ),
         rx.el.link(rel="icon", href=FAVICON_URL),
     ],
 )

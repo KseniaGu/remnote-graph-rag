@@ -149,6 +149,89 @@ def make_indexer(vector_store, graph_store, docs=None, settings=None):
     )
 
 
+def test_structured_graph_retains_directed_parallel_edges_and_provenance(monkeypatch):
+    root = FakeGraphNode("concept_root", "Root", source_chunk_ids=["chunk_root"])
+    other = FakeGraphNode("concept_other", "Other", node_label="NEW_TYPE")
+    other.properties["description"] = {"bad": "descriptor"}
+    other.properties["source_chunk_ids"] = [{"bad": "source"}]
+    pipeline = VisualizerRetrievalPipeline(
+        make_indexer(FakeVectorStore(), FakeGraphStore([root, other]))
+    )
+    concepts = [
+        pipeline._concept_candidate_from_node(node, "Root") for node in (root, other)
+    ]
+    monkeypatch.setattr(pipeline, "_resolve_anchors", lambda _: concepts)
+    monkeypatch.setattr(pipeline, "_retrieve_supporting_source_chunk_ids", lambda _: [])
+    monkeypatch.setattr(
+        pipeline,
+        "_semantic_edges_for_query",
+        lambda *args: [
+            EdgeCandidate(root.id, "USES", other.id, 0.9, ["chunk_edge"]),
+            EdgeCandidate(root.id, "EXTENDS", other.id, 0.8),
+        ],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_synthetic_edges_for_query",
+        lambda *args, **kwargs: [
+            EdgeCandidate(other.id, "RELATED_TO", root.id, 0.5, synthetic=True)
+        ],
+    )
+
+    graph = pipeline.structured_graph(["Root"]).graph
+    assert graph is not None
+    assert [node.id for node in graph.nodes] == pipeline.visualize(["Root"])[0]
+    assert {(edge.source, edge.predicate, edge.target) for edge in graph.edges} == {
+        (root.id, "USES", other.id),
+        (root.id, "EXTENDS", other.id),
+        (other.id, "RELATED_TO", root.id),
+    }
+    assert graph.edges[0].evidence_source_ids == ["note:chunk_edge"]
+    assert graph.edges[-1].synthetic
+    assert graph.nodes[0].source_ids == ["note:chunk_root"]
+    assert graph.nodes[1].type == "NEW_TYPE"
+    assert graph.nodes[1].description is None
+    assert graph.nodes[1].source_ids == []
+    assert [edge.id for edge in graph.edges] == [
+        edge.id for edge in pipeline.structured_graph(["Root"]).graph.edges
+    ]
+
+
+def test_structured_graph_retains_stored_mentions_without_node_source_metadata(
+    monkeypatch,
+):
+    root = FakeGraphNode("concept_root", "Root")
+    child = FakeGraphNode("concept_child", "Child")
+    chunk = FakeGraphNode("chunk_root", "Root source", node_label="text_chunk")
+    pipeline = VisualizerRetrievalPipeline(
+        make_indexer(
+            FakeVectorStore(),
+            FakeGraphStore(
+                [root, child, chunk], [(chunk, FakeRelation("MENTIONS"), child)]
+            ),
+            settings=KnowledgeGraphSearchSettings(
+                visualizer_include_isolated_nodes=True
+            ),
+        )
+    )
+    anchor = pipeline._concept_candidate_from_node(root, "Root")
+    anchor.is_anchor = True
+    monkeypatch.setattr(pipeline, "_resolve_anchors", lambda _: [anchor])
+    monkeypatch.setattr(
+        pipeline, "_retrieve_supporting_source_chunk_ids", lambda _: [chunk.id]
+    )
+    monkeypatch.setattr(
+        pipeline, "_filter_source_chunks_for_anchors", lambda ids, _: ids
+    )
+
+    graph = pipeline.structured_graph(["Root"]).graph
+    assert graph is not None
+    assert {node.id: node.source_ids for node in graph.nodes} == {
+        root.id: [],
+        child.id: ["note:chunk_root"],
+    }
+
+
 class KnownFocusExclusionFailure(AssertionError):
     """Identifies the known failure to exclude incidental graph nodes."""
 

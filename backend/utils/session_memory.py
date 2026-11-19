@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
+from pydantic import ValidationError
 from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError
 
 from backend.configs.constants import (
     DEFAULT_MAX_MESSAGE_CHARS,
@@ -15,6 +17,7 @@ from backend.configs.constants import (
 )
 from backend.configs.storage import StorageSettings
 from backend.utils.helpers import logger
+from backend.workflows.presentation import Message, SessionSnapshot
 
 
 def normalize_session_id(session_id: str) -> str:
@@ -40,23 +43,21 @@ def compress_text(text: str, max_chars: int = DEFAULT_MAX_MESSAGE_CHARS) -> str:
 
 
 def format_messages_for_memory(
-    messages: list[dict[str, str]],
+    messages: list[Message],
     max_message_chars: int = DEFAULT_MAX_MESSAGE_CHARS,
 ) -> str:
     """Formats persisted messages into a compact prompt block."""
     chunks = []
     for message in messages:
-        role = message.get("role", "unknown")
-        agent = message.get("agent", "")
-        label = f"{role}:{agent}" if agent else role
-        content = compress_text(message.get("content", ""), max_message_chars)
+        label = f"{message.role}:{message.agent}" if message.agent else message.role
+        content = compress_text(message.content, max_message_chars)
         if content:
             chunks.append(f"- {label}: {content}")
     return "\n".join(chunks)
 
 
 def build_extractive_summary(
-    messages: list[dict[str, str]],
+    messages: list[Message],
     max_chars: int = DEFAULT_SUMMARY_MAX_CHARS,
 ) -> str:
     """Builds a cheap, deterministic summary from older turns.
@@ -153,8 +154,9 @@ class SessionMemoryStore:
         self._collection.create_index("expires_at", expireAfterSeconds=0)
         self._indexes_ready = True
 
-    def get(self, session_id: str) -> dict[str, Any] | None:
-        """Returns a persisted session memory document, or None on miss/error."""
+    def _read(
+        self, session_id: str, *, require_available: bool = False
+    ) -> tuple[SessionSnapshot, str] | None:
         safe_session_id = normalize_session_id(session_id)
         if not safe_session_id:
             return None
@@ -167,82 +169,90 @@ class SessionMemoryStore:
                 }
             )
         except Exception as e:
+            if require_available:
+                raise
             logger.warning(f"Session memory read failed: {e}")
             return None
-        if not doc:
+        if not doc or doc.get("schema_version") != SESSION_MEMORY_SCHEMA_VERSION:
             return None
 
         expires_at = doc.get("expires_at")
-        if expires_at is not None:
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=UTC)
-            if expires_at <= datetime.now(UTC):
-                return None
-        return doc
+        if not isinstance(expires_at, datetime):
+            return None
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        summary = doc.get("summary")
+        if expires_at <= datetime.now(UTC) or not isinstance(summary, str):
+            return None
+        try:
+            snapshot = SessionSnapshot.model_validate(doc.get("presentation"))
+        except ValidationError:
+            return None
+        if snapshot.session_id != safe_session_id:
+            return None
+        return snapshot, summary
+
+    def get(
+        self, session_id: str, *, require_available: bool = False
+    ) -> SessionSnapshot | None:
+        """Returns a validated session snapshot on a current, unexpired hit."""
+        result = self._read(session_id, require_available=require_available)
+        return result[0] if result else None
 
     def get_prompt_summary(self, session_id: str, latest_user_message: str) -> str:
         """Returns older-session memory only when the current turn likely needs it."""
         if not is_context_dependent_turn(latest_user_message):
             return ""
 
-        doc = self.get(session_id)
-        if not doc:
-            return ""
-        return doc.get("summary", "")
+        result = self._read(session_id)
+        return result[1] if result else ""
 
-    def replace_messages(
+    def replace_snapshot(
         self,
-        session_id: str,
-        messages: list[dict[str, str]],
+        snapshot: SessionSnapshot,
         recent_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
-        session_history: list[dict[str, Any]] | None = None,
-        recent_maps: list[dict[str, Any]] | None = None,
-        visual_artifacts: list[dict[str, Any]] | None = None,
     ) -> bool:
-        """Persists browser-session messages, summary, and optional UI restore metadata."""
-        safe_session_id = normalize_session_id(session_id)
-        if not safe_session_id:
-            return False
-
+        """Persists a complete snapshot with a content-only extractive summary."""
+        session_id = snapshot.session_id
         now = datetime.now(UTC)
-        safe_messages = make_bson_safe(messages)
-        older_messages = (
-            safe_messages[:-recent_limit] if len(safe_messages) > recent_limit else []
-        )
-        summary = build_extractive_summary(older_messages)
         doc = {
-            "_id": safe_session_id,
+            "_id": session_id,
             "schema_version": SESSION_MEMORY_SCHEMA_VERSION,
-            "messages": safe_messages,
-            "summary": summary,
-            "message_count": len(safe_messages),
+            "presentation": make_bson_safe(snapshot.model_dump()),
+            "summary": build_extractive_summary(snapshot.messages[:-recent_limit]),
+            "message_count": len(snapshot.messages),
             "updated_at": now,
             "expires_at": now + timedelta(seconds=DEFAULT_SESSION_MEMORY_TTL_SECONDS),
         }
-        if session_history is not None:
-            doc["session_history"] = make_bson_safe(session_history)
-        if recent_maps is not None:
-            doc["recent_maps"] = make_bson_safe(recent_maps)
-        if visual_artifacts is not None:
-            doc["visual_artifacts"] = make_bson_safe(visual_artifacts)
-
         try:
             self._get_collection().replace_one(
-                {"_id": safe_session_id}, doc, upsert=True
+                {"_id": session_id, "cleared": {"$ne": True}}, doc, upsert=True
             )
+        except DuplicateKeyError:
+            # A concurrent Clear owns this retired session ID.
+            return False
         except Exception as e:
             logger.warning(f"Session memory write failed: {e}")
             return False
         return True
 
     def delete(self, session_id: str) -> bool:
-        """Deletes a persisted browser-session memory document."""
+        """Removes conversation data and rejects outstanding writes to its ID."""
         safe_session_id = normalize_session_id(session_id)
         if not safe_session_id:
             return False
 
         try:
-            self._get_collection().delete_one({"_id": safe_session_id})
+            self._get_collection().replace_one(
+                {"_id": safe_session_id},
+                {
+                    "_id": safe_session_id,
+                    "cleared": True,
+                    "expires_at": datetime.now(UTC)
+                    + timedelta(seconds=DEFAULT_SESSION_MEMORY_TTL_SECONDS),
+                },
+                upsert=True,
+            )
         except Exception as e:
             logger.warning(f"Session memory delete failed: {e}")
             return False
