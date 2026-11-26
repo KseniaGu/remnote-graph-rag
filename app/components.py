@@ -244,7 +244,9 @@ def starter_prompt_row() -> rx.Component:
         *[
             quick_action_button(icon, intent, action)
             for (icon, _, action), intent in zip(
-                QUICK_ACTIONS, ("Practice", "Explain", "Research", "Visualize"), strict=True
+                QUICK_ACTIONS,
+                ("Practice", "Explain", "Research", "Visualize"),
+                strict=True,
             )
         ],
         class_name="sample-prompts",
