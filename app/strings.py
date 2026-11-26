@@ -50,7 +50,7 @@ STUDY_INTENTS = (
     ("Explain", "Explain "),
     ("Quiz me", "Quiz me on "),
     ("Research", "Research "),
-    ("Map it", "Map the concepts around "),
+    ("Visualize", "Visualize the concepts around "),
 )
 CHAT_PROCESSING_LABEL = "Processing"
 CHAT_PROCESSING_PLACEHOLDER = "Response in progress…"
